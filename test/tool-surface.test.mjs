@@ -144,6 +144,38 @@ test('every written-out resource count matches the RESOURCES array', () => {
  * documents that name it. A prompt orchestrates the EXISTING tools, so every
  * tool a prompt sends the agent to must actually be in the TOOLS array — a
  * renamed tool must fail here, not in an agent's session. */
+/* Each prompt renders through its OWN renderer, and the wrong brief is worse
+ * than no brief: a prompt that told an agent to port a demo-kit sample it was
+ * never given would send it looking for an original that does not exist.
+ * Dispatch used to be a two-way ternary, so every name that was not the first
+ * one got the porting brief - a third prompt would have been mis-briefed in
+ * silence, and the count cap below hides that rather than preventing it. What
+ * prevents it is this: every declared prompt must render, and each rendering
+ * must carry its own job. */
+test('every prompt renders its own brief, not another prompt\'s', async () => {
+  const { getPrompt } = await import('../lib/prompts.mjs');
+  const args = { 'build-an-abap2ui5-app': { task: 'a flight table' }, 'port-a-ui5-sample': { sample: 'sap.m.Wizard' } };
+  const briefs = new Map();
+  for (const p of PROMPTS) {
+    assert.ok(args[p.name], `add a rendering fixture for the new prompt '${p.name}'`);
+    const text = getPrompt(p.name, args[p.name]).messages.map((m) => m.content.text).join('\n');
+    assert.ok(text.includes(Object.values(args[p.name])[0]),
+      `'${p.name}' must render its own argument into its own brief`);
+    for (const [other, seen] of briefs) {
+      assert.notEqual(text, seen, `'${p.name}' renders the same text as '${other}'`);
+    }
+    briefs.set(p.name, text);
+  }
+  // building an app and porting a sample are the two jobs, and each brief has
+  // to be the one for its job (this is exactly what the ternary got wrong)
+  assert.match(briefs.get('build-an-abap2ui5-app'), /You are building an abap2UI5 app/);
+  assert.match(briefs.get('port-a-ui5-sample'), /You are porting one official UI5 demo-kit sample/);
+
+  // a prompt declared without a renderer fails by name instead of quietly
+  // serving somebody else's brief
+  assert.throws(() => getPrompt('a-third-prompt', {}), /unknown prompt/);
+});
+
 test('every prompt is declared in full and every prompt name in the README is real', () => {
   assert.ok(PROMPTS.length >= 1 && PROMPTS.length <= 2, 'one or two prompts, deliberately no more');
   const readme = read('README.md');

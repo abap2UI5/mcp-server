@@ -13,7 +13,7 @@ import { parseApi, searchApi, apiSummary } from '../lib/api.mjs';
 import { searchDocs } from '../lib/docs.mjs';
 import { parseSizes } from '../lib/screenshot.mjs';
 import { oneOf, boundedInt } from '../lib/args.mjs';
-import { scaffold, validClassName, templateFiles, readSpec } from '../lib/scaffold.mjs';
+import { scaffold, rename, validClassName, templateFiles, readSpec } from '../lib/scaffold.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -370,6 +370,71 @@ test('a linter checkout is identified by its exports map, not by having a packag
       'and neither is a package.json with no exports map at all');
   } finally {
     for (const d of [linter, notTheLinter, noExports]) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+/* The exports map IS the contract with the linter (AGENTS.md: internal
+ * file-layout refactors there are safe, a removed or renamed export breaks a
+ * tool here while the linter's own tests stay green) - and the resolution of
+ * that map had no test at all. Node accepts two shapes for a target, a plain
+ * path and a conditional-exports object, and both reach this repo: the linter
+ * publishes `{ types, default }` today and published a bare string before that.
+ * A third case matters as much - an entry that is not there - because that is
+ * what an OLDER checkout looks like, and it has to say so by name rather than
+ * failing on an undefined path. */
+test('importViewCheck resolves both export shapes and names a missing entry', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-exports-'));
+  fs.mkdirSync(path.join(dir, 'lib'));
+  fs.writeFileSync(path.join(dir, 'lib', 'index.mjs'), 'export const which = "root";\n');
+  fs.writeFileSync(path.join(dir, 'lib', 'findings.mjs'), 'export const which = "findings";\n');
+  fs.writeFileSync(path.join(dir, 'lib', 'config.mjs'), 'export const which = "config";\n');
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({
+    name: '@abap2ui5/linter',
+    exports: {
+      // a plain string target, the shape the linter published first
+      '.': './lib/index.mjs',
+      // conditional exports, the shape it publishes now
+      './findings': { types: './types.d.ts', default: './lib/findings.mjs' },
+      // and one where `import` wins over `default`, as Node resolves it
+      './config': { import: './lib/config.mjs', default: './lib/index.mjs' },
+      // an entry with no runtime target at all: types only
+      './rule-docs': { types: './types.d.ts' },
+    },
+  }));
+  const saved = process.env.AI_VIEW_CHECK_HOME;
+  process.env.AI_VIEW_CHECK_HOME = dir;
+  try {
+    const { importViewCheck } = await import('../lib/repos.mjs');
+    assert.equal((await importViewCheck('.')).which, 'root');
+    assert.equal((await importViewCheck('./findings')).which, 'findings');
+    assert.equal((await importViewCheck('./config')).which, 'config',
+      'the import condition wins over default, the way Node resolves it');
+
+    // an older checkout: the tool has to say WHICH export and WHERE, because
+    // the remedy is a git pull in that other repository
+    await assert.rejects(
+      () => importViewCheck('./screenshot'),
+      (e) => /does not export '\.\/screenshot'/.test(e.message) && e.message.includes(dir),
+    );
+    await assert.rejects(() => importViewCheck('./rule-docs'), /does not export '\.\/rule-docs'/,
+      'an entry with only a types target is no more importable than a missing one');
+  } finally {
+    if (saved === undefined) delete process.env.AI_VIEW_CHECK_HOME;
+    else process.env.AI_VIEW_CHECK_HOME = saved;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('importViewCheck answers null without a linter checkout, rather than throwing', async () => {
+  const saved = process.env.AI_VIEW_CHECK_HOME;
+  process.env.AI_VIEW_CHECK_HOME = path.join(os.tmpdir(), 'a2ui5-no-linter-here');
+  try {
+    const { importViewCheck } = await import('../lib/repos.mjs');
+    assert.equal(await importViewCheck('.'), null,
+      'the caller turns null into the actionable missing-checkout message');
+  } finally {
+    if (saved === undefined) delete process.env.AI_VIEW_CHECK_HOME;
+    else process.env.AI_VIEW_CHECK_HOME = saved;
   }
 });
 
@@ -1253,6 +1318,86 @@ test('a scaffold class name is an ABAP class name, or it is refused', () => {
     'zcl_app/../../x', 'zcl_my app', 'zcl_' + 'x'.repeat(30)]) {
     assert.equal(validClassName(bad), false, "expected refusal for '" + bad + "'");
   }
+});
+
+/* The substitution engine itself, on a fixture spec of the same shape
+ * app-template's template.json has. It is pure (spec, file, text, options) and
+ * used to be reachable only through scaffold(), i.e. only with the sibling
+ * checkout - so on a bare checkout the three tests below skipped and a
+ * substitution bug was invisible. */
+const TEMPLATE_SPEC = {
+  placeholderClass: 'zcl_app_001',
+  files: {
+    shared: ['abaplint.jsonc', 'package.json'],
+    named: ['.abapgit.xml', 'src/package.devc.xml', 'src/zcl_app_001.clas.abap', 'src/zcl_app_001.clas.xml'],
+  },
+  substitutions: {
+    class: {
+      files: ['src/zcl_app_001.clas.abap', 'src/zcl_app_001.clas.xml', 'AGENTS.md'],
+      renamesPath: true,
+    },
+    packageText: [{ file: 'src/package.devc.xml', element: 'CTEXT' }],
+    repo: [
+      { file: '.abapgit.xml', element: 'NAME' },
+      { file: 'package.json', jsonKey: 'name' },
+    ],
+  },
+};
+const sub = (file, text, opts) => rename(TEMPLATE_SPEC, file, text, opts);
+
+test('the substitution engine renames a class in both cases, and only where the spec says', () => {
+  const abap = 'CLASS zcl_app_001 DEFINITION PUBLIC.\n  " see zcl_app_001\nENDCLASS.\n';
+  assert.equal(
+    sub('src/zcl_app_001.clas.abap', abap, { cls: 'zcl_invoice' }),
+    'CLASS zcl_invoice DEFINITION PUBLIC.\n  " see zcl_invoice\nENDCLASS.\n',
+  );
+  // the sidecar writes the name UPPER case - renaming only the ABAP produces an
+  // object abapGit imports under one name and ABAP activates under another
+  assert.equal(
+    sub('src/zcl_app_001.clas.xml', '<CLSNAME>ZCL_APP_001</CLSNAME>', { cls: 'zcl_invoice' }),
+    '<CLSNAME>ZCL_INVOICE</CLSNAME>',
+  );
+  // a file the spec does not list keeps the placeholder, whatever it contains
+  assert.equal(
+    sub('abaplint.jsonc', '{ "x": "zcl_app_001" }', { cls: 'zcl_invoice' }),
+    '{ "x": "zcl_app_001" }',
+  );
+  // no class asked for, or the template's own name asked for: nothing to do
+  assert.equal(sub('src/zcl_app_001.clas.abap', abap, {}), abap);
+  assert.equal(sub('src/zcl_app_001.clas.abap', abap, { cls: 'zcl_app_001' }), abap);
+});
+
+test('the substitution engine writes the package text and the repository name', () => {
+  assert.equal(
+    sub('src/package.devc.xml', '<DEVC><CTEXT>Template app</CTEXT></DEVC>', { packageText: 'Invoice App' }),
+    '<DEVC><CTEXT>Invoice App</CTEXT></DEVC>',
+  );
+  assert.equal(
+    sub('.abapgit.xml', '<NAME>app-template</NAME>', { repo: 'invoice-app' }),
+    '<NAME>invoice-app</NAME>',
+  );
+  // the same substitution, expressed as a JSON key rather than an element
+  assert.equal(
+    sub('package.json', '{\n  "name": "abap2ui5-app-template",\n  "version": "1.0.0"\n}', { repo: 'invoice-app' }),
+    '{\n  "name": "invoice-app",\n  "version": "1.0.0"\n}',
+  );
+  // each substitution applies to ITS file only
+  assert.equal(sub('.abapgit.xml', '<CTEXT>x</CTEXT>', { packageText: 'y' }), '<CTEXT>x</CTEXT>');
+  assert.equal(sub('package.json', '{ "name": "x" }', {}), '{ "name": "x" }');
+});
+
+test('the substitution engine applies every substitution asked for at once', () => {
+  const xml = '<abapGit><NAME>app-template</NAME></abapGit>';
+  assert.equal(
+    sub('.abapgit.xml', xml, { cls: 'zcl_invoice', packageText: 'Invoice App', repo: 'invoice-app' }),
+    '<abapGit><NAME>invoice-app</NAME></abapGit>',
+    'a named file gets the substitutions the spec lists it under, and no others',
+  );
+  const clas = 'CLASS zcl_app_001 DEFINITION.\n<CTEXT>keep</CTEXT>\n';
+  assert.equal(
+    sub('src/zcl_app_001.clas.abap', clas, { cls: 'zcl_invoice', packageText: 'Invoice App', repo: 'invoice-app' }),
+    'CLASS zcl_invoice DEFINITION.\n<CTEXT>keep</CTEXT>\n',
+  );
 });
 
 test('scaffolding renames the class in the ABAP, the sidecar and the file name', (t) => {
