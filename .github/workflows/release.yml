@@ -85,6 +85,31 @@ jobs:
           fi
           echo "publishing $PKG"
 
+      # RELEASING.md step 1 is "move the Unreleased entries under the new
+      # version", and it was a step somebody remembers rather than a gate. The
+      # cost of forgetting it is a published version whose changes are filed
+      # under Unreleased forever - a changelog that says a release contains
+      # nothing, and a version number that has to be burned to correct it.
+      - name: The changelog carries this version, and Unreleased is empty
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          node -e '
+            const fs = require("fs");
+            const version = require("./package.json").version;
+            const sections = fs.readFileSync("CHANGELOG.md", "utf8").split(/^## /m).slice(1);
+            const unreleased = sections.find((s) => /^unreleased/i.test(s));
+            const left = unreleased ? unreleased.split("\n").slice(1).join("\n").trim() : "";
+            if (left) {
+              console.error("CHANGELOG.md still has entries under ## Unreleased - move them under ## " + version + " before tagging:\n" + left.slice(0, 400));
+              process.exit(1);
+            }
+            if (!sections.some((s) => s.startsWith(version))) {
+              console.error("CHANGELOG.md has no \"## " + version + "\" section - the version being published needs one");
+              process.exit(1);
+            }
+            console.log("changelog ok: ## " + version + " exists, nothing left under Unreleased");
+          '
+
       # The sibling-free half of the suite, on the exact commit being
       # published rather than on whatever passed on main.
       - run: npm test

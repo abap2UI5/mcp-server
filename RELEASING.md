@@ -49,19 +49,19 @@ Then, on npmjs.com → `@abap2ui5/mcp-server` → **Settings → Trusted Publish
 it at this repository and `release.yml`. From the second release on the
 workflow publishes with no token at all.
 
-Two things follow the first publish, in other repositories, and neither is
-automatic:
-
-- the [VS Code extension](https://github.com/abap2UI5/vscode-extension)
-  registers this server as `npx --yes github:abap2UI5/mcp-server` — the whole
-  reason for publishing is that this resolves to whatever `main` holds that
-  day, so it should become `npx --yes @abap2ui5/mcp-server@<version>`;
-- the README's setup section still tells everyone to `git clone` this
-  repository, which stops being necessary for the tools that need no corpus.
+Two things follow the first publish, in other repositories. Both were done
+when 0.1.0 landed; what they still are is the checklist for the release after
+a **rename**, and that list is under [After a release](#after-a-release) rather
+than here — it used to be in both places, in the present tense here and in the
+past tense there, so the file contradicted itself about work that was finished.
 
 ## Cutting a release
 
-1. `CHANGELOG.md` — move the `Unreleased` entries under the new version.
+1. `CHANGELOG.md` — move the `Unreleased` entries under the new version. The
+   release workflow refuses to publish a tag whose version has no section, or
+   one that still has entries left under `Unreleased`: a published version
+   whose changes are filed under `Unreleased` forever can only be corrected by
+   burning another version number.
 2. Bump and tag:
 
    ```sh
@@ -72,8 +72,9 @@ automatic:
    `npm version` commits and creates an **annotated** tag here — there is no
    workspace to keep in step, unlike in `abap2UI5/linter`.
 3. Watch the run. It refuses to publish if the tag and `package.json`
-   disagree, runs the sibling-free test suite on the exact commit, and prints
-   the tarball contents before the publish step.
+   disagree or if the changelog is not in the shape step 1 leaves it in, runs
+   the sibling-free test suite on the exact commit, and prints the tarball
+   contents before the publish step.
 
 To rehearse everything except the publish, dispatch the workflow by hand from
 the Actions tab — same gates, same tarball, no registry write.
