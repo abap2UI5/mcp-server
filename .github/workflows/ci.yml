@@ -76,7 +76,7 @@ jobs:
       # thing to depend on.
       - run: git clone --depth 1 https://github.com/abap2UI5/samples-controls
       - run: git clone --depth 1 https://github.com/abap2UI5/linter
-      # the framework checkout. Four tools (app_guide, api_reference, pitfalls)
+      # the framework checkout. Three tools (app_guide, api_reference, pitfalls)
       # and five resources read it, and they are the most fragile consumers on
       # the compatibility surface: lib/api.mjs is a line parser over
       # abaplint-formatted ABAP (a formatting change upstream is a parser change
