@@ -155,6 +155,14 @@ duplicates none of their content:
   forces the hermetic behaviour.
 - **Chromium:** uses the Playwright-managed browser; if absent, falls back to a
   system chromium (`A2UI5_MCP_CHROMIUM` overrides the executable path).
+- **Screenshots:** `run_app` writes its PNG to
+  `<tmp>/abap2ui5-mcp-screenshots/<class>.png` and returns the path beside the
+  image — deliberately not into the install directory, which is inside
+  `node_modules` when you install from npm. `A2UI5_MCP_SCREENSHOT_DIR` puts them
+  somewhere you keep.
+- **`scope_of` needs an OpenUI5 checkout** as well as the corpus: it reads the
+  JSDoc from `OPENUI5_SRC`, or from `../fork-openui5` beside the
+  **samples-controls** checkout when that variable is unset.
 - **If you set this up earlier:** the corpus repository was `ai-demokit`, then
   `abap2UI5-api`, and is `samples-controls` today. Nothing needs changing — an
   existing checkout is still found under any of the three directory names, and

@@ -671,6 +671,25 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
   }
 });
 
+/* A throw nobody caught costs ONE call, not the session.
+ *
+ * Every tool call is already wrapped (CallToolRequestSchema above), but not
+ * every throw happens inside one: a Playwright page listener, a stream 'error'
+ * after the call that started it has resolved, a rejected promise nothing
+ * awaited. Without these handlers Node's default is to print the stack and
+ * exit, which takes down the stdio server - and with it the agent's whole
+ * session, its built backend and its browser - over a failure in one app's
+ * page. Logged and survived instead.
+ *
+ * stderr, never stdout: stdout IS the JSON-RPC channel here, and a stack trace
+ * written into it is a protocol error on top of the original one. */
+function logCrash(kind, err) {
+  const detail = (err && err.stack) || String(err);
+  console.error(`abap2ui5 MCP server: ${kind} (the server stays up)\n${detail}`);
+}
+process.on('unhandledRejection', (reason) => logCrash('unhandled rejection', reason));
+process.on('uncaughtException', (err) => logCrash('uncaught exception', err));
+
 process.on('SIGINT', async () => {
   await stopBackend().catch(() => {});
   process.exit(0);

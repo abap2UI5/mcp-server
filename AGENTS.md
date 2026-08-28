@@ -38,11 +38,22 @@ is no silent fallback to the sibling guess.
 | `A2UI5_HOME` | `../abap2UI5` | `node/srv/express.mjs` (backend server), `node/downport/` + `node/setup/abap_transpile.json` (incremental build), `node/output/`, `.claude/skills/{abap-check,ui5-check}/SKILL.md` (`pitfalls`), `docs/agents/building-apps.md` (`app_guide`) |
 | `SAMPLES_HOME` | `../samples`, `../abap2UI5-samples` | `catalogue.json` (preferred) + `SAMPLES.md` (fallback, and the src/00 area) — one of the three catalogues `examples` searches |
 | `SAMPLES_STACK_HOME` | `../samples-stack`, `../abap2UI5-samples-stack` | `catalogue.json` (preferred) + `SAMPLES.md` (fallback) — the stack-dependent catalogue (OData, RAP, APC, launchpad) |
+| `APP_TEMPLATE_HOME` | `../app-template`, `../abap2UI5-app-template` | `template.json` and the files it lists — what `scaffold_app` serves and renames (the tool is dead without this checkout) |
 | `DOCS_HOME` | `../docs` | `docs/**/*.md` — the documentation site's sources, searched live by `docs_search` |
 | `AI_VIEW_CHECK_HOME` | `../linter` (legacy aliases: `../abap2UI5-linter`, `../ai-view-check`) | `validate_view` + `screenshot_view`: dynamic import of the linter's package `exports` entries `.`, `./findings`, `./config`, `./rule-docs` (via `importViewCheck`) |
 
+One more checkout is read but not by this server: **`OPENUI5_SRC`** (default
+`../fork-openui5`, relative to the SAMPLES-CONTROLS checkout, not to this one)
+is where samples-controls' `scripts/scope-of.mjs` reads the OpenUI5 JSDoc from,
+so `scope_of` needs it as much as it needs the corpus. It used to be named
+only inside that tool's description in `lib/tools.mjs`, which is the one place
+a maintainer setting a machine up does not look.
+
 Also: `A2UI5_MCP_PORT`, `A2UI5_MCP_OFFLINE=1` (no CDN fallback for UI5),
-`A2UI5_MCP_CHROMIUM` (browser path), and the child-process timeouts
+`A2UI5_MCP_CHROMIUM` (browser path), `A2UI5_MCP_SCREENSHOT_DIR` (where
+`run_app` writes its PNGs; default `<tmp>/abap2ui5-mcp-screenshots`, and
+deliberately not the install directory — that is inside `node_modules` for an
+npx/npm install), and the child-process timeouts
 `A2UI5_MCP_LINT_TIMEOUT_MS` / `A2UI5_MCP_SCOPE_TIMEOUT_MS` (default 5 min)
 and `A2UI5_MCP_BUILD_TIMEOUT_MS` (default 30 min).
 
@@ -291,6 +302,7 @@ legitimately slower.
 | [samples](https://github.com/abap2UI5/samples) | The pattern catalogue `examples` searches |
 | [samples-stack](https://github.com/abap2UI5/samples-stack) | The stack-dependent catalogue `examples` searches |
 | [abap2UI5](https://github.com/abap2UI5/abap2UI5) | Runtime substrate: transpiled backend + express server — and the client API `api_reference` parses |
+| [app-template](https://github.com/abap2UI5/app-template) | The starter project `scaffold_app` serves and renames, executing the template's own `template.json` (`APP_TEMPLATE_HOME`) |
 | [docs](https://github.com/abap2UI5/docs) | The documentation site `docs_search` reads, in source form |
 | [abap2UI5-linter](https://github.com/abap2UI5/linter) | `validate_view` implementation (imported via its package `exports` map) |
 | [vscode-extension](https://github.com/abap2UI5/vscode-extension) | Registers this server for MCP clients in the editor (`src/mcp.ts`) |
