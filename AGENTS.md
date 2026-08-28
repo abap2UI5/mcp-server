@@ -283,7 +283,13 @@ legitimately slower.
   `linter`, then the pre-rename aliases `abap2UI5-linter` and `ai-view-check`;
   `samples-controls`, then `abap2UI5-api` and `ai-demokit`; and so on), the env
   vars that override the guess, and the probe file that proves a candidate
-  really is that checkout. `lib/repos.mjs` reads it — the constants it still
+  really is that checkout — plus, where that file alone cannot tell two repos
+  apart, an `identify` check on a JSON key (`samples` and `samples-stack` both
+  commit `SAMPLES.md`; the linter probe was a bare `package.json`, so any Node
+  project in a directory named `linter` resolved as the linter and failed later
+  and elsewhere). Those checks only ever rule a candidate OUT, and are skipped
+  when the file they read is absent, so a checkout from before `catalogue.json`
+  keeps resolving. `lib/repos.mjs` reads it — the constants it still
   exports (`VIEW_CHECK_DIRS`, `CORPUS_DIRS`, …) are views on the JSON, not
   literals. **Add a name here and nowhere else.** The VS Code extension used to
   keep a hand-written second copy in `src/repolayout.ts`; it now snapshots this

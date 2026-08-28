@@ -293,6 +293,86 @@ test('the former env var still points the server at the corpus', () => {
   }
 });
 
+/* A probe file that two repositories both generate proves nothing. `samples`
+ * and `samples-stack` both commit SAMPLES.md, so a SAMPLES_HOME pointing at
+ * one used to resolve cheerfully as the other and every answer came from the
+ * wrong catalogue; the linter probe was a bare package.json, so any Node
+ * project in a directory called `linter` resolved as the linter and failed
+ * later, inside importViewCheck, with "does not export '.'" - which reads as
+ * an out-of-date linter rather than as "that is not a linter checkout".
+ *
+ * What the identity checks must NOT do is break an old checkout: they are
+ * skipped where the file they name is absent, which is the shape a checkout
+ * from before catalogue.json has. */
+const resolvedWith = (fn, env) => execFileSync(
+  process.execPath,
+  ['-e', `import('./lib/repos.mjs').then(m => process.stdout.write(String(m.${fn}())))`],
+  {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      // every candidate the guess would otherwise find, silenced
+      SAMPLES_HOME: '', SAMPLES_STACK_HOME: '', AI_VIEW_CHECK_HOME: '', ...env,
+    },
+    encoding: 'utf8',
+  },
+);
+
+function fakeCheckout(files) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-ident-'));
+  for (const [name, body] of Object.entries(files)) {
+    fs.writeFileSync(path.join(dir, name), typeof body === 'string' ? body : JSON.stringify(body));
+  }
+  return dir;
+}
+
+test('a catalogue checkout is identified, not just probed for SAMPLES.md', () => {
+  const stack = fakeCheckout({
+    'SAMPLES.md': '# samples-stack',
+    'catalogue.json': { repo: 'abap2UI5/samples-stack', samples: [] },
+    'package.json': { name: 'abap2ui5-samples-stack' },
+  });
+  const samples = fakeCheckout({
+    'SAMPLES.md': '# samples',
+    'catalogue.json': { repository: 'abap2UI5/samples', samples: [] },
+    'package.json': { name: 'abap2UI5-samples' },
+  });
+  // the shape a checkout from before catalogue.json existed has
+  const old = fakeCheckout({ 'SAMPLES.md': '# samples' });
+  try {
+    assert.equal(resolvedWith('resolveSamples', { SAMPLES_HOME: samples }), samples);
+    assert.equal(resolvedWith('resolveSamplesStack', { SAMPLES_STACK_HOME: stack }), stack);
+    assert.equal(resolvedWith('resolveSamples', { SAMPLES_HOME: stack }), 'null',
+      'a samples-stack checkout must not answer as samples');
+    assert.equal(resolvedWith('resolveSamplesStack', { SAMPLES_STACK_HOME: samples }), 'null',
+      'nor the other way round');
+    assert.equal(resolvedWith('resolveSamples', { SAMPLES_HOME: old }), old,
+      'a checkout with nothing but the page still resolves - the checks only ever rule OUT');
+  } finally {
+    for (const d of [stack, samples, old]) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test('a linter checkout is identified by its exports map, not by having a package.json', () => {
+  const linter = fakeCheckout({
+    'package.json': {
+      name: '@abap2ui5/linter',
+      exports: { '.': './lib/index.mjs', './findings': './lib/findings.mjs', './config': './lib/config.mjs' },
+    },
+  });
+  const notTheLinter = fakeCheckout({ 'package.json': { name: 'some-other-tool', exports: { '.': './index.js' } } });
+  const noExports = fakeCheckout({ 'package.json': { name: 'anything', main: 'index.js' } });
+  try {
+    assert.equal(resolvedWith('resolveViewCheck', { AI_VIEW_CHECK_HOME: linter }), linter);
+    assert.equal(resolvedWith('resolveViewCheck', { AI_VIEW_CHECK_HOME: notTheLinter }), 'null',
+      'an exports map without the linter entries is not a linter checkout');
+    assert.equal(resolvedWith('resolveViewCheck', { AI_VIEW_CHECK_HOME: noExports }), 'null',
+      'and neither is a package.json with no exports map at all');
+  } finally {
+    for (const d of [linter, notTheLinter, noExports]) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
 // ------------------------------------------------------------- pitfalls ----
 
 /* The two catalogues are markdown maintained in the abap2UI5 repo, so what is
