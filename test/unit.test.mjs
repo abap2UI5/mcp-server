@@ -12,7 +12,8 @@ import { sliceGuide, guideChapters } from '../lib/guide.mjs';
 import { parseApi, searchApi, apiSummary } from '../lib/api.mjs';
 import { searchDocs } from '../lib/docs.mjs';
 import { parseSizes } from '../lib/screenshot.mjs';
-import { scaffold, validClassName, templateFiles, readSpec } from '../lib/scaffold.mjs';
+import { oneOf, boundedInt } from '../lib/args.mjs';
+import { scaffold, rename, validClassName, templateFiles, readSpec } from '../lib/scaffold.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -289,6 +290,151 @@ test('the former env var still points the server at the corpus', () => {
     assert.equal(found, home, 'AI_DEMOKIT_HOME must keep working — it is in existing MCP client configs');
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+/* A probe file that two repositories both generate proves nothing. `samples`
+ * and `samples-stack` both commit SAMPLES.md, so a SAMPLES_HOME pointing at
+ * one used to resolve cheerfully as the other and every answer came from the
+ * wrong catalogue; the linter probe was a bare package.json, so any Node
+ * project in a directory called `linter` resolved as the linter and failed
+ * later, inside importViewCheck, with "does not export '.'" - which reads as
+ * an out-of-date linter rather than as "that is not a linter checkout".
+ *
+ * What the identity checks must NOT do is break an old checkout: they are
+ * skipped where the file they name is absent, which is the shape a checkout
+ * from before catalogue.json has. */
+const resolvedWith = (fn, env) => execFileSync(
+  process.execPath,
+  ['-e', `import('./lib/repos.mjs').then(m => process.stdout.write(String(m.${fn}())))`],
+  {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      // every candidate the guess would otherwise find, silenced
+      SAMPLES_HOME: '', SAMPLES_STACK_HOME: '', AI_VIEW_CHECK_HOME: '', ...env,
+    },
+    encoding: 'utf8',
+  },
+);
+
+function fakeCheckout(files) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-ident-'));
+  for (const [name, body] of Object.entries(files)) {
+    fs.writeFileSync(path.join(dir, name), typeof body === 'string' ? body : JSON.stringify(body));
+  }
+  return dir;
+}
+
+test('a catalogue checkout is identified, not just probed for SAMPLES.md', () => {
+  const stack = fakeCheckout({
+    'SAMPLES.md': '# samples-stack',
+    'catalogue.json': { repo: 'abap2UI5/samples-stack', samples: [] },
+    'package.json': { name: 'abap2ui5-samples-stack' },
+  });
+  const samples = fakeCheckout({
+    'SAMPLES.md': '# samples',
+    'catalogue.json': { repository: 'abap2UI5/samples', samples: [] },
+    'package.json': { name: 'abap2UI5-samples' },
+  });
+  // the shape a checkout from before catalogue.json existed has
+  const old = fakeCheckout({ 'SAMPLES.md': '# samples' });
+  try {
+    assert.equal(resolvedWith('resolveSamples', { SAMPLES_HOME: samples }), samples);
+    assert.equal(resolvedWith('resolveSamplesStack', { SAMPLES_STACK_HOME: stack }), stack);
+    assert.equal(resolvedWith('resolveSamples', { SAMPLES_HOME: stack }), 'null',
+      'a samples-stack checkout must not answer as samples');
+    assert.equal(resolvedWith('resolveSamplesStack', { SAMPLES_STACK_HOME: samples }), 'null',
+      'nor the other way round');
+    assert.equal(resolvedWith('resolveSamples', { SAMPLES_HOME: old }), old,
+      'a checkout with nothing but the page still resolves - the checks only ever rule OUT');
+  } finally {
+    for (const d of [stack, samples, old]) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test('a linter checkout is identified by its exports map, not by having a package.json', () => {
+  const linter = fakeCheckout({
+    'package.json': {
+      name: '@abap2ui5/linter',
+      exports: { '.': './lib/index.mjs', './findings': './lib/findings.mjs', './config': './lib/config.mjs' },
+    },
+  });
+  const notTheLinter = fakeCheckout({ 'package.json': { name: 'some-other-tool', exports: { '.': './index.js' } } });
+  const noExports = fakeCheckout({ 'package.json': { name: 'anything', main: 'index.js' } });
+  try {
+    assert.equal(resolvedWith('resolveViewCheck', { AI_VIEW_CHECK_HOME: linter }), linter);
+    assert.equal(resolvedWith('resolveViewCheck', { AI_VIEW_CHECK_HOME: notTheLinter }), 'null',
+      'an exports map without the linter entries is not a linter checkout');
+    assert.equal(resolvedWith('resolveViewCheck', { AI_VIEW_CHECK_HOME: noExports }), 'null',
+      'and neither is a package.json with no exports map at all');
+  } finally {
+    for (const d of [linter, notTheLinter, noExports]) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+/* The exports map IS the contract with the linter (AGENTS.md: internal
+ * file-layout refactors there are safe, a removed or renamed export breaks a
+ * tool here while the linter's own tests stay green) - and the resolution of
+ * that map had no test at all. Node accepts two shapes for a target, a plain
+ * path and a conditional-exports object, and both reach this repo: the linter
+ * publishes `{ types, default }` today and published a bare string before that.
+ * A third case matters as much - an entry that is not there - because that is
+ * what an OLDER checkout looks like, and it has to say so by name rather than
+ * failing on an undefined path. */
+test('importViewCheck resolves both export shapes and names a missing entry', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-exports-'));
+  fs.mkdirSync(path.join(dir, 'lib'));
+  fs.writeFileSync(path.join(dir, 'lib', 'index.mjs'), 'export const which = "root";\n');
+  fs.writeFileSync(path.join(dir, 'lib', 'findings.mjs'), 'export const which = "findings";\n');
+  fs.writeFileSync(path.join(dir, 'lib', 'config.mjs'), 'export const which = "config";\n');
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({
+    name: '@abap2ui5/linter',
+    exports: {
+      // a plain string target, the shape the linter published first
+      '.': './lib/index.mjs',
+      // conditional exports, the shape it publishes now
+      './findings': { types: './types.d.ts', default: './lib/findings.mjs' },
+      // and one where `import` wins over `default`, as Node resolves it
+      './config': { import: './lib/config.mjs', default: './lib/index.mjs' },
+      // an entry with no runtime target at all: types only
+      './rule-docs': { types: './types.d.ts' },
+    },
+  }));
+  const saved = process.env.AI_VIEW_CHECK_HOME;
+  process.env.AI_VIEW_CHECK_HOME = dir;
+  try {
+    const { importViewCheck } = await import('../lib/repos.mjs');
+    assert.equal((await importViewCheck('.')).which, 'root');
+    assert.equal((await importViewCheck('./findings')).which, 'findings');
+    assert.equal((await importViewCheck('./config')).which, 'config',
+      'the import condition wins over default, the way Node resolves it');
+
+    // an older checkout: the tool has to say WHICH export and WHERE, because
+    // the remedy is a git pull in that other repository
+    await assert.rejects(
+      () => importViewCheck('./screenshot'),
+      (e) => /does not export '\.\/screenshot'/.test(e.message) && e.message.includes(dir),
+    );
+    await assert.rejects(() => importViewCheck('./rule-docs'), /does not export '\.\/rule-docs'/,
+      'an entry with only a types target is no more importable than a missing one');
+  } finally {
+    if (saved === undefined) delete process.env.AI_VIEW_CHECK_HOME;
+    else process.env.AI_VIEW_CHECK_HOME = saved;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('importViewCheck answers null without a linter checkout, rather than throwing', async () => {
+  const saved = process.env.AI_VIEW_CHECK_HOME;
+  process.env.AI_VIEW_CHECK_HOME = path.join(os.tmpdir(), 'a2ui5-no-linter-here');
+  try {
+    const { importViewCheck } = await import('../lib/repos.mjs');
+    assert.equal(await importViewCheck('.'), null,
+      'the caller turns null into the actionable missing-checkout message');
+  } finally {
+    if (saved === undefined) delete process.env.AI_VIEW_CHECK_HOME;
+    else process.env.AI_VIEW_CHECK_HOME = saved;
   }
 });
 
@@ -1088,19 +1234,206 @@ test('a viewport is parsed, or refused by name', () => {
   }
 });
 
+/* Each viewport is a browser window and a PNG travelling back through the
+ * protocol, so the pattern alone was not the whole gate: it accepted
+ * `99999x99999` - a ten-gigapixel full-page screenshot - and any number of
+ * viewports in one call. */
+test('a viewport is bounded in size and in number', () => {
+  assert.throws(() => parseSizes(['99999x99999']), /out of range/);
+  assert.throws(() => parseSizes(['4097x100']), /out of range/);
+  assert.doesNotThrow(() => parseSizes(['4096x4096']), 'the limit itself is still a viewport');
+  assert.throws(() => parseSizes(Array(9).fill('390x844')), /too many sizes/);
+  assert.doesNotThrow(() => parseSizes(Array(8).fill('390x844')));
+});
+
+// -------------------------------------------------------------- arguments ----
+/* The tool schemas declare `enum` and `type: number`; a client is free to send
+ * anything anyway, so the checking happens here. What this pins is that an
+ * unrecognised value is an ERROR rather than a silent fallback - the failure
+ * that cost a full build when `mode: "incremental "` fell through to auto. */
+test('an enumerated argument is checked, never silently defaulted', () => {
+  assert.equal(oneOf('full', { name: 'mode', allowed: ['auto', 'incremental', 'full'], dflt: 'auto' }), 'full');
+  assert.equal(oneOf(undefined, { name: 'mode', allowed: ['auto', 'full'], dflt: 'auto' }), 'auto');
+  assert.equal(oneOf('', { name: 'mode', allowed: ['auto', 'full'], dflt: 'auto' }), 'auto');
+  assert.equal(oneOf(undefined, { name: 'status', allowed: ['direct'] }), undefined,
+    'no default means "no filter", not a made-up one');
+
+  // the trailing space is the real case: it missed `=== "incremental"` and
+  // started a full build
+  for (const bad of ['incremental ', 'Full', 'increment', 'auto;rm -rf /', 0, true]) {
+    assert.throws(
+      () => oneOf(bad, { name: 'mode', allowed: ['auto', 'incremental', 'full'], dflt: 'auto' }),
+      /unknown mode/,
+      `expected rejection for ${JSON.stringify(bad)}`,
+    );
+  }
+  // and the message lists what IS accepted, so the agent can retry
+  assert.throws(
+    () => oneOf('x', { name: 'area', allowed: ['abap', 'view', 'all'], dflt: 'all' }),
+    /unknown area 'x' .* use abap, view or all/,
+  );
+});
+
+test('a numeric argument is coerced, bounded and refused when it is not a number', () => {
+  const opts = { name: 'limit', dflt: 20, min: 1, max: 200 };
+  assert.equal(boundedInt(undefined, opts), 20);
+  assert.equal(boundedInt(5, opts), 5);
+  assert.equal(boundedInt('5', opts), 5, 'a client that sends the number as a string means the number');
+  assert.equal(boundedInt(7.9, opts), 7);
+  // 0 and negative used to mean "no limit at all" one layer down
+  assert.equal(boundedInt(0, opts), 1);
+  assert.equal(boundedInt(-3, opts), 1);
+  assert.equal(boundedInt(1e9, opts), 200);
+  for (const bad of ['abc', {}, NaN, Infinity]) {
+    assert.throws(() => boundedInt(bad, opts), /limit must be a number/, `expected rejection for ${String(bad)}`);
+  }
+});
+
+/* Defence in depth under the tool layer: searchExamples used to return the
+ * WHOLE catalogue - 600+ entries - for limit 0, a negative number, or the NaN
+ * a non-numeric argument produces. An argument meant to make the answer
+ * smaller must never make it bigger. */
+test('the example search bounds its limit whatever the caller passed', () => {
+  const all = searchExamples({ query: 'app', rawText: SAMPLES_MD, limit: 99 }).length;
+  assert.ok(all >= 2, 'the fixture has rows to limit');
+  assert.equal(searchExamples({ query: 'app', rawText: SAMPLES_MD, limit: 1 }).length, 1);
+  for (const bad of [0, -1, 'abc', NaN]) {
+    const n = searchExamples({ query: 'app', rawText: SAMPLES_MD, limit: bad }).length;
+    assert.ok(n <= all && n >= 1, `limit ${String(bad)} must stay bounded, got ${n}`);
+  }
+  assert.equal(searchExamples({ query: 'app', rawText: SAMPLES_MD, limit: 0 }).length, 1,
+    'zero is the smallest answer that is still an answer, not "all of them"');
+});
+
 // ----------------------------------------------------------- scaffold ----
 /* The class name is substituted into the sidecar's CLSNAME and into file
  * names, so it is validated before it is used. An object whose ABAP and whose
  * CLSNAME disagree looks right and does not activate - which is why
  * app-template ships a rename script rather than an instruction. */
 test('a scaffold class name is an ABAP class name, or it is refused', () => {
-  for (const ok of ['zcl_my_app', 'ycl_app', 'zcx_error', 'zcl_a1_b2']) {
+  for (const ok of ['zcl_my_app', 'zcx_error', 'zcl_a1_b2']) {
     assert.equal(validClassName(ok), true, ok);
   }
   for (const bad of ['', 'zcl_', 'cl_my_app', 'zcl-my-app', '../etc/passwd',
     'zcl_app/../../x', 'zcl_my app', 'zcl_' + 'x'.repeat(30)]) {
     assert.equal(validClassName(bad), false, "expected refusal for '" + bad + "'");
   }
+});
+
+/* ycl_ and ycx_ were accepted here and are rejected by the abaplint
+ * object_naming (^ZCL_|^ZCX_) that ships in the same template - so the scaffold
+ * blessed a name and handed back a repository failing its own gate. */
+test('a name the scaffolded project cannot lint is refused here', () => {
+  for (const bad of ['ycl_my_app', 'ycx_error']) {
+    assert.equal(validClassName(bad), false, "expected refusal for '" + bad + "'");
+  }
+});
+
+/* The rule belongs to template.json, like the file list does. This file keeps a
+ * fallback for a checkout that has no spec yet, and a second copy of a rule is
+ * exactly what this module exists to avoid - so the two have to agree whenever
+ * the sibling is there to ask. */
+test('the fallback class rule agrees with the template it stands in for', (t) => {
+  const root = path.join(ROOT, '..', 'app-template');
+  if (!fs.existsSync(path.join(root, 'template.json'))) {
+    t.skip('app-template sibling has no template.json');
+    return;
+  }
+  const spec = readSpec(root);
+  if (!spec?.substitutions?.class?.rule) {
+    t.skip('that checkout has no class rule');
+    return;
+  }
+
+  const probes = ['zcl_my_app', 'zcx_error', 'ycl_my_app', 'ycx_error', 'cl_my_app',
+    'zcl_a1_b2', 'zcl_', 'zif_my_app'];
+  for (const probe of probes) {
+    assert.equal(
+      validClassName(probe),
+      validClassName(probe, spec),
+      `the fallback and template.json disagree about "${probe}" - one of them moved`,
+    );
+  }
+});
+
+/* The substitution engine itself, on a fixture spec of the same shape
+ * app-template's template.json has. It is pure (spec, file, text, options) and
+ * used to be reachable only through scaffold(), i.e. only with the sibling
+ * checkout - so on a bare checkout the three tests below skipped and a
+ * substitution bug was invisible. */
+const TEMPLATE_SPEC = {
+  placeholderClass: 'zcl_app_001',
+  files: {
+    shared: ['abaplint.jsonc', 'package.json'],
+    named: ['.abapgit.xml', 'src/package.devc.xml', 'src/zcl_app_001.clas.abap', 'src/zcl_app_001.clas.xml'],
+  },
+  substitutions: {
+    class: {
+      files: ['src/zcl_app_001.clas.abap', 'src/zcl_app_001.clas.xml', 'AGENTS.md'],
+      renamesPath: true,
+    },
+    packageText: [{ file: 'src/package.devc.xml', element: 'CTEXT' }],
+    repo: [
+      { file: '.abapgit.xml', element: 'NAME' },
+      { file: 'package.json', jsonKey: 'name' },
+    ],
+  },
+};
+const sub = (file, text, opts) => rename(TEMPLATE_SPEC, file, text, opts);
+
+test('the substitution engine renames a class in both cases, and only where the spec says', () => {
+  const abap = 'CLASS zcl_app_001 DEFINITION PUBLIC.\n  " see zcl_app_001\nENDCLASS.\n';
+  assert.equal(
+    sub('src/zcl_app_001.clas.abap', abap, { cls: 'zcl_invoice' }),
+    'CLASS zcl_invoice DEFINITION PUBLIC.\n  " see zcl_invoice\nENDCLASS.\n',
+  );
+  // the sidecar writes the name UPPER case - renaming only the ABAP produces an
+  // object abapGit imports under one name and ABAP activates under another
+  assert.equal(
+    sub('src/zcl_app_001.clas.xml', '<CLSNAME>ZCL_APP_001</CLSNAME>', { cls: 'zcl_invoice' }),
+    '<CLSNAME>ZCL_INVOICE</CLSNAME>',
+  );
+  // a file the spec does not list keeps the placeholder, whatever it contains
+  assert.equal(
+    sub('abaplint.jsonc', '{ "x": "zcl_app_001" }', { cls: 'zcl_invoice' }),
+    '{ "x": "zcl_app_001" }',
+  );
+  // no class asked for, or the template's own name asked for: nothing to do
+  assert.equal(sub('src/zcl_app_001.clas.abap', abap, {}), abap);
+  assert.equal(sub('src/zcl_app_001.clas.abap', abap, { cls: 'zcl_app_001' }), abap);
+});
+
+test('the substitution engine writes the package text and the repository name', () => {
+  assert.equal(
+    sub('src/package.devc.xml', '<DEVC><CTEXT>Template app</CTEXT></DEVC>', { packageText: 'Invoice App' }),
+    '<DEVC><CTEXT>Invoice App</CTEXT></DEVC>',
+  );
+  assert.equal(
+    sub('.abapgit.xml', '<NAME>app-template</NAME>', { repo: 'invoice-app' }),
+    '<NAME>invoice-app</NAME>',
+  );
+  // the same substitution, expressed as a JSON key rather than an element
+  assert.equal(
+    sub('package.json', '{\n  "name": "abap2ui5-app-template",\n  "version": "1.0.0"\n}', { repo: 'invoice-app' }),
+    '{\n  "name": "invoice-app",\n  "version": "1.0.0"\n}',
+  );
+  // each substitution applies to ITS file only
+  assert.equal(sub('.abapgit.xml', '<CTEXT>x</CTEXT>', { packageText: 'y' }), '<CTEXT>x</CTEXT>');
+  assert.equal(sub('package.json', '{ "name": "x" }', {}), '{ "name": "x" }');
+});
+
+test('the substitution engine applies every substitution asked for at once', () => {
+  const xml = '<abapGit><NAME>app-template</NAME></abapGit>';
+  assert.equal(
+    sub('.abapgit.xml', xml, { cls: 'zcl_invoice', packageText: 'Invoice App', repo: 'invoice-app' }),
+    '<abapGit><NAME>invoice-app</NAME></abapGit>',
+    'a named file gets the substitutions the spec lists it under, and no others',
+  );
+  const clas = 'CLASS zcl_app_001 DEFINITION.\n<CTEXT>keep</CTEXT>\n';
+  assert.equal(
+    sub('src/zcl_app_001.clas.abap', clas, { cls: 'zcl_invoice', packageText: 'Invoice App', repo: 'invoice-app' }),
+    'CLASS zcl_invoice DEFINITION.\n<CTEXT>keep</CTEXT>\n',
+  );
 });
 
 test('scaffolding renames the class in the ABAP, the sidecar and the file name', (t) => {

@@ -20,7 +20,12 @@ is what an agent's feedback loop is made of.
 > different matter: comments and the tool descriptions have always used em
 > dashes and stay as they are. (This paragraph said "source files are 7-bit
 > ASCII", which no file in the repo has ever been, `lib/capabilities.mjs`
-> included.)
+> included.) **`test/ascii.test.mjs` is the gate**, over `server.mjs` and every
+> `lib/*.mjs`: everything above U+007F fails except the prose punctuation
+> listed there by code point (em dash, en dash, section sign), each with the
+> reason it is allowed. An emoji, an invisible character or a homoglyph letter
+> is refused by file and line — build it from its code point instead, the way
+> `lib/capabilities.mjs` builds the status marks.
 
 ## The one thing to understand first: this repo cannot work alone
 
@@ -38,11 +43,22 @@ is no silent fallback to the sibling guess.
 | `A2UI5_HOME` | `../abap2UI5` | `node/srv/express.mjs` (backend server), `node/downport/` + `node/setup/abap_transpile.json` (incremental build), `node/output/`, `.claude/skills/{abap-check,ui5-check}/SKILL.md` (`pitfalls`), `docs/agents/building-apps.md` (`app_guide`) |
 | `SAMPLES_HOME` | `../samples`, `../abap2UI5-samples` | `catalogue.json` (preferred) + `SAMPLES.md` (fallback, and the src/00 area) — one of the three catalogues `examples` searches |
 | `SAMPLES_STACK_HOME` | `../samples-stack`, `../abap2UI5-samples-stack` | `catalogue.json` (preferred) + `SAMPLES.md` (fallback) — the stack-dependent catalogue (OData, RAP, APC, launchpad) |
+| `APP_TEMPLATE_HOME` | `../app-template`, `../abap2UI5-app-template` | `template.json` and the files it lists — what `scaffold_app` serves and renames (the tool is dead without this checkout) |
 | `DOCS_HOME` | `../docs` | `docs/**/*.md` — the documentation site's sources, searched live by `docs_search` |
 | `AI_VIEW_CHECK_HOME` | `../linter` (legacy aliases: `../abap2UI5-linter`, `../ai-view-check`) | `validate_view` + `screenshot_view`: dynamic import of the linter's package `exports` entries `.`, `./findings`, `./config`, `./rule-docs` (via `importViewCheck`) |
 
+One more checkout is read but not by this server: **`OPENUI5_SRC`** (default
+`../fork-openui5`, relative to the SAMPLES-CONTROLS checkout, not to this one)
+is where samples-controls' `scripts/scope-of.mjs` reads the OpenUI5 JSDoc from,
+so `scope_of` needs it as much as it needs the corpus. It used to be named
+only inside that tool's description in `lib/tools.mjs`, which is the one place
+a maintainer setting a machine up does not look.
+
 Also: `A2UI5_MCP_PORT`, `A2UI5_MCP_OFFLINE=1` (no CDN fallback for UI5),
-`A2UI5_MCP_CHROMIUM` (browser path), and the child-process timeouts
+`A2UI5_MCP_CHROMIUM` (browser path), `A2UI5_MCP_SCREENSHOT_DIR` (where
+`run_app` writes its PNGs; default `<tmp>/abap2ui5-mcp-screenshots`, and
+deliberately not the install directory — that is inside `node_modules` for an
+npx/npm install), and the child-process timeouts
 `A2UI5_MCP_LINT_TIMEOUT_MS` / `A2UI5_MCP_SCOPE_TIMEOUT_MS` (default 5 min)
 and `A2UI5_MCP_BUILD_TIMEOUT_MS` (default 30 min).
 
@@ -151,13 +167,19 @@ changes upstream, this repo must change in the same breath:
 The server **writes into the sibling checkouts**. When you (or another
 agent) find these artifacts in a dirty sibling worktree, mcp-server caused them:
 
-- `<samples-controls>/.abaplint-mcp-dev.jsonc` — patched lint config for deployed
-  dev apps (gitignored there).
 - `<samples-controls>/src/zz_dev/*.clas.abap` + `.clas.xml` + `package.devc.xml` —
   deployed dev apps (`remove_app` deletes them again).
 - `<abap2UI5>/e2e-transpile.json` — temporary incremental-build config
   (deleted on close).
 - `<abap2UI5>/node/` — a clone of `open-abap-core` during builds.
+
+`<samples-controls>/.abaplint-mcp-dev.jsonc` (the patched lint config for
+deployed dev apps, gitignored there) used to be on that list and is not any
+more: `lintApp` removes it in a `finally`, so it exists only while a lint is
+actually running. It keeps that exact file name because that is the name the
+corpus gitignores — which is why `lintApp` QUEUES lints rather than giving each
+one a suffix of its own: two concurrent lints over the one path meant the first
+to finish deleted the config the second was still being linted against.
 
 ## Build & verify
 
@@ -266,7 +288,13 @@ legitimately slower.
   `linter`, then the pre-rename aliases `abap2UI5-linter` and `ai-view-check`;
   `samples-controls`, then `abap2UI5-api` and `ai-demokit`; and so on), the env
   vars that override the guess, and the probe file that proves a candidate
-  really is that checkout. `lib/repos.mjs` reads it — the constants it still
+  really is that checkout — plus, where that file alone cannot tell two repos
+  apart, an `identify` check on a JSON key (`samples` and `samples-stack` both
+  commit `SAMPLES.md`; the linter probe was a bare `package.json`, so any Node
+  project in a directory named `linter` resolved as the linter and failed later
+  and elsewhere). Those checks only ever rule a candidate OUT, and are skipped
+  when the file they read is absent, so a checkout from before `catalogue.json`
+  keeps resolving. `lib/repos.mjs` reads it — the constants it still
   exports (`VIEW_CHECK_DIRS`, `CORPUS_DIRS`, …) are views on the JSON, not
   literals. **Add a name here and nowhere else.** The VS Code extension used to
   keep a hand-written second copy in `src/repolayout.ts`; it now snapshots this
@@ -285,6 +313,7 @@ legitimately slower.
 | [samples](https://github.com/abap2UI5/samples) | The pattern catalogue `examples` searches |
 | [samples-stack](https://github.com/abap2UI5/samples-stack) | The stack-dependent catalogue `examples` searches |
 | [abap2UI5](https://github.com/abap2UI5/abap2UI5) | Runtime substrate: transpiled backend + express server — and the client API `api_reference` parses |
+| [app-template](https://github.com/abap2UI5/app-template) | The starter project `scaffold_app` serves and renames, executing the template's own `template.json` (`APP_TEMPLATE_HOME`) |
 | [docs](https://github.com/abap2UI5/docs) | The documentation site `docs_search` reads, in source form |
 | [abap2UI5-linter](https://github.com/abap2UI5/linter) | `validate_view` implementation (imported via its package `exports` map) |
 | [vscode-extension](https://github.com/abap2UI5/vscode-extension) | Registers this server for MCP clients in the editor (`src/mcp.ts`) |

@@ -146,3 +146,63 @@ test('buildBackend kills and reports a build that exceeds its timeout', async ()
     },
   );
 });
+
+// ---------------------------------------------------------------- lintApp ----
+
+/* The lint config has to sit in the corpus ROOT - abaplint resolves a config's
+ * `files` glob relative to the config's own directory - so every lint writes
+ * the same path into a repository this server does not own and deletes it
+ * again in a finally. Two lints at once therefore raced, with one loser: the
+ * first to finish removed the config the second's abaplint was still reading.
+ *
+ * The stand-in for abaplint is a script on PATH that records whether the
+ * config was there when it started AND when it finished, which is exactly the
+ * window the race opened. Without the queue in lintApp the second call records
+ * a disappearance; with it, neither does. */
+test('two concurrent lints do not delete each other\'s config', { skip: process.platform === 'win32' && 'needs a POSIX shell on PATH' }, async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-lint-'));
+  const corpus = path.join(base, 'ai-demokit');
+  fs.mkdirSync(path.join(corpus, 'scripts'), { recursive: true });
+  fs.writeFileSync(path.join(corpus, 'scripts', 'e2e-build.mjs'), '');
+  fs.writeFileSync(
+    path.join(corpus, 'abaplint.jsonc'),
+    '{ "global": { "exclude": ["zz_dev"] }, "rules": { "object_naming": { "clas": "^Z2UI5_CL_SMPC_" } } }',
+  );
+  const marker = path.join(base, 'gone.txt');
+  const bin = path.join(base, 'bin');
+  fs.mkdirSync(bin);
+  // npx abaplint <config> --format json, slow enough for the two calls to
+  // overlap if nothing sequences them
+  fs.writeFileSync(path.join(bin, 'npx'), [
+    '#!/bin/sh',
+    'cfg="$2"',
+    '[ -f "$cfg" ] || echo start >> "$LINT_MARKER"',
+    'sleep 0.4',
+    '[ -f "$cfg" ] || echo end >> "$LINT_MARKER"',
+    'echo "[]"',
+  ].join('\n'));
+  fs.chmodSync(path.join(bin, 'npx'), 0o755);
+
+  const saved = { ...process.env };
+  Object.assign(process.env, {
+    AI_DEMOKIT_HOME: corpus,
+    SAMPLES_CONTROLS_HOME: '',
+    LINT_MARKER: marker,
+    PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+  });
+  try {
+    const { lintApp } = await import('../lib/runtime.mjs');
+    const both = await Promise.all([lintApp('zcl_one'), lintApp('zcl_two')]);
+    for (const r of both) assert.equal(r.ok, true, `a lint must still answer: ${JSON.stringify(r)}`);
+    assert.equal(fs.existsSync(marker), false,
+      `the config vanished under a running lint: ${fs.existsSync(marker) ? fs.readFileSync(marker, 'utf8') : ''}`);
+    assert.equal(fs.existsSync(path.join(corpus, '.abaplint-mcp-dev.jsonc')), false,
+      'and it is cleaned up when the lints are done');
+  } finally {
+    for (const k of ['AI_DEMOKIT_HOME', 'SAMPLES_CONTROLS_HOME', 'LINT_MARKER', 'PATH']) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});

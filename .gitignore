@@ -1,2 +1,5 @@
 node_modules
+# run_app writes to <tmp>/abap2ui5-mcp-screenshots now (A2UI5_MCP_SCREENSHOT_DIR
+# overrides). Kept so a checkout that ran an older server stays clean, and for
+# anyone who points that variable back in here.
 screenshots

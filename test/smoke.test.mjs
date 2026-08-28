@@ -76,6 +76,31 @@ test(`stdio smoke: initialize, ${TOOL_NAMES.length} tools, a capabilities query`
     const caps = await until((m) => m.id === 3);
     assert.ok(JSON.stringify(caps.result).length > 200, 'capabilities query returned content');
 
+    /* `examples` over the real committed catalogue, live over stdio. The one
+     * parser in this repo that has silently broken TWICE (AGENTS.md: a new
+     * <br> block made every row unmatchable), and its failure mode is the
+     * reason it needs a live assertion rather than fixtures alone - zero rows
+     * reads as "there are no samples for that", not as a parse error. The
+     * fixtures in test/unit.test.mjs pin the semantics; this pins that the
+     * shipped catalogue still answers. */
+    send({
+      jsonrpc: '2.0', id: 19, method: 'tools/call',
+      params: { name: 'examples', arguments: { query: 'breadcrumbs', repo: 'samples-controls' } },
+    });
+    const exRes = (await until((m) => m.id === 19, 15000)).result;
+    assert.ok(!exRes.isError, `examples errored: ${exRes.content[0].text}`);
+    const ex = JSON.parse(exRes.content[0].text);
+    assert.ok(ex.matches > 0, `the corpus has breadcrumb ports - a zero here is a broken catalogue read: ${exRes.content[0].text.slice(0, 300)}`);
+    assert.ok(ex.entries[0].cls && ex.entries[0].path, 'an entry names a class and the file to read');
+
+    // and the richer shape: the corpus commits catalogue.json, so that is what
+    // the answer must have come from - a silent fall back to the SAMPLES.md
+    // page would cost the verification status the ranking uses
+    send({ jsonrpc: '2.0', id: 20, method: 'tools/call', params: { name: 'examples', arguments: {} } });
+    const sum = JSON.parse((await until((m) => m.id === 20, 15000)).result.content[0].text).summary;
+    assert.equal(sum.sources['samples-controls'], 'catalogue.json');
+    assert.ok(sum.byRepo['samples-controls'] > 0, 'the corpus catalogue parsed to entries');
+
     // validate_view through the linter checkout's public exports (property
     // gate only — render needs a browser, which this smoke does not assume)
     if (HAVE_LINTER) {

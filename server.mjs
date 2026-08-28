@@ -48,11 +48,12 @@ import { readApi, parseApi, searchApi, apiSummary, apiFile, API_PATH } from './l
 import { parseSizes, screenshotSource } from './lib/screenshot.mjs';
 import { resolveSamplesControls, resolveAppTemplate, importViewCheck, resolveLintConfig, SERVER_ROOT } from './lib/repos.mjs';
 import { searchDocs, docsRoot } from './lib/docs.mjs';
-import { scaffold, validClassName, templateFiles, SPEC_FILE } from './lib/scaffold.mjs';
+import { scaffold, readSpec, validClassName, classNameRule, templateFiles, SPEC_FILE } from './lib/scaffold.mjs';
 import { TOOLS } from './lib/tools.mjs';
 import { RESOURCES, RESOURCE_TEMPLATES, readResource } from './lib/resources.mjs';
 import { PROMPTS, getPrompt } from './lib/prompts.mjs';
 import { missingSiblingMessage } from './lib/siblings.mjs';
+import { oneOf, boundedInt } from './lib/args.mjs';
 import {
   deployApp,
   removeApp,
@@ -166,7 +167,14 @@ async function handle(name, args = {}, ctx = {}) {
           hint: 'pass `query` (keywords) and/or `status` to get the matching entries; statuses: direct, workaround, needs-live-test, not-expressible',
         });
       }
-      const hits = searchCapabilities({ query: args.query, status: args.status });
+      /* An unknown status used to filter every entry away and answer
+       * "0 matches" - which reads as "nothing does that" rather than as
+       * "that is not one of the four statuses". */
+      const status = oneOf(args.status, {
+        name: 'status',
+        allowed: ['direct', 'workaround', 'needs-live-test', 'not-expressible'],
+      });
+      const hits = searchCapabilities({ query: args.query, status });
       return text({ matches: hits.length, entries: hits });
     }
     case 'examples': {
@@ -183,14 +191,27 @@ async function handle(name, args = {}, ctx = {}) {
       }
       const searched = found.map((c) => c.repo);
       const notSearched = missing.map((m) => `${m.repo}: ${m.why}`);
-      if (!args.query && !args.area && !args.repo) {
+      /* Both filters are checked before anything is read: an unknown repo or
+       * area filters every entry away, and the empty result that produces is
+       * indistinguishable from "nobody has built this" - the one answer this
+       * tool must never give by accident. */
+      const repo = oneOf(args.repo, {
+        name: 'repo', allowed: ['samples', 'samples-controls', 'samples-stack'],
+      });
+      const area = oneOf(args.area, {
+        name: 'area', allowed: ['samples', 'experimental-or-test'],
+      });
+      if (!args.query && !area && !repo) {
         return text({
           summary: exampleSummary(),
           hint: 'pass `query` (keywords) to get matching apps; each entry names a class to READ in its repository',
         });
       }
       const hits = searchExamples({
-        query: args.query, area: args.area, repo: args.repo, limit: args.limit ?? 20,
+        query: args.query,
+        area,
+        repo,
+        limit: boundedInt(args.limit, { name: 'limit', dflt: 20, min: 1, max: 200 }),
       });
       return text({
         matches: hits.length,
@@ -236,14 +257,22 @@ async function handle(name, args = {}, ctx = {}) {
 
       /* Refused rather than passed through: the name is substituted into the
        * sidecar's CLSNAME and into file names, so anything path-like or not an
-       * ABAP identifier has to stop here, not at the agent's `write`. */
+       * ABAP identifier has to stop here, not at the agent's `write`.
+       *
+       * Judged by the TEMPLATE's rule, not by one kept here. The template also
+       * ships the abaplint config that has to accept the result, and it gates
+       * the two against each other — so a name blessed there is a name the
+       * scaffolded project's own CI will not reject. */
+      const root = resolveAppTemplate();
       const cls = (args.class || '').toLowerCase();
-      if (cls && !validClassName(cls)) {
-        return toolError(`"${args.class}" does not look like an ABAP class name — expected `
-          + '^[zy]c[lx]_ followed by letters, digits or underscores (max 30 characters), e.g. zcl_my_app');
+      if (cls && !validClassName(cls, readSpec(root))) {
+        const { rule, max } = classNameRule(readSpec(root));
+        return toolError(`"${args.class}" is not a class name this template accepts — it has to match `
+          + `${rule} and stay within ${max} characters, e.g. zcl_my_app. `
+          + 'abaplint\'s object_naming in the scaffolded project accepts ZCL_ and ZCX_ only, '
+          + 'so a name outside this rule produces a repository that fails its own gate.');
       }
 
-      const root = resolveAppTemplate();
       const { files, missing, spec, noSpec } = scaffold(root, {
         cls,
         packageText: args.package,
@@ -283,10 +312,9 @@ async function handle(name, args = {}, ctx = {}) {
         return toolError(`the abap2UI5 checkout has no ${API_PATH.join('/')} (looked in ${apiFile()}) — `
           + 'update it (git pull); the client API lives there');
       }
-      const kind = args.kind || 'all';
-      if (!['methods', 'constants', 'types', 'all'].includes(kind)) {
-        return toolError(`unknown kind '${kind}' — use methods, constants, types or all`);
-      }
+      const kind = oneOf(args.kind, {
+        name: 'kind', allowed: ['methods', 'constants', 'types', 'all'], dflt: 'all',
+      });
       const parsed = parseApi(raw);
       // empty groups are omitted rather than sent as [], so a narrowed answer
       // is exactly as wide as what it found
@@ -337,7 +365,10 @@ async function handle(name, args = {}, ctx = {}) {
       const miss = missingSibling('docs');
       if (miss) return miss;
       if (!args.query) return toolError('pass `query` — keywords to search the documentation for, e.g. "value help" or "launchpad"');
-      const entries = searchDocs({ query: args.query, limit: args.limit ?? 10 });
+      const entries = searchDocs({
+        query: args.query,
+        limit: boundedInt(args.limit, { name: 'limit', dflt: 10, min: 1, max: 50 }),
+      });
       // the checkout can be there and the tree not: a half-finished pull, a
       // layout change upstream. Name the directory, the way app_guide does.
       if (entries === null || !fs.existsSync(docsRoot())) {
@@ -361,10 +392,7 @@ async function handle(name, args = {}, ctx = {}) {
       // the catalogues live in the abap2UI5 checkout, not in the corpus
       const miss = missingSibling('abap2UI5');
       if (miss) return miss;
-      const area = args.area || 'all';
-      if (!['abap', 'view', 'all'].includes(area)) {
-        return toolError(`unknown area '${area}' — use abap, view or all`);
-      }
+      const area = oneOf(args.area, { name: 'area', allowed: ['abap', 'view', 'all'], dflt: 'all' });
       const found = searchPitfalls({ area, query: args.query });
       if (!found) {
         return toolError('the abap2UI5 checkout has no .claude/skills/{abap-check,ui5-check}/SKILL.md — '
@@ -551,16 +579,29 @@ async function handle(name, args = {}, ctx = {}) {
       // bootstrap the in-repo .abap2UI5 clone on a full build
       const miss = missingSibling('samples-controls');
       if (miss) return miss;
+      /* Checked BEFORE the running backend is stopped and before a build is
+       * started: an unrecognised mode used to fall through to the auto branch,
+       * and a typo therefore cost a full build - tens of minutes - instead of
+       * a sentence. */
+      const mode = oneOf(args.mode, {
+        name: 'mode', allowed: ['auto', 'incremental', 'full'], dflt: 'auto',
+      });
       await stopBackend();
-      const res = await buildBackend({ mode: args.mode || 'auto', onLine: progressReporter(ctx) });
-      if (!res.ok) return toolError(`build failed (exit ${res.code}, mode ${res.mode || args.mode}):\n${res.tail}`);
+      const res = await buildBackend({ mode, onLine: progressReporter(ctx) });
+      if (!res.ok) return toolError(`build failed (exit ${res.code}, mode ${res.mode || mode}):\n${res.tail}`);
       return text({ built: true, mode: res.mode, next: 'run_app { class_name } to boot and screenshot the app', tail: res.tail.split('\n').slice(-5).join('\n') });
     }
     case 'run_app': {
       // samples-controls serves the local @openui5 modules, abap2UI5 the backend
       const miss = missingSibling('samples-controls', 'abap2UI5');
       if (miss) return miss;
-      const res = await runApp({ className: args.class_name, timeoutMs: args.timeout_ms || 60000 });
+      /* Bounded: the boot timeout is how long this call holds a browser and a
+       * backend open, and a client that sends 0, a string or a day's worth of
+       * milliseconds must not decide that. */
+      const res = await runApp({
+        className: args.class_name,
+        timeoutMs: boundedInt(args.timeout_ms, { name: 'timeout_ms', dflt: 60000, min: 5000, max: 600000 }),
+      });
       const report = {
         class: res.class,
         booted: res.booted,
@@ -573,7 +614,12 @@ async function handle(name, args = {}, ctx = {}) {
       return { content, isError: !res.booted };
     }
     case 'backend': {
-      const action = args.action || 'status';
+      /* An unknown action used to fall through to `status`, so a misspelled
+       * `stop` answered with a report that the backend is running - which is
+       * true, and not what was asked for. */
+      const action = oneOf(args.action, {
+        name: 'action', allowed: ['status', 'start', 'stop', 'restart'], dflt: 'status',
+      });
       if (action === 'start' || action === 'restart') {
         // status/stop work without any checkout; starting needs the backend
         const miss = missingSibling('abap2UI5');
@@ -632,6 +678,25 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
     return toolError(String((e && e.message) || e));
   }
 });
+
+/* A throw nobody caught costs ONE call, not the session.
+ *
+ * Every tool call is already wrapped (CallToolRequestSchema above), but not
+ * every throw happens inside one: a Playwright page listener, a stream 'error'
+ * after the call that started it has resolved, a rejected promise nothing
+ * awaited. Without these handlers Node's default is to print the stack and
+ * exit, which takes down the stdio server - and with it the agent's whole
+ * session, its built backend and its browser - over a failure in one app's
+ * page. Logged and survived instead.
+ *
+ * stderr, never stdout: stdout IS the JSON-RPC channel here, and a stack trace
+ * written into it is a protocol error on top of the original one. */
+function logCrash(kind, err) {
+  const detail = (err && err.stack) || String(err);
+  console.error(`abap2ui5 MCP server: ${kind} (the server stays up)\n${detail}`);
+}
+process.on('unhandledRejection', (reason) => logCrash('unhandled rejection', reason));
+process.on('uncaughtException', (err) => logCrash('uncaught exception', err));
 
 process.on('SIGINT', async () => {
   await stopBackend().catch(() => {});

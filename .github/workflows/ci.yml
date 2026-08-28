@@ -1,12 +1,17 @@
-# Two jobs:
+# Three jobs:
 #   test  — the sibling-free units (stripJsonc, the CAPABILITIES.md parser,
 #           deployApp validation, the BENIGN console filter) on a bare
 #           checkout; proves the server degrades cleanly with nothing around.
-#   smoke — the same suite in a sibling workspace (samples-controls + linter
-#           cloned next to this checkout), so the stdio smoke actually runs:
-#           MCP handshake, a live CAPABILITIES.md query, and validate_view
-#           through the linter's public exports. This is the job that catches
-#           a sibling drifting away from what this server consumes.
+#   audit — `npm audit` on the two runtime dependencies, separately so an
+#           advisory published overnight does not read as a failing test.
+#   smoke — the same suite in a sibling workspace (samples-controls, linter,
+#           abap2UI5, app-template and docs cloned next to this checkout), so
+#           the stdio smoke actually runs: MCP handshake, a live CAPABILITIES.md
+#           query, an `examples` search over the committed catalogue,
+#           validate_view through the linter's public exports, and the guide /
+#           client-API / docs parsers against the real upstream files. This is
+#           the job that catches a sibling drifting away from what this server
+#           consumes.
 #
 # What neither job covers, and should be said rather than assumed: run_app,
 # build_backend and the render half of validate_view. They need the corpus'
@@ -39,6 +44,20 @@ jobs:
       - run: npm ci
       - run: npm test
 
+  # A job of its own rather than a step in `test`: an advisory published
+  # overnight is not a defect in this tree, and a red check that says `audit`
+  # tells you that without reading a log. High and above only - this package
+  # has two dependencies and neither is transitive-heavy.
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+      - run: npm audit --audit-level=high
+
   smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -57,6 +76,14 @@ jobs:
       # thing to depend on.
       - run: git clone --depth 1 https://github.com/abap2UI5/samples-controls
       - run: git clone --depth 1 https://github.com/abap2UI5/linter
+      # the framework checkout. Three tools (app_guide, api_reference, pitfalls)
+      # and five resources read it, and they are the most fragile consumers on
+      # the compatibility surface: lib/api.mjs is a line parser over
+      # abaplint-formatted ABAP (a formatting change upstream is a parser change
+      # here) and lib/guide.mjs hard-codes docs/agents/building-apps.md. Without
+      # this clone everything behind HAVE_A2UI5 in the smoke skipped itself, so
+      # a rename or a reformat upstream reached a user before it reached CI.
+      - run: git clone --depth 1 https://github.com/abap2UI5/abap2UI5
       # app-template is a sibling this server reads too - scaffold_app serves
       # its files and executes its template.json. Without the clone the three
       # scaffold tests skip themselves, and a smoke job that silently covers
