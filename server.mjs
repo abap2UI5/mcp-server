@@ -48,7 +48,7 @@ import { readApi, parseApi, searchApi, apiSummary, apiFile, API_PATH } from './l
 import { parseSizes, screenshotSource } from './lib/screenshot.mjs';
 import { resolveSamplesControls, resolveAppTemplate, importViewCheck, resolveLintConfig, SERVER_ROOT } from './lib/repos.mjs';
 import { searchDocs, docsRoot } from './lib/docs.mjs';
-import { scaffold, validClassName, templateFiles, SPEC_FILE } from './lib/scaffold.mjs';
+import { scaffold, readSpec, validClassName, classNameRule, templateFiles, SPEC_FILE } from './lib/scaffold.mjs';
 import { TOOLS } from './lib/tools.mjs';
 import { RESOURCES, RESOURCE_TEMPLATES, readResource } from './lib/resources.mjs';
 import { PROMPTS, getPrompt } from './lib/prompts.mjs';
@@ -257,14 +257,22 @@ async function handle(name, args = {}, ctx = {}) {
 
       /* Refused rather than passed through: the name is substituted into the
        * sidecar's CLSNAME and into file names, so anything path-like or not an
-       * ABAP identifier has to stop here, not at the agent's `write`. */
+       * ABAP identifier has to stop here, not at the agent's `write`.
+       *
+       * Judged by the TEMPLATE's rule, not by one kept here. The template also
+       * ships the abaplint config that has to accept the result, and it gates
+       * the two against each other — so a name blessed there is a name the
+       * scaffolded project's own CI will not reject. */
+      const root = resolveAppTemplate();
       const cls = (args.class || '').toLowerCase();
-      if (cls && !validClassName(cls)) {
-        return toolError(`"${args.class}" does not look like an ABAP class name — expected `
-          + '^[zy]c[lx]_ followed by letters, digits or underscores (max 30 characters), e.g. zcl_my_app');
+      if (cls && !validClassName(cls, readSpec(root))) {
+        const { rule, max } = classNameRule(readSpec(root));
+        return toolError(`"${args.class}" is not a class name this template accepts — it has to match `
+          + `${rule} and stay within ${max} characters, e.g. zcl_my_app. `
+          + 'abaplint\'s object_naming in the scaffolded project accepts ZCL_ and ZCX_ only, '
+          + 'so a name outside this rule produces a repository that fails its own gate.');
       }
 
-      const root = resolveAppTemplate();
       const { files, missing, spec, noSpec } = scaffold(root, {
         cls,
         packageText: args.package,

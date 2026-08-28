@@ -1311,12 +1311,48 @@ test('the example search bounds its limit whatever the caller passed', () => {
  * CLSNAME disagree looks right and does not activate - which is why
  * app-template ships a rename script rather than an instruction. */
 test('a scaffold class name is an ABAP class name, or it is refused', () => {
-  for (const ok of ['zcl_my_app', 'ycl_app', 'zcx_error', 'zcl_a1_b2']) {
+  for (const ok of ['zcl_my_app', 'zcx_error', 'zcl_a1_b2']) {
     assert.equal(validClassName(ok), true, ok);
   }
   for (const bad of ['', 'zcl_', 'cl_my_app', 'zcl-my-app', '../etc/passwd',
     'zcl_app/../../x', 'zcl_my app', 'zcl_' + 'x'.repeat(30)]) {
     assert.equal(validClassName(bad), false, "expected refusal for '" + bad + "'");
+  }
+});
+
+/* ycl_ and ycx_ were accepted here and are rejected by the abaplint
+ * object_naming (^ZCL_|^ZCX_) that ships in the same template - so the scaffold
+ * blessed a name and handed back a repository failing its own gate. */
+test('a name the scaffolded project cannot lint is refused here', () => {
+  for (const bad of ['ycl_my_app', 'ycx_error']) {
+    assert.equal(validClassName(bad), false, "expected refusal for '" + bad + "'");
+  }
+});
+
+/* The rule belongs to template.json, like the file list does. This file keeps a
+ * fallback for a checkout that has no spec yet, and a second copy of a rule is
+ * exactly what this module exists to avoid - so the two have to agree whenever
+ * the sibling is there to ask. */
+test('the fallback class rule agrees with the template it stands in for', (t) => {
+  const root = path.join(ROOT, '..', 'app-template');
+  if (!fs.existsSync(path.join(root, 'template.json'))) {
+    t.skip('app-template sibling has no template.json');
+    return;
+  }
+  const spec = readSpec(root);
+  if (!spec?.substitutions?.class?.rule) {
+    t.skip('that checkout has no class rule');
+    return;
+  }
+
+  const probes = ['zcl_my_app', 'zcx_error', 'ycl_my_app', 'ycx_error', 'cl_my_app',
+    'zcl_a1_b2', 'zcl_', 'zif_my_app'];
+  for (const probe of probes) {
+    assert.equal(
+      validClassName(probe),
+      validClassName(probe, spec),
+      `the fallback and template.json disagree about "${probe}" - one of them moved`,
+    );
   }
 });
 
