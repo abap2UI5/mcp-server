@@ -151,13 +151,19 @@ changes upstream, this repo must change in the same breath:
 The server **writes into the sibling checkouts**. When you (or another
 agent) find these artifacts in a dirty sibling worktree, mcp-server caused them:
 
-- `<samples-controls>/.abaplint-mcp-dev.jsonc` — patched lint config for deployed
-  dev apps (gitignored there).
 - `<samples-controls>/src/zz_dev/*.clas.abap` + `.clas.xml` + `package.devc.xml` —
   deployed dev apps (`remove_app` deletes them again).
 - `<abap2UI5>/e2e-transpile.json` — temporary incremental-build config
   (deleted on close).
 - `<abap2UI5>/node/` — a clone of `open-abap-core` during builds.
+
+`<samples-controls>/.abaplint-mcp-dev.jsonc` (the patched lint config for
+deployed dev apps, gitignored there) used to be on that list and is not any
+more: `lintApp` removes it in a `finally`, so it exists only while a lint is
+actually running. It keeps that exact file name because that is the name the
+corpus gitignores — which is why `lintApp` QUEUES lints rather than giving each
+one a suffix of its own: two concurrent lints over the one path meant the first
+to finish deleted the config the second was still being linted against.
 
 ## Build & verify
 
