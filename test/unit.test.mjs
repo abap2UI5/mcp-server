@@ -12,6 +12,7 @@ import { sliceGuide, guideChapters } from '../lib/guide.mjs';
 import { parseApi, searchApi, apiSummary } from '../lib/api.mjs';
 import { searchDocs } from '../lib/docs.mjs';
 import { parseSizes } from '../lib/screenshot.mjs';
+import { oneOf, boundedInt } from '../lib/args.mjs';
 import { scaffold, validClassName, templateFiles, readSpec } from '../lib/scaffold.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -1086,6 +1087,77 @@ test('a viewport is parsed, or refused by name', () => {
   for (const bad of ['huge', '390', '390*844', '390x', 'x844', '390x844px']) {
     assert.throws(() => parseSizes([bad]), /invalid size/, `expected rejection for '${bad}'`);
   }
+});
+
+/* Each viewport is a browser window and a PNG travelling back through the
+ * protocol, so the pattern alone was not the whole gate: it accepted
+ * `99999x99999` - a ten-gigapixel full-page screenshot - and any number of
+ * viewports in one call. */
+test('a viewport is bounded in size and in number', () => {
+  assert.throws(() => parseSizes(['99999x99999']), /out of range/);
+  assert.throws(() => parseSizes(['4097x100']), /out of range/);
+  assert.doesNotThrow(() => parseSizes(['4096x4096']), 'the limit itself is still a viewport');
+  assert.throws(() => parseSizes(Array(9).fill('390x844')), /too many sizes/);
+  assert.doesNotThrow(() => parseSizes(Array(8).fill('390x844')));
+});
+
+// -------------------------------------------------------------- arguments ----
+/* The tool schemas declare `enum` and `type: number`; a client is free to send
+ * anything anyway, so the checking happens here. What this pins is that an
+ * unrecognised value is an ERROR rather than a silent fallback - the failure
+ * that cost a full build when `mode: "incremental "` fell through to auto. */
+test('an enumerated argument is checked, never silently defaulted', () => {
+  assert.equal(oneOf('full', { name: 'mode', allowed: ['auto', 'incremental', 'full'], dflt: 'auto' }), 'full');
+  assert.equal(oneOf(undefined, { name: 'mode', allowed: ['auto', 'full'], dflt: 'auto' }), 'auto');
+  assert.equal(oneOf('', { name: 'mode', allowed: ['auto', 'full'], dflt: 'auto' }), 'auto');
+  assert.equal(oneOf(undefined, { name: 'status', allowed: ['direct'] }), undefined,
+    'no default means "no filter", not a made-up one');
+
+  // the trailing space is the real case: it missed `=== "incremental"` and
+  // started a full build
+  for (const bad of ['incremental ', 'Full', 'increment', 'auto;rm -rf /', 0, true]) {
+    assert.throws(
+      () => oneOf(bad, { name: 'mode', allowed: ['auto', 'incremental', 'full'], dflt: 'auto' }),
+      /unknown mode/,
+      `expected rejection for ${JSON.stringify(bad)}`,
+    );
+  }
+  // and the message lists what IS accepted, so the agent can retry
+  assert.throws(
+    () => oneOf('x', { name: 'area', allowed: ['abap', 'view', 'all'], dflt: 'all' }),
+    /unknown area 'x' .* use abap, view or all/,
+  );
+});
+
+test('a numeric argument is coerced, bounded and refused when it is not a number', () => {
+  const opts = { name: 'limit', dflt: 20, min: 1, max: 200 };
+  assert.equal(boundedInt(undefined, opts), 20);
+  assert.equal(boundedInt(5, opts), 5);
+  assert.equal(boundedInt('5', opts), 5, 'a client that sends the number as a string means the number');
+  assert.equal(boundedInt(7.9, opts), 7);
+  // 0 and negative used to mean "no limit at all" one layer down
+  assert.equal(boundedInt(0, opts), 1);
+  assert.equal(boundedInt(-3, opts), 1);
+  assert.equal(boundedInt(1e9, opts), 200);
+  for (const bad of ['abc', {}, NaN, Infinity]) {
+    assert.throws(() => boundedInt(bad, opts), /limit must be a number/, `expected rejection for ${String(bad)}`);
+  }
+});
+
+/* Defence in depth under the tool layer: searchExamples used to return the
+ * WHOLE catalogue - 600+ entries - for limit 0, a negative number, or the NaN
+ * a non-numeric argument produces. An argument meant to make the answer
+ * smaller must never make it bigger. */
+test('the example search bounds its limit whatever the caller passed', () => {
+  const all = searchExamples({ query: 'app', rawText: SAMPLES_MD, limit: 99 }).length;
+  assert.ok(all >= 2, 'the fixture has rows to limit');
+  assert.equal(searchExamples({ query: 'app', rawText: SAMPLES_MD, limit: 1 }).length, 1);
+  for (const bad of [0, -1, 'abc', NaN]) {
+    const n = searchExamples({ query: 'app', rawText: SAMPLES_MD, limit: bad }).length;
+    assert.ok(n <= all && n >= 1, `limit ${String(bad)} must stay bounded, got ${n}`);
+  }
+  assert.equal(searchExamples({ query: 'app', rawText: SAMPLES_MD, limit: 0 }).length, 1,
+    'zero is the smallest answer that is still an answer, not "all of them"');
 });
 
 // ----------------------------------------------------------- scaffold ----
