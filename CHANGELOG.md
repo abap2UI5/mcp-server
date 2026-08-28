@@ -2,6 +2,47 @@
 
 ## Unreleased
 
+- **Every enumerated argument is checked, and every numeric one is bounded.**
+  The schemas declare `enum` and `type: number`; a client is free to send
+  anything anyway, and only `pitfalls` and `api_reference` said so. The rest
+  fell through: `build_backend` read `args.mode || 'auto'`, so
+  `mode: "incremental "` started a full build - tens of minutes to prove that a
+  typo is not a mode; `backend` answered `status` for any action it did not
+  recognise; `capabilities`, and `examples` for `repo`/`area`, filtered every
+  entry away and reported no matches, which reads as an answer. `limit: 0`
+  returned the entire catalogue and `limit: "abc"` returned nothing;
+  `timeout_ms` had no ceiling and a viewport could be `99999x99999`. One helper
+  (`lib/args.mjs`) now does both jobs, and an invalid argument comes back as a
+  sentence naming what is accepted.
+- **A sibling checkout is identified, not just probed for a file two
+  repositories share.** `samples` and `samples-stack` both probed `SAMPLES.md`,
+  so `SAMPLES_HOME` pointed at the wrong one resolved cheerfully and answered
+  from the wrong catalogue; the linter probed a bare `package.json`, so any Node
+  project in a directory named `linter` resolved as the linter and failed later
+  and elsewhere. `lib/repo-dirs.json` entries can now carry identity checks,
+  which only ever rule a candidate out and are skipped where the file they read
+  is absent - a checkout from before `catalogue.json` still resolves.
+- **Lints no longer race over one config file.** `deploy_app` writes
+  `.abaplint-mcp-dev.jsonc` into the corpus root and deletes it in a `finally`;
+  two calls at once meant the first to finish removed the config the second was
+  still being linted against. Lints are queued now, keeping the file name the
+  corpus gitignores.
+- **The server survives an uncaught throw**, logging it to stderr instead of
+  taking the stdio session, the built backend and the browser down with it. And
+  `run_app` writes its screenshot to `<tmp>/abap2ui5-mcp-screenshots` rather
+  than into the install directory - which is inside `node_modules` for an npm
+  install - with `A2UI5_MCP_SCREENSHOT_DIR` to put it somewhere you keep.
+- **Gates for the rules that had none.** CI clones the framework checkout, so
+  the four tools and five resources that read it are exercised rather than
+  skipped; the stdio smoke calls `examples`, the parser that has silently
+  broken twice; the count drift gate reads spelled-out numbers and every
+  `lib/*.mjs`; the ASCII rule is checked over the sources; and the release
+  workflow refuses a tag whose changelog section is missing or whose
+  `Unreleased` block is not empty. Plus tests for the scaffold substitution
+  engine, the linter exports-map resolution and the prompt dispatch, which is a
+  map now rather than a ternary that gave every unrecognised prompt the porting
+  brief.
+
 - **MCP resources and prompts, next to the tools.** The server used to declare
   `{ tools: {} }` and nothing else — a client that surfaces resources or
   prompts saw an empty server, and an agent had to learn from sixteen
