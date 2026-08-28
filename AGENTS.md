@@ -20,7 +20,12 @@ is what an agent's feedback loop is made of.
 > different matter: comments and the tool descriptions have always used em
 > dashes and stay as they are. (This paragraph said "source files are 7-bit
 > ASCII", which no file in the repo has ever been, `lib/capabilities.mjs`
-> included.)
+> included.) **`test/ascii.test.mjs` is the gate**, over `server.mjs` and every
+> `lib/*.mjs`: everything above U+007F fails except the prose punctuation
+> listed there by code point (em dash, en dash, section sign), each with the
+> reason it is allowed. An emoji, an invisible character or a homoglyph letter
+> is refused by file and line — build it from its code point instead, the way
+> `lib/capabilities.mjs` builds the status marks.
 
 ## The one thing to understand first: this repo cannot work alone
 
