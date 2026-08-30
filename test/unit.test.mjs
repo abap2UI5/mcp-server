@@ -373,6 +373,34 @@ test('a linter checkout is identified by its exports map, not by having a packag
   }
 });
 
+/* Two repositories are named `docs` - abap2UI5/docs and cap2UI5/docs - and
+ * both carry the probe file docs/index.md, so a workspace with the WRONG one
+ * checked out as ../docs used to resolve it and hand back
+ * abap2ui5.github.io URLs that do not exist. The package name tells them
+ * apart; a checkout from before package.json existed still resolves, because
+ * identify checks only ever rule OUT. */
+test('a docs checkout is identified as the abap2UI5 site, not any tree with docs/index.md', () => {
+  const mkDocs = (pkg) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-docs-'));
+    fs.mkdirSync(path.join(dir, 'docs'));
+    fs.writeFileSync(path.join(dir, 'docs', 'index.md'), '# home\n');
+    if (pkg) fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify(pkg));
+    return dir;
+  };
+  const ours = mkDocs({ name: 'abap2ui5-docs' });
+  const capDocs = mkDocs({ name: 'cap2ui5-docs' });
+  const old = mkDocs(null);
+  try {
+    assert.equal(resolvedWith('resolveDocs', { DOCS_HOME: ours }), ours);
+    assert.equal(resolvedWith('resolveDocs', { DOCS_HOME: capDocs }), 'null',
+      'the cap2UI5 docs site must not answer as the abap2UI5 docs');
+    assert.equal(resolvedWith('resolveDocs', { DOCS_HOME: old }), old,
+      'a checkout with no package.json still resolves - the checks only ever rule OUT');
+  } finally {
+    for (const d of [ours, capDocs, old]) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
 /* The exports map IS the contract with the linter (AGENTS.md: internal
  * file-layout refactors there are safe, a removed or renamed export breaks a
  * tool here while the linter's own tests stay green) - and the resolution of

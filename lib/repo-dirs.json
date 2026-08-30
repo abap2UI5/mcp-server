@@ -69,7 +69,10 @@
       "env": [
         "DOCS_HOME"
       ],
-      "probe": "docs/index.md"
+      "probe": "docs/index.md",
+      "identify": [
+        { "file": "package.json", "key": "name", "equals": "abap2ui5-docs" }
+      ]
     },
     "viewCheck": {
       "repository": "abap2UI5/linter",
