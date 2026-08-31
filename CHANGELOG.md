@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.1.1 - 2026-08-31
+
 - **Every enumerated argument is checked, and every numeric one is bounded.**
   The schemas declare `enum` and `type: number`; a client is free to send
   anything anyway, and only `pitfalls` and `api_reference` said so. The rest
