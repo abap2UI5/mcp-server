@@ -2,7 +2,7 @@
 #   test  — the sibling-free units (stripJsonc, the CAPABILITIES.md parser,
 #           deployApp validation, the BENIGN console filter) on a bare
 #           checkout; proves the server degrades cleanly with nothing around.
-#   smoke — the same suite in a sibling workspace (ai-demokit + linter cloned
+#   smoke — the same suite in a sibling workspace (samples-controls + linter cloned
 #           next to this checkout), so the stdio smoke actually runs: MCP
 #           handshake, a live CAPABILITIES.md query, and validate_view through
 #           the linter's public exports. This is the job that catches a
@@ -39,16 +39,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          path: ai-mcp
+          path: mcp-server
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       # the siblings this server orchestrates — tip of main, exactly what a
       # user following the README ends up with. The linter's property gate is
       # dependency-free at import time, so a bare clone suffices.
-      - run: git clone --depth 1 https://github.com/abap2UI5/ai-demokit
+      - run: git clone --depth 1 https://github.com/abap2UI5/samples-controls
       - run: git clone --depth 1 https://github.com/abap2UI5/linter
       - run: npm ci
-        working-directory: ai-mcp
+        working-directory: mcp-server
       - run: npm test
-        working-directory: ai-mcp
+        working-directory: mcp-server

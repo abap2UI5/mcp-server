@@ -5,7 +5,7 @@
  *
  * Speaks MCP over stdio. Register it in any MCP client, e.g. Claude Code:
  *
- *   claude mcp add abap2ui5 -- node ai-mcp/server.mjs
+ *   claude mcp add abap2ui5 -- node mcp-server/server.mjs
  *
  * Tools (each wraps infrastructure this repo already trusts in CI):
  *   capabilities      what abap2UI5 can express (CAPABILITIES.md, live-parsed)
@@ -377,4 +377,4 @@ process.on('SIGTERM', async () => {
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error(`abap2ui5 MCP server ready (ai-demokit: ${resolveAiDemokit()}, backend built: ${backendBuilt()})`);
+console.error(`abap2ui5 MCP server ready (samples-controls: ${resolveAiDemokit()}, backend built: ${backendBuilt()})`);

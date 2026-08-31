@@ -1,5 +1,5 @@
 // Sibling-free unit tests (node --test): every unit here runs without the
-// ai-demokit / abap2UI5 / linter checkouts. The stdio smoke lives in
+// samples-controls / abap2UI5 / linter checkouts. The stdio smoke lives in
 // test/smoke.test.mjs and DOES need the siblings.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -76,7 +76,7 @@ test('searchCapabilities filters by status and by AND-ed query terms', () => {
 
 // ------------------------------------------------- deployApp validation ----
 // The validation gate runs BEFORE any sibling checkout is touched, so the
-// error paths are sibling-free. (The happy path writes into ai-demokit and
+// error paths are sibling-free. (The happy path writes into samples-controls and
 // is covered by the stdio smoke instead.)
 
 test('deployApp rejects a class name outside the z2ui5_cl_ namespace', () => {

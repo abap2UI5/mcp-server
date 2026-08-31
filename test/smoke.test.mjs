@@ -1,5 +1,5 @@
 // stdio smoke: boots the real server and drives the MCP handshake. Needs the
-// ai-demokit sibling checkout (the server reads its content live) - the test
+// samples-controls sibling checkout (the server reads its content live) - the test
 // SKIPS cleanly when it is absent, so `npm test` stays green in a bare CI
 // checkout while still exercising the full path in a sibling workspace.
 import test from 'node:test';
@@ -13,7 +13,7 @@ const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const HAVE_DEMOKIT = !!resolveAiDemokit();
 const HAVE_LINTER = !!resolveViewCheck();
 
-test('stdio smoke: initialize, 9 tools, a capabilities query', { skip: !HAVE_DEMOKIT && 'ai-demokit sibling not found' }, async () => {
+test('stdio smoke: initialize, 9 tools, a capabilities query', { skip: !HAVE_DEMOKIT && 'samples-controls sibling not found' }, async () => {
   const p = spawn('node', [path.join(ROOT, 'server.mjs')], { stdio: ['pipe', 'pipe', 'ignore'] });
   let buf = '';
   p.stdout.on('data', (d) => (buf += d));
