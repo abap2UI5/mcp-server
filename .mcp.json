@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "abap2ui5": {
+      "command": "node",
+      "args": ["server.mjs"]
+    }
+  }
+}

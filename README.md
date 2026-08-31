@@ -20,22 +20,43 @@ validation core.
 
 ## Setup
 
-The server orchestrates sibling checkouts (override locations with env vars):
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/abap2UI5/mcp-server?quickstart=1)
+
+**One command** — clones the sibling checkouts next to this repo, installs
+dependencies and the headless browser (existing checkouts and installs are
+reused, safe to re-run):
 
 ```sh
-git clone https://github.com/abap2UI5/abap2UI5   # A2UI5_HOME
-git clone https://github.com/abap2UI5/ai-demokit # AI_DEMOKIT_HOME
-git clone https://github.com/abap2UI5/linter     # AI_VIEW_CHECK_HOME (required for validate_view)
-git clone https://github.com/abap2UI5/ai-mcp
-cd abap2UI5 && npm ci && cd ../ai-demokit && npm ci && cd ../linter && npm ci && cd ../ai-mcp && npm ci
-npx playwright install chromium
+git clone https://github.com/abap2UI5/mcp-server && ./mcp-server/setup.sh
 ```
 
 Register in your MCP client, e.g. Claude Code:
 
 ```sh
-claude mcp add abap2ui5 -- node /path/to/ai-mcp/server.mjs
+claude mcp add abap2ui5 -- node /path/to/mcp-server/server.mjs
 ```
+
+Started from the `mcp-server` directory, Claude Code picks the server up
+automatically via the committed [`.mcp.json`](.mcp.json) — and in a
+[Codespace](https://codespaces.new/abap2UI5/mcp-server?quickstart=1) the
+whole setup (including the browser's system libraries) runs on create, so
+the loop is ready when the editor opens.
+
+<details>
+<summary><b>Manual setup</b> (what the script does, with the env overrides)</summary>
+
+```sh
+git clone https://github.com/abap2UI5/abap2UI5         # A2UI5_HOME
+git clone https://github.com/abap2UI5/samples-controls # AI_DEMOKIT_HOME
+git clone https://github.com/abap2UI5/linter           # AI_VIEW_CHECK_HOME (required for validate_view)
+git clone https://github.com/abap2UI5/mcp-server
+cd abap2UI5 && npm ci && cd ../samples-controls && npm ci && cd ../linter && npm ci && cd ../mcp-server && npm ci
+npx playwright install chromium
+```
+
+Checkouts under the pre-rename directory names (`ai-demokit`,
+`abap2UI5-linter`, `ai-view-check`) are found too.
+</details>
 
 ## Tools
 

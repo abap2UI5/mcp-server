@@ -12,13 +12,13 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/abap2UI5/ai-mcp.git"
+    "url": "git+https://github.com/abap2UI5/mcp-server.git"
   },
   "license": "MIT",
   "bugs": {
     "url": "https://github.com/abap2UI5/abap2UI5/issues"
   },
-  "homepage": "https://github.com/abap2UI5/ai-mcp#readme",
+  "homepage": "https://github.com/abap2UI5/mcp-server#readme",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
     "playwright": "^1.61.1"
