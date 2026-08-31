@@ -62,6 +62,20 @@ The [abap2UI5 VS Code extension](https://github.com/abap2UI5/vscode-extension)
 registers this server for you, and adds a second one of its own for the tools
 that need a real SAP system.
 
+**Everything in one command** — for a machine (or
+[Codespace](https://codespaces.new/abap2UI5/mcp-server?quickstart=1)) dedicated
+to the full build-and-boot loop, [`setup.sh`](setup.sh) clones the framework,
+corpus and linter checkouts next to this repo, installs their dependencies and
+the headless browser (existing checkouts are reused, safe to re-run):
+
+```sh
+git clone https://github.com/abap2UI5/mcp-server && ./mcp-server/setup.sh
+```
+
+A Claude Code started inside the checkout picks the server up automatically
+via the committed [`.mcp.json`](.mcp.json); the
+[devcontainer](.devcontainer/devcontainer.json) runs the same setup on create.
+
 ## Tools
 
 Every tool reads live from a sibling checkout, and each one needs a specific

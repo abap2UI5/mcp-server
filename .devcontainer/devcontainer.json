@@ -1,0 +1,13 @@
+{
+  "name": "abap2UI5 MCP server",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
+  "hostRequirements": {
+    "cpus": 4
+  },
+  "postCreateCommand": "./setup.sh --with-deps",
+  "customizations": {
+    "vscode": {
+      "extensions": ["anthropic.claude-code"]
+    }
+  }
+}
