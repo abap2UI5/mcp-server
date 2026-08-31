@@ -1,0 +1,38 @@
+# Monthly dependency updates, opened as pull requests so `npm test` decides
+# whether they are safe.
+#
+# The one runtime dependency is @modelcontextprotocol/sdk, and it is the one
+# worth watching: the tool names and result shapes this server returns are a
+# contract with every agent setup, so an SDK bump is reviewed rather than
+# taken. The sibling repositories are checkouts, not packages - nothing here
+# can bump those.
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+      time: "06:30"
+    open-pull-requests-limit: 5
+    groups:
+      dependencies:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+      dependencies-major:
+        patterns: ["*"]
+        update-types: ["major"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+      time: "06:30"
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+      actions-major:
+        patterns: ["*"]
+        update-types: ["major"]

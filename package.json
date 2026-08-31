@@ -1,6 +1,6 @@
 {
-  "name": "@abap2ui5/mcp",
-  "version": "0.1.0",
+  "name": "@abap2ui5/mcp-server",
+  "version": "0.1.1",
   "description": "MCP server for abap2UI5: capability queries, view validation, deploy, headless run + screenshot \u2014 the AI agent dev loop, no SAP system needed.",
   "type": "module",
   "bin": {
@@ -8,7 +8,8 @@
   },
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test test/unit.test.mjs test/smoke.test.mjs"
+    "check": "npm test",
+    "test": "node --test \"test/*.test.mjs\""
   },
   "repository": {
     "type": "git",
@@ -16,7 +17,7 @@
   },
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/abap2UI5/abap2UI5/issues"
+    "url": "https://github.com/abap2UI5/mcp-server/issues"
   },
   "homepage": "https://github.com/abap2UI5/mcp-server#readme",
   "dependencies": {
@@ -25,5 +26,22 @@
   },
   "engines": {
     "node": ">=22"
-  }
+  },
+  "files": [
+    "server.mjs",
+    "lib/",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "abap2ui5",
+    "abap",
+    "ui5",
+    "mcp",
+    "model-context-protocol",
+    "sap"
+  ]
 }

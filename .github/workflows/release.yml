@@ -1,0 +1,172 @@
+name: Publish to npm
+# Publishes @abap2ui5/mcp-server to the public npm registry from one version tag.
+#
+# Why this exists: the server was installable only as `npx --yes
+# github:abap2UI5/mcp-server`, which resolves to whatever main happens to hold.
+# For a server whose tool NAMES and result SHAPES are a contract with every
+# agent setup that registers it, "whatever main holds" is the wrong contract -
+# an agent's config keeps working or stops working depending on the day.
+#
+# Merging to main stays the release for everything else; npm is the one
+# channel that needs a deliberate, immutable version, because a published
+# version can never be changed.
+#
+# To cut a release:
+#   npm version patch|minor|major
+#   git push --follow-tags
+# npm version commits and tags (annotated) by itself here - there is no
+# workspace to keep in step, unlike in abap2UI5/linter.
+#
+# ---------------------------------------------------------------------------
+# One-time setup, in this order - the workflow cannot do either step itself:
+#
+#   1. The npm organisation `abap2ui5` has to own the scope. It already does:
+#      @abap2ui5/linter and @abap2ui5/render-runtime are published under it.
+#   2. Trusted publishing can only be configured for a package that already
+#      exists, so the FIRST publish is manual, from a maintainer's machine
+#      after `npm login`:
+#
+#         npm publish --access public
+#
+#      No --provenance on that one: npm generates a provenance attestation
+#      only from a supported CI and aborts elsewhere. The bootstrap version
+#      ships without it; every release this workflow cuts has it.
+#
+#      Then, on npmjs.com -> the package -> Settings -> Trusted Publisher,
+#      point it at this repository and this workflow file (`release.yml`).
+#      From the second release on, this workflow publishes with no token.
+#
+# Trusted publishing (OIDC) is deliberate: no NPM_TOKEN to leak or rotate, and
+# npm records an attestation tying the tarball to this run and commit.
+# `id-token: write` below is what mints that token.
+# ---------------------------------------------------------------------------
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  # A publish is irreversible, so it is worth being able to run everything
+  # EXCEPT the publish. Dispatching this workflow does exactly that.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      # Node 22 ships npm 10.x, which has no OIDC support - it would fall
+      # through to asking for a token and fail confusingly. Trusted publishing
+      # needs 11.5.1 or newer.
+      - name: Use an npm that can publish via OIDC
+        run: npm install -g npm@latest
+
+      - run: npm ci
+
+      # The tag is the version claim; package.json is what gets published.
+      # Catching a mismatch here costs a minute, catching it afterwards costs
+      # a burned version number - npm never lets one be reused.
+      - name: Tag and package.json must agree
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          PKG="v$(node -p "require('./package.json').version")"
+          if [ "$PKG" != "$GITHUB_REF_NAME" ]; then
+            echo "tag $GITHUB_REF_NAME does not match package.json ($PKG)" >&2
+            exit 1
+          fi
+          echo "publishing $PKG"
+
+      # RELEASING.md step 1 is "move the Unreleased entries under the new
+      # version", and it was a step somebody remembers rather than a gate. The
+      # cost of forgetting it is a published version whose changes are filed
+      # under Unreleased forever - a changelog that says a release contains
+      # nothing, and a version number that has to be burned to correct it.
+      - name: The changelog carries this version, and Unreleased is empty
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          node -e '
+            const fs = require("fs");
+            const version = require("./package.json").version;
+            const sections = fs.readFileSync("CHANGELOG.md", "utf8").split(/^## /m).slice(1);
+            const unreleased = sections.find((s) => /^unreleased/i.test(s));
+            const left = unreleased ? unreleased.split("\n").slice(1).join("\n").trim() : "";
+            if (left) {
+              console.error("CHANGELOG.md still has entries under ## Unreleased - move them under ## " + version + " before tagging:\n" + left.slice(0, 400));
+              process.exit(1);
+            }
+            if (!sections.some((s) => s.startsWith(version))) {
+              console.error("CHANGELOG.md has no \"## " + version + "\" section - the version being published needs one");
+              process.exit(1);
+            }
+            console.log("changelog ok: ## " + version + " exists, nothing left under Unreleased");
+          '
+
+      # The sibling-free half of the suite, on the exact commit being
+      # published rather than on whatever passed on main.
+      - run: npm test
+
+      # What the tarball will contain, in the log, before it is immutable.
+      # `files` in package.json decides this and a missing entry is invisible
+      # until someone installs the package and the server cannot find lib/.
+      - name: What is in the tarball
+        run: npm pack --dry-run
+
+      # ...and printing it is not the same as proving it. `npm test` runs
+      # against the WORKING TREE, where every file exists whether or not
+      # `files` lists it, so the one defect this package can ship - a lib/
+      # module left out of the allowlist - is invisible to the whole suite.
+      # So the tarball is installed into a scratch project and driven over
+      # stdio the way an MCP client drives it: the server has to start from
+      # its bin, list its tools, and degrade with its actionable message when
+      # a checkout is missing. That is the level-1 surface, and it is the part
+      # a published version has to get right, since everything else needs
+      # sibling checkouts no CI job here has.
+      - name: The packed tarball starts and answers
+        run: |
+          set -euo pipefail
+          npm pack --pack-destination /tmp
+          TARBALL=$(ls /tmp/abap2ui5-mcp-*.tgz)
+          mkdir -p /tmp/packtest && cd /tmp/packtest
+          echo '{"name":"packtest","version":"1.0.0","private":true}' > package.json
+          npm install --no-audit --no-fund "$TARBALL"
+          node -e '
+            const { spawn } = require("child_process");
+            const p = spawn("./node_modules/.bin/abap2ui5-mcp", [], {
+              stdio: ["pipe", "pipe", "ignore"],
+              // no checkout anywhere: the level-1 contract is what is tested
+              env: { ...process.env, SAMPLES_CONTROLS_HOME: "/nope", SAMPLES_HOME: "/nope",
+                     SAMPLES_STACK_HOME: "/nope", A2UI5_HOME: "/nope", AI_VIEW_CHECK_HOME: "/nope" },
+            });
+            let buf = "";
+            p.stdout.on("data", (d) => (buf += d));
+            const send = (o) => p.stdin.write(JSON.stringify(o) + "\n");
+            send({jsonrpc:"2.0",id:1,method:"initialize",params:{protocolVersion:"2024-11-05",capabilities:{},clientInfo:{name:"pack",version:"0"}}});
+            send({jsonrpc:"2.0",id:2,method:"tools/list"});
+            send({jsonrpc:"2.0",id:3,method:"tools/call",params:{name:"validate_view",arguments:{xml:"<x/>"}}});
+            setTimeout(() => {
+              p.kill();
+              const msgs = buf.split("\n").filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+              const expect = (cond, what) => { if (!cond) { console.error("FAIL: " + what + "\n" + buf.slice(0, 2000)); process.exit(1); } console.log("ok  " + what); };
+              const init = msgs.find((m) => m.id === 1);
+              const list = msgs.find((m) => m.id === 2);
+              const call = msgs.find((m) => m.id === 3);
+              expect(init && init.result.serverInfo.name === "abap2ui5", "the installed server starts and identifies itself");
+              expect(init.result.serverInfo.version === require("./node_modules/@abap2ui5/mcp-server/package.json").version, "it serves the packaged version");
+              expect(list && list.result.tools.length > 0, "tools/list answers from the tarball (lib/ came along)");
+              expect(call && call.result.isError && /checkout not found/.test(call.result.content[0].text),
+                "a missing checkout is an actionable message, not a crash");
+            }, 4000);
+          '
+
+      - name: Publish
+        if: startsWith(github.ref, 'refs/tags/')
+        run: npm publish --provenance --access public

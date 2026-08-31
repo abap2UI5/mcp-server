@@ -1,0 +1,106 @@
+{
+  "note": "Directory names each sibling checkout can carry, newest first, plus the env vars that override the guess. THE source of truth for the ecosystem's rename history - lib/repos.mjs resolves from it, and abap2UI5/vscode-extension snapshots it into src/data/repo-dirs.json. Add a name here when a repository is renamed; never keep a second list somewhere else. The `server` entry is this repository itself: it resolves nothing for its own sake, but the extension looks for a local checkout of it by directory name and would miss one carrying the previous name.",
+  "probes": "`probe` is the file that proves a candidate directory is a checkout of that repository. Where that file alone cannot tell two repositories apart, `identify` narrows it: each entry names a JSON file, a top-level key and what the value has to be (`equals`, compared case-insensitively) or has to contain (`hasKeys`). A check whose file is absent, unparseable, or missing that key is SKIPPED rather than failed - an older checkout from before the file existed must keep resolving, which is the whole reason `probe` is the cheap existence test it is. `required: true` reverses that for a check reading the probe file itself, where a missing key is proof rather than ignorance.",
+  "repos": {
+    "corpus": {
+      "repository": "abap2UI5/samples-controls",
+      "why": "The corpus: the UI5 demo kit rebuilt control by control, port by port. e2e-build, the capability map, the scope gate, the deploy sandbox and the @openui5 packages the render/boot path serves. (No count here on purpose - each repository states its own in its generated SAMPLES.md / STATUS.md, and a number copied into a description is one nothing re-measures.)",
+      "dirs": [
+        "samples-controls",
+        "abap2UI5-api",
+        "ai-demokit"
+      ],
+      "env": [
+        "SAMPLES_CONTROLS_HOME",
+        "AI_DEMOKIT_HOME"
+      ],
+      "probe": "scripts/e2e-build.mjs"
+    },
+    "samples": {
+      "repository": "abap2UI5/samples",
+      "why": "The pattern catalogue: which PATTERN has somebody already built. A different repository from the corpus on purpose - that one answers which CONTROL can be expressed.",
+      "dirs": [
+        "samples",
+        "abap2UI5-samples"
+      ],
+      "env": [
+        "SAMPLES_HOME"
+      ],
+      "probe": "SAMPLES.md",
+      "identify": [
+        { "file": "catalogue.json", "key": "repository", "equals": "abap2UI5/samples" },
+        { "file": "package.json", "key": "name", "equals": "abap2UI5-samples" }
+      ]
+    },
+    "samplesStack": {
+      "repository": "abap2UI5/samples-stack",
+      "why": "The third catalogue: apps that need something from the STACK - an OData service, a RAP behavior definition, an APC channel, the Fiori launchpad. They cannot run on a bare abap2UI5 install.",
+      "dirs": [
+        "samples-stack",
+        "abap2UI5-samples-stack"
+      ],
+      "env": [
+        "SAMPLES_STACK_HOME"
+      ],
+      "probe": "SAMPLES.md",
+      "identify": [
+        { "file": "catalogue.json", "key": "repo", "equals": "abap2UI5/samples-stack" },
+        { "file": "package.json", "key": "name", "equals": "abap2ui5-samples-stack" }
+      ]
+    },
+    "appTemplate": {
+      "repository": "abap2UI5/app-template",
+      "why": "The starter project: both gate configs, the CI workflow, the abapGit metadata and one working app class.",
+      "dirs": [
+        "app-template",
+        "abap2UI5-app-template"
+      ],
+      "env": [
+        "APP_TEMPLATE_HOME"
+      ],
+      "probe": "abaplint.jsonc"
+    },
+    "docs": {
+      "repository": "abap2UI5/docs",
+      "why": "The documentation site: the cookbook, the setup and configuration chapters, the advanced guides. docs_search reads its markdown sources; the published site serves the same pages rendered.",
+      "dirs": [
+        "docs"
+      ],
+      "env": [
+        "DOCS_HOME"
+      ],
+      "probe": "docs/index.md",
+      "identify": [
+        { "file": "package.json", "key": "name", "equals": "abap2ui5-docs" }
+      ]
+    },
+    "viewCheck": {
+      "repository": "abap2UI5/linter",
+      "why": "The abap2UI5 linter: the property and render gates, imported through its package.json exports map.",
+      "dirs": [
+        "linter",
+        "abap2UI5-linter",
+        "ai-view-check"
+      ],
+      "env": [
+        "AI_VIEW_CHECK_HOME"
+      ],
+      "probe": "package.json",
+      "identify": [
+        { "file": "package.json", "key": "exports", "hasKeys": [".", "./findings"], "required": true }
+      ]
+    },
+    "server": {
+      "repository": "abap2UI5/mcp-server",
+      "why": "This server. Listed so a consumer looking for a local checkout of it - the VS Code extension does, before falling back to npx - finds one under either name.",
+      "dirs": [
+        "mcp-server",
+        "ai-mcp"
+      ],
+      "env": [
+        "ABAP2UI5_MCP_HOME"
+      ],
+      "probe": "server.mjs"
+    }
+  }
+}
