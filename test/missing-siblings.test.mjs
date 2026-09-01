@@ -188,6 +188,20 @@ test('every sibling-dependent tool degrades with an actionable error when the ch
     expectMissingRead(await readErr('abap2ui5://capabilities'), CORPUS, 'SAMPLES_CONTROLS_HOME');
     expectMissingRead(await readErr('abap2ui5://generation-rules'), CORPUS, 'SAMPLES_CONTROLS_HOME');
 
+    /* Completion is ADVISORY: with the abap2UI5 checkout absent, completing
+     * the guide-chapter template answers an empty list, never an error - the
+     * client is typing ahead, and the read itself carries the degradation. */
+    send({
+      jsonrpc: '2.0', id: 6, method: 'completion/complete',
+      params: {
+        ref: { type: 'ref/resource', uri: 'abap2ui5://guide/{chapter}' },
+        argument: { name: 'chapter', value: 'ev' },
+      },
+    });
+    const completion = await until((m) => m.id === 6);
+    assert.ok(!completion.error, `completion must not error without the checkout: ${JSON.stringify(completion.error)}`);
+    assert.deepEqual(completion.result.completion.values, []);
+
     /* The prompts read no checkout at all - they orchestrate the tools, which
      * carry their own degradation. So with every sibling absent, listing and
      * rendering both still work in full. */

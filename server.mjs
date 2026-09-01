@@ -39,6 +39,7 @@ import {
   ReadResourceRequestSchema,
   ListPromptsRequestSchema,
   GetPromptRequestSchema,
+  CompleteRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { searchCapabilities, capabilitySummary } from './lib/capabilities.mjs';
 import { searchExamples, exampleSummary, catalogueFiles } from './lib/examples.mjs';
@@ -50,7 +51,7 @@ import { resolveSamplesControls, resolveAppTemplate, importViewCheck, resolveLin
 import { searchDocs, docsRoot } from './lib/docs.mjs';
 import { scaffold, readSpec, validClassName, classNameRule, templateFiles, SPEC_FILE } from './lib/scaffold.mjs';
 import { TOOLS } from './lib/tools.mjs';
-import { RESOURCES, RESOURCE_TEMPLATES, readResource } from './lib/resources.mjs';
+import { RESOURCES, RESOURCE_TEMPLATES, GUIDE_CHAPTER_TEMPLATE, readResource } from './lib/resources.mjs';
 import { PROMPTS, getPrompt } from './lib/prompts.mjs';
 import { missingSiblingMessage } from './lib/siblings.mjs';
 import { oneOf, boundedInt, stringArray } from './lib/args.mjs';
@@ -683,8 +684,25 @@ const PKG = JSON.parse(fs.readFileSync(path.join(SERVER_ROOT, 'package.json'), '
 
 const server = new Server(
   { name: 'abap2ui5', version: PKG.version },
-  { capabilities: { tools: {}, resources: {}, prompts: {} } },
+  /* logging: diagnostics travel as notifications/message once the transport
+   * is up (declaring the capability also gives the SDK's logging/setLevel
+   * handler something to filter by); completions: the guide-chapter resource
+   * template completes its {chapter} argument. */
+  { capabilities: { tools: {}, resources: {}, prompts: {}, logging: {}, completions: {} } },
 );
+
+/* One diagnostic channel. Through the MCP logging notification when the
+ * transport is connected — that is where a client actually shows it — and to
+ * stderr before the connect and whenever sending fails (stdout is the
+ * JSON-RPC channel; a stack trace in it is a protocol error on top of the
+ * original one). */
+function diagnostic(level, message) {
+  if (server.transport) {
+    server.sendLoggingMessage({ level, logger: 'abap2ui5', data: message }).catch(() => console.error(message));
+  } else {
+    console.error(message);
+  }
+}
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
 
@@ -701,6 +719,25 @@ server.setRequestHandler(ReadResourceRequestSchema, async (req) => readResource(
  * sibling checkout; the tools they send the agent to do. */
 server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: PROMPTS }));
 server.setRequestHandler(GetPromptRequestSchema, async (req) => getPrompt(req.params.name, req.params.arguments || {}));
+
+/* Completion for the one resource template: abap2ui5://guide/{chapter}. The
+ * chapters are the guide's own `## ` headings (guideChapters), read live like
+ * every other document. Advisory by contract, so it never errors the way a
+ * read does: no checkout, no guide, an unknown ref or argument all answer an
+ * EMPTY list — the client is typing ahead, not reading. */
+server.setRequestHandler(CompleteRequestSchema, async (req) => {
+  const empty = { completion: { values: [], total: 0, hasMore: false } };
+  const { ref, argument } = req.params;
+  if (!ref || ref.type !== 'ref/resource' || ref.uri !== GUIDE_CHAPTER_TEMPLATE) return empty;
+  if (!argument || argument.name !== 'chapter') return empty;
+  const md = readGuide();
+  if (md === null) return empty;
+  const want = String(argument.value || '').toLowerCase();
+  const values = guideChapters(md)
+    .filter((c) => c.toLowerCase().includes(want))
+    .slice(0, 100); // the protocol's ceiling per answer
+  return { completion: { values, total: values.length, hasMore: false } };
+});
 server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
   try {
     return await handle(req.params.name, req.params.arguments || {}, {
@@ -731,7 +768,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
  * written into it is a protocol error on top of the original one. */
 function logCrash(kind, err) {
   const detail = (err && err.stack) || String(err);
-  console.error(`abap2ui5 MCP server: ${kind} (the server stays up)\n${detail}`);
+  diagnostic('error', `abap2ui5 MCP server: ${kind} (the server stays up)\n${detail}`);
 }
 process.on('unhandledRejection', (reason) => logCrash('unhandled rejection', reason));
 process.on('uncaughtException', (err) => logCrash('uncaught exception', err));
@@ -747,4 +784,4 @@ process.on('SIGTERM', async () => {
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error(`abap2ui5 MCP server ready (samples-controls: ${resolveSamplesControls()}, backend built: ${backendBuilt()})`);
+diagnostic('info', `abap2ui5 MCP server ready (samples-controls: ${resolveSamplesControls()}, backend built: ${backendBuilt()})`);
