@@ -47,10 +47,11 @@ import { searchPitfalls } from './lib/pitfalls.mjs';
 import { readGuide, sliceGuide, guideChapters, guideFile, GUIDE_PATH } from './lib/guide.mjs';
 import { readApiParsed, searchApi, apiSummary, apiFile, API_PATH } from './lib/api.mjs';
 import { parseSizes, screenshotSource } from './lib/screenshot.mjs';
-import { resolveSamplesControls, resolveAppTemplate, importViewCheck, resolveLintConfig, SERVER_ROOT } from './lib/repos.mjs';
+import { resolveSamplesControls, resolveAppTemplate, importViewCheck, SERVER_ROOT } from './lib/repos.mjs';
 import { searchDocs, docsRoot } from './lib/docs.mjs';
 import { scaffold, readSpec, validClassName, classNameRule, templateFiles, SPEC_FILE } from './lib/scaffold.mjs';
 import { fixSource } from './lib/fixview.mjs';
+import { lintOptionsFor } from './lib/lintopts.mjs';
 import { getRenderer, dropRenderer, closeRenderers, rendererLooksDead } from './lib/renderer.mjs';
 import { TOOLS } from './lib/tools.mjs';
 import { RESOURCES, RESOURCE_TEMPLATES, GUIDE_CHAPTER_TEMPLATE, readResource } from './lib/resources.mjs';
@@ -161,42 +162,6 @@ async function explainRules(findings, withDetail) {
       : { summary: doc.summary };
   }
   return Object.keys(out).length ? out : null;
-}
-
-/*
- * The lint option set validate_view and fix_view share: explicit tool
- * arguments win; the checked project's abap2ui5lint.jsonc fills the rest — an
- * agent must not report (or fix by) findings the project's own CI has
- * deliberately configured away.
- *
- * Which project's config that is, in order: the one named (project_dir), the
- * one the server was started in, the corpus. It used to be the corpus and
- * only the corpus, which is right for porting samples and wrong for everyone
- * else. The chosen file is reported back as `config`.
- *
- * `forceNoRender` is fix_view's setting: fixes ride on the property gate, so
- * the render pass would cost seconds for findings that never carry one —
- * forced off and marked as decided so no config can switch it back on.
- */
-async function lintOptionsFor(args, { forceNoRender = false } = {}) {
-  const { findConfigFrom, loadConfig, applyConfig } = await importViewCheck('./config');
-  const opt = { minUi5: '1.71', allow: [], render: !forceNoRender, properties: true };
-  const seen = new Set(['properties']);
-  if (forceNoRender) seen.add('render');
-  if (args.min_ui5) { opt.minUi5 = args.min_ui5; seen.add('minUi5'); }
-  if (args.allow) opt.allow = args.allow;
-  if (!forceNoRender && args.render === false) { opt.render = false; seen.add('render'); }
-  const configFile = resolveLintConfig(findConfigFrom, {
-    projectDir: args.project_dir,
-    cwd: process.cwd(),
-    corpus: resolveSamplesControls(),
-  });
-  if (configFile) {
-    const cfg = loadConfig(configFile);
-    delete cfg.baseline; // baseline is a repo-workflow concern; new source has no baseline entry
-    applyConfig(opt, seen, cfg);
-  }
-  return { opt, configFile };
 }
 
 /* fixable: true on every finding that carries mechanical fixes — the flag
