@@ -51,6 +51,7 @@ import { resolveSamplesControls, resolveAppTemplate, importViewCheck, resolveLin
 import { searchDocs, docsRoot } from './lib/docs.mjs';
 import { scaffold, readSpec, validClassName, classNameRule, templateFiles, SPEC_FILE } from './lib/scaffold.mjs';
 import { fixSource } from './lib/fixview.mjs';
+import { getRenderer, dropRenderer, closeRenderers, rendererLooksDead } from './lib/renderer.mjs';
 import { TOOLS } from './lib/tools.mjs';
 import { RESOURCES, RESOURCE_TEMPLATES, GUIDE_CHAPTER_TEMPLATE, readResource } from './lib/resources.mjs';
 import { PROMPTS, getPrompt } from './lib/prompts.mjs';
@@ -547,14 +548,38 @@ async function handle(name, args = {}, ctx = {}) {
       const report = progressReporter(ctx);
       if (report) opt.onProgress = (p) => report(`${p.phase} ${p.done}/${p.total}`);
 
-      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-validate-'));
-      const file = path.join(dir, args.xml ? 'source.view.xml' : 'source.clas.abap');
+      const check = async (options) => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-validate-'));
+        const file = path.join(dir, args.xml ? 'source.view.xml' : 'source.clas.abap');
+        try {
+          fs.writeFileSync(file, args.xml || args.abap_source);
+          const [r] = await lib.checkFiles([file], options);
+          return r;
+        } finally {
+          fs.rmSync(dir, { recursive: true, force: true });
+        }
+      };
+      /* Warm renderer where the linter supports one (lib/renderer.mjs): the
+       * render gate's Chromium cold start dominates this call, and one warm
+       * browser serves every call (concurrent ones queue on its page pool).
+       * An older linter gets exactly the cold path it always had; a warm
+       * browser that died mid-call is dropped and the call retried cold. */
+      const GATE_POOL = { pages: 1 };
       let result;
-      try {
-        fs.writeFileSync(file, args.xml || args.abap_source);
-        [result] = await lib.checkFiles([file], opt);
-      } finally {
-        fs.rmSync(dir, { recursive: true, force: true });
+      const renderer = opt.render === false ? null : await getRenderer(GATE_POOL);
+      if (renderer) {
+        try {
+          result = await check({ ...opt, renderer });
+        } catch (e) {
+          await dropRenderer(GATE_POOL); // whatever threw, a fresh one next call
+          throw e;
+        }
+        if (rendererLooksDead(result.renderErrors)) {
+          await dropRenderer(GATE_POOL);
+          result = await check(opt);
+        }
+      } else {
+        result = await check(opt);
       }
 
       /* Every finding carries its severity, a ready-made message and (where
@@ -649,15 +674,39 @@ async function handle(name, args = {}, ctx = {}) {
         return toolError(String(e.message));
       }
       const reportShot = progressReporter(ctx);
-      const shots = await screenshotSource({
+      const doShots = (renderer) => screenshotSource({
         screenshotFiles: lib.screenshotFiles,
         abapSource: args.abap_source,
         xml: args.xml,
         sizes,
         theme: args.theme,
         model: args.model,
+        ...(renderer ? { renderer } : {}),
         ...(reportShot ? { onProgress: (p) => reportShot(`${p.phase} ${p.done}/${p.total}`) } : {}),
       });
+      /* Warm renderer per THEME (theme and css are baked in at open time —
+       * lib/renderer.mjs): the browser launch and UI5 boot cost more than
+       * every picture in the call put together. Cold path untouched on an
+       * older linter; a dead warm browser is dropped and the call retried
+       * cold, so a crashed Chromium costs one relaunch, never a wrong or
+       * empty answer. */
+      const shotPool = { theme: args.theme || 'sap_horizon', css: true };
+      const warmShot = await getRenderer(shotPool);
+      let shots;
+      if (warmShot) {
+        try {
+          shots = await doShots(warmShot);
+        } catch {
+          await dropRenderer(shotPool);
+          shots = await doShots(null);
+        }
+        if (shots && rendererLooksDead(shots.flatMap((s) => s.errors || []))) {
+          await dropRenderer(shotPool);
+          shots = await doShots(null);
+        }
+      } else {
+        shots = await doShots(null);
+      }
 
       /* One entry per view per viewport. A class can build more than one
        * document (a view and its popup fragment), and `index`/`kind` are what
@@ -872,11 +921,11 @@ process.on('unhandledRejection', (reason) => logCrash('unhandled rejection', rea
 process.on('uncaughtException', (err) => logCrash('uncaught exception', err));
 
 process.on('SIGINT', async () => {
-  await stopBackend().catch(() => {});
+  await Promise.all([stopBackend().catch(() => {}), closeRenderers()]);
   process.exit(0);
 });
 process.on('SIGTERM', async () => {
-  await stopBackend().catch(() => {});
+  await Promise.all([stopBackend().catch(() => {}), closeRenderers()]);
   process.exit(0);
 });
 

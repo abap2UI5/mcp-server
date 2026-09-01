@@ -26,6 +26,13 @@
   fallback), and the `abap2ui5://guide/{chapter}` template completes its
   argument from the guide's live chapter headings — advisory, so a missing
   checkout answers an empty list, never an error.
+- **A warm renderer for the fast loop.** Where the linter accepts an
+  already-open renderer (its `{ renderer }` option and `./render` export),
+  validate_view and screenshot_view keep one Chromium warm across calls —
+  the cold start dominated both — keyed per theme, shared by concurrent
+  calls (the renderer's own page pool queues them), closed on shutdown, and
+  dropped-and-relaunched when it dies (that call falls back cold). All
+  feature-detected: an older linter keeps exactly the cold path it had.
 - **Progress from the fast loop.** `validate_view` and `screenshot_view`
   forward the linter's onProgress phases when a progressToken is sent (an
   older linter simply ignores the option), and `deploy_app` marks its
