@@ -419,7 +419,7 @@ async function handle(name, args = {}, ctx = {}) {
        * shatters into one argument per character, a number throws inside
        * spawn as a TypeError nobody can act on. */
       const entities = stringArray(args.entities, { name: 'entities' });
-      const { code, out } = await runScopeOf(entities);
+      const { code, out } = await runScopeOf(entities, { signal: ctx.signal });
       return text(`${out}\n\n(exit ${code}: 0 = all in scope, 1 = at least one out of scope or unresolved)`);
     }
     case 'deploy_app': {
@@ -432,7 +432,11 @@ async function handle(name, args = {}, ctx = {}) {
       });
       const reply = { deployed: res.class, file: res.abapPath };
       if (args.lint !== false) {
-        reply.lint = await lintApp(res.class);
+        reply.lint = await lintApp(res.class, { signal: ctx.signal });
+        if (reply.lint.aborted) {
+          return toolError('deploy_app cancelled during the lint — the class was already written to the '
+            + 'dev sandbox; deploy again to lint it, or remove_app to take it back out');
+        }
         if (!reply.lint.ok) {
           reply.hint = 'fix the lint findings and deploy again; build_backend is only worth running on a clean lint';
         }
@@ -593,7 +597,8 @@ async function handle(name, args = {}, ctx = {}) {
         name: 'mode', allowed: ['auto', 'incremental', 'full'], dflt: 'auto',
       });
       await stopBackend();
-      const res = await buildBackend({ mode, onLine: progressReporter(ctx) });
+      const res = await buildBackend({ mode, onLine: progressReporter(ctx), signal: ctx.signal });
+      if (res.aborted) return toolError(`build cancelled by the client (mode ${res.mode || mode}):\n${res.tail}`);
       if (!res.ok) return toolError(`build failed (exit ${res.code}, mode ${res.mode || mode}):\n${res.tail}`);
       return text({ built: true, mode: res.mode, next: 'run_app { class_name } to boot and screenshot the app', tail: res.tail.split('\n').slice(-5).join('\n') });
     }
@@ -607,6 +612,7 @@ async function handle(name, args = {}, ctx = {}) {
       const res = await runApp({
         className: args.class_name,
         timeoutMs: boundedInt(args.timeout_ms, { name: 'timeout_ms', dflt: 60000, min: 5000, max: 600000 }),
+        signal: ctx.signal,
       });
       const report = {
         class: res.class,
@@ -679,6 +685,11 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
     return await handle(req.params.name, req.params.arguments || {}, {
       progressToken: req.params._meta && req.params._meta.progressToken,
       sendNotification: extra && extra.sendNotification,
+      /* The SDK aborts this when the client sends notifications/cancelled for
+       * the request. The long-running tools hand it to spawnWithTimeout,
+       * which kills the child's whole process tree - a cancelled build must
+       * not keep transpiling under a request nobody is waiting for. */
+      signal: extra && extra.signal,
     });
   } catch (e) {
     return toolError(String((e && e.message) || e));

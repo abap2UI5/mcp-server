@@ -58,6 +58,42 @@ test('spawnWithTimeout leaves a fast child alone and streams its lines', async (
   assert.deepEqual(lines.sort(), ['one', 'three', 'two']);
 });
 
+/* Cancellation: the MCP request's AbortSignal reaches the child through
+ * spawnWithTimeout, and an abort kills the whole tree promptly - a cancelled
+ * build must not keep transpiling under a request nobody waits for. */
+test('spawnWithTimeout kills the child promptly when the signal aborts', async () => {
+  const ac = new AbortController();
+  setTimeout(() => ac.abort(), 200);
+  const t0 = Date.now();
+  const res = await spawnWithTimeout(
+    process.execPath,
+    ['-e', 'console.log("started"); setInterval(() => {}, 1000);'],
+    { timeoutMs: 30000, signal: ac.signal },
+  );
+  assert.equal(res.aborted, true);
+  assert.equal(res.timedOut, false, 'an abort is reported as an abort, not as a timeout');
+  assert.ok(Date.now() - t0 < 5000, 'the abort must not wait for the timeout');
+  assert.match(res.stdout, /started/, 'output before the kill is kept');
+});
+
+test('spawnWithTimeout never spawns under an already-aborted signal', async () => {
+  const ac = new AbortController();
+  ac.abort();
+  const marker = path.join(os.tmpdir(), `a2ui5-abort-${process.pid}.txt`);
+  try {
+    const res = await spawnWithTimeout(
+      process.execPath,
+      ['-e', `require('fs').writeFileSync(${JSON.stringify(marker)}, 'ran')`],
+      { timeoutMs: 5000, signal: ac.signal },
+    );
+    assert.equal(res.aborted, true);
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(fs.existsSync(marker), false, 'the child must not have run at all');
+  } finally {
+    fs.rmSync(marker, { force: true });
+  }
+});
+
 test('spawnWithTimeout surfaces a spawn failure instead of rejecting', async () => {
   const res = await spawnWithTimeout('this-command-does-not-exist-xyz', [], { timeoutMs: 1000 });
   assert.equal(res.code, null);
