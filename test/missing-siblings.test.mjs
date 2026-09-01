@@ -137,6 +137,11 @@ test('every sibling-dependent tool degrades with an actionable error when the ch
       /linter checkout not found/,
       'AI_VIEW_CHECK_HOME',
     );
+    expectMissing(
+      await call('fix_view', { xml: '<mvc:View xmlns:mvc="sap.ui.core.mvc"/>' }),
+      /linter checkout not found/,
+      'AI_VIEW_CHECK_HOME',
+    );
 
     // abap2UI5-backed tools (run_app checks samples-controls first — both missing here)
     expectMissing(await call('run_app', { class_name: 'z2ui5_cl_demo' }), CORPUS, 'SAMPLES_CONTROLS_HOME');

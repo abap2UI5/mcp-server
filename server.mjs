@@ -50,6 +50,7 @@ import { parseSizes, screenshotSource } from './lib/screenshot.mjs';
 import { resolveSamplesControls, resolveAppTemplate, importViewCheck, resolveLintConfig, SERVER_ROOT } from './lib/repos.mjs';
 import { searchDocs, docsRoot } from './lib/docs.mjs';
 import { scaffold, readSpec, validClassName, classNameRule, templateFiles, SPEC_FILE } from './lib/scaffold.mjs';
+import { fixSource } from './lib/fixview.mjs';
 import { TOOLS } from './lib/tools.mjs';
 import { RESOURCES, RESOURCE_TEMPLATES, GUIDE_CHAPTER_TEMPLATE, readResource } from './lib/resources.mjs';
 import { PROMPTS, getPrompt } from './lib/prompts.mjs';
@@ -159,6 +160,57 @@ async function explainRules(findings, withDetail) {
       : { summary: doc.summary };
   }
   return Object.keys(out).length ? out : null;
+}
+
+/*
+ * The lint option set validate_view and fix_view share: explicit tool
+ * arguments win; the checked project's abap2ui5lint.jsonc fills the rest — an
+ * agent must not report (or fix by) findings the project's own CI has
+ * deliberately configured away.
+ *
+ * Which project's config that is, in order: the one named (project_dir), the
+ * one the server was started in, the corpus. It used to be the corpus and
+ * only the corpus, which is right for porting samples and wrong for everyone
+ * else. The chosen file is reported back as `config`.
+ *
+ * `forceNoRender` is fix_view's setting: fixes ride on the property gate, so
+ * the render pass would cost seconds for findings that never carry one —
+ * forced off and marked as decided so no config can switch it back on.
+ */
+async function lintOptionsFor(args, { forceNoRender = false } = {}) {
+  const { findConfigFrom, loadConfig, applyConfig } = await importViewCheck('./config');
+  const opt = { minUi5: '1.71', allow: [], render: !forceNoRender, properties: true };
+  const seen = new Set(['properties']);
+  if (forceNoRender) seen.add('render');
+  if (args.min_ui5) { opt.minUi5 = args.min_ui5; seen.add('minUi5'); }
+  if (args.allow) opt.allow = args.allow;
+  if (!forceNoRender && args.render === false) { opt.render = false; seen.add('render'); }
+  const configFile = resolveLintConfig(findConfigFrom, {
+    projectDir: args.project_dir,
+    cwd: process.cwd(),
+    corpus: resolveSamplesControls(),
+  });
+  if (configFile) {
+    const cfg = loadConfig(configFile);
+    delete cfg.baseline; // baseline is a repo-workflow concern; new source has no baseline entry
+    applyConfig(opt, seen, cfg);
+  }
+  return { opt, configFile };
+}
+
+/* fixable: true on every finding that carries mechanical fixes — the flag
+ * that says fix_view can clear it. Feature-detected: an older linter without
+ * the ./fix export costs the agent the flag and nothing else, never the
+ * findings. */
+async function flagFixable(findings) {
+  let isFixable;
+  try {
+    ({ isFixable } = await importViewCheck('./fix'));
+  } catch {
+    return findings;
+  }
+  if (typeof isFixable !== 'function') return findings;
+  return findings.map((f) => (isFixable(f) ? { ...f, fixable: true } : f));
 }
 
 async function handle(name, args = {}, ctx = {}) {
@@ -485,33 +537,7 @@ async function handle(name, args = {}, ctx = {}) {
        * config semantics. No internal file paths, no re-derived logic. */
       const lib = await importViewCheck('.');
       const { severityOf, severityRank, SEVERITIES } = await importViewCheck('./findings');
-      const { findConfigFrom, loadConfig, applyConfig } = await importViewCheck('./config');
-
-      // explicit tool arguments win; the checked project's abap2ui5lint.jsonc
-      // fills the rest — an agent must not report findings the project's own
-      // CI has deliberately configured away
-      const opt = { minUi5: '1.71', allow: [], render: true, properties: true };
-      const seen = new Set(['properties']);
-      if (args.min_ui5) { opt.minUi5 = args.min_ui5; seen.add('minUi5'); }
-      if (args.allow) opt.allow = args.allow;
-      if (args.render === false) { opt.render = false; seen.add('render'); }
-      /* Which project's config that is, in order: the one named, the one the
-       * server was started in, the corpus. It used to be the corpus and only
-       * the corpus, which is right for porting samples and wrong for everyone
-       * else: an app in someone's own repository was judged by samples-
-       * controls' rule overrides, allow list and UI5 floor, with no argument
-       * to say otherwise — while this tool's description promised the
-       * opposite. The chosen file is reported back as `config`. */
-      const configFile = resolveLintConfig(findConfigFrom, {
-        projectDir: args.project_dir,
-        cwd: process.cwd(),
-        corpus: resolveSamplesControls(),
-      });
-      if (configFile) {
-        const cfg = loadConfig(configFile);
-        delete cfg.baseline; // baseline is a repo-workflow concern; new source has no baseline entry
-        applyConfig(opt, seen, cfg);
-      }
+      const { opt, configFile } = await lintOptionsFor(args);
 
       /* Progress when the client asked for it: the linter's checkFiles emits
        * { phase, done, total } through onProgress. Feature-detected by
@@ -544,10 +570,13 @@ async function handle(name, args = {}, ctx = {}) {
       const failOn = opt.failOn || 'warning';
       const ok = failOn === 'never' || SEVERITIES.slice(severityRank(failOn)).every((s) => counts[s] === 0);
       const rules = await explainRules(result.findings, args.explain === true);
+      // additive: fixable: true per finding fix_view can clear (older linter
+      // without ./fix: no flag, findings untouched)
+      const findings = await flagFixable(result.findings);
       return text({
         ok,
         counts,
-        findings: result.findings,
+        findings,
         ...(rules ? { rules } : {}),
         renderErrors: result.renderErrors,
         reconstructedDocs: result.docs.length,
@@ -559,6 +588,44 @@ async function handle(name, args = {}, ctx = {}) {
           : counts.error === 0 && counts.hint > 0
             ? 'hints are advisory - an event without a handler is intended when the roundtrip alone is the point'
             : undefined,
+      });
+    }
+    case 'fix_view': {
+      const miss = missingSibling('linter');
+      if (miss) return miss;
+      if (!args.abap_source && !args.xml) return toolError('pass abap_source or xml');
+      const lib = await importViewCheck('.');
+      /* ./fix is newer than the linter's other exports; a checkout without it
+       * gets an actionable sentence and validate_view stays untouched. */
+      let fixLib;
+      try {
+        fixLib = await importViewCheck('./fix');
+      } catch {
+        return toolError('this linter checkout is too old for fix_view — its package exports no ./fix '
+          + '(applyFixes); update it (git pull). validate_view keeps working on this checkout.');
+      }
+      if (typeof fixLib.applyFixes !== 'function') {
+        return toolError('this linter checkout is too old for fix_view — ./fix exports no applyFixes; '
+          + 'update it (git pull). validate_view keeps working on this checkout.');
+      }
+      const { opt, configFile } = await lintOptionsFor(args, { forceNoRender: true });
+      const res = await fixSource({
+        checkFiles: lib.checkFiles,
+        applyFixes: fixLib.applyFixes,
+        abapSource: args.abap_source,
+        xml: args.xml,
+        opt,
+      });
+      const remaining = await flagFixable(res.remaining);
+      return text({
+        applied: res.applied,
+        fixed: res.fixed,
+        remaining,
+        config: configFile || undefined,
+        source: res.source,
+        note: res.applied
+          ? 'nothing was written — the corrected source above is yours to place; the remaining findings need decisions a mechanical fix cannot make'
+          : 'no finding carried a mechanical fix — the findings under `remaining` need decisions, not renames',
       });
     }
     case 'screenshot_view': {
