@@ -12,7 +12,7 @@ import { sliceGuide, guideChapters } from '../lib/guide.mjs';
 import { parseApi, searchApi, apiSummary } from '../lib/api.mjs';
 import { searchDocs } from '../lib/docs.mjs';
 import { parseSizes } from '../lib/screenshot.mjs';
-import { oneOf, boundedInt } from '../lib/args.mjs';
+import { oneOf, boundedInt, stringArray } from '../lib/args.mjs';
 import { scaffold, rename, validClassName, templateFiles, readSpec } from '../lib/scaffold.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -1315,6 +1315,29 @@ test('a numeric argument is coerced, bounded and refused when it is not a number
   for (const bad of ['abc', {}, NaN, Infinity]) {
     assert.throws(() => boundedInt(bad, opts), /limit must be a number/, `expected rejection for ${String(bad)}`);
   }
+});
+
+/* A list argument that ends up as spawn argv has the failure modes coercion
+ * cannot repair: a bare string passes a length check and shatters into one
+ * argv entry per character, a number throws inside spawn as a TypeError
+ * nobody can act on. scope_of\'s entities go through this. */
+test('a string-list argument is exactly an array of non-empty strings, bounded', () => {
+  const opts = { name: 'entities' };
+  assert.deepEqual(stringArray(['sap.m.Wizard'], opts), ['sap.m.Wizard']);
+  assert.deepEqual(stringArray(['  sap.m.Bar '], opts), ['sap.m.Bar'], 'entries are trimmed');
+  // a bare string has .length and would shatter into characters in argv
+  assert.throws(() => stringArray('sap.m.Wizard', opts), /entities must be an array of strings/);
+  assert.throws(() => stringArray(42, opts), /entities must be an array of strings/);
+  assert.throws(() => stringArray([], opts), /entities is empty/);
+  assert.throws(() => stringArray(['sap.m.Bar', 7], opts), /non-empty string/);
+  assert.throws(() => stringArray(['sap.m.Bar', ''], opts), /non-empty string/);
+  assert.throws(() => stringArray(['   '], opts), /non-empty string/);
+  assert.throws(() => stringArray([null], opts), /non-empty string/);
+  assert.throws(
+    () => stringArray(Array.from({ length: 51 }, (_, i) => `e${i}`), opts),
+    /at most 50 per call/,
+  );
+  assert.throws(() => stringArray(['x'.repeat(201)], opts), /longer than 200 characters/);
 });
 
 /* Defence in depth under the tool layer: searchExamples used to return the

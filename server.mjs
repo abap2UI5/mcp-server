@@ -53,7 +53,7 @@ import { TOOLS } from './lib/tools.mjs';
 import { RESOURCES, RESOURCE_TEMPLATES, readResource } from './lib/resources.mjs';
 import { PROMPTS, getPrompt } from './lib/prompts.mjs';
 import { missingSiblingMessage } from './lib/siblings.mjs';
-import { oneOf, boundedInt } from './lib/args.mjs';
+import { oneOf, boundedInt, stringArray } from './lib/args.mjs';
 import {
   deployApp,
   removeApp,
@@ -411,8 +411,14 @@ async function handle(name, args = {}, ctx = {}) {
     case 'scope_of': {
       const miss = missingSibling('samples-controls');
       if (miss) return miss;
-      const entities = args.entities || [];
-      if (!entities.length) return toolError('pass at least one entity, e.g. ["sap.m.Wizard"]');
+      if (args.entities === undefined || args.entities === null) {
+        return toolError('pass at least one entity, e.g. ["sap.m.Wizard"]');
+      }
+      /* Checked HERE because these entries become spawn argv (lib/args.mjs
+       * explains the contract): a bare string passes a length check and then
+       * shatters into one argument per character, a number throws inside
+       * spawn as a TypeError nobody can act on. */
+      const entities = stringArray(args.entities, { name: 'entities' });
       const { code, out } = await runScopeOf(entities);
       return text(`${out}\n\n(exit ${code}: 0 = all in scope, 1 = at least one out of scope or unresolved)`);
     }
