@@ -62,6 +62,16 @@ const portOpen = () =>
     req.on('error', () => resolve(false));
   });
 
+test('two concurrent starts spawn one backend, not two on one port', async () => {
+  fs.writeFileSync(marker, '');
+  const [a, b] = await Promise.all([startBackend(), startBackend()]);
+  assert.equal(a.running, true);
+  assert.equal(b.running, true);
+  const boots = fs.readFileSync(marker, 'utf8').split('\n').filter(Boolean);
+  assert.equal(boots.length, 1, `expected one spawned backend, saw pids: ${boots.join(', ')}`);
+  await stopBackend();
+});
+
 test('a stale child exiting late does not orphan the live backend', async () => {
   await startBackend();
   assert.equal(backendStatus().running, true);
