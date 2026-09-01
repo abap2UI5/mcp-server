@@ -100,6 +100,7 @@ checkout is missing answers with the clone command and env var that fix it.
 | `validate_view` | The linter's gates in seconds, judged by your project's own `abap2ui5lint.jsonc` | linter |
 | `screenshot_view` | See the view in seconds — no build, no backend | linter |
 | `deploy_app` | Write the class + abapGit sidecar into the gitignored sandbox, then abaplint it | samples-controls |
+| `read_app` | Read a deployed dev app's source back, and whether the built backend already carries it | samples-controls |
 | `build_backend` | Rebuild the transpiled Node backend; incremental after the first full build | samples-controls + abap2UI5 |
 | `build_log` | Page through the last build's full output — the error the result's short tail cut off | nothing (reads the record the last build left) |
 | `run_app` | Boot an app headless: status, real page errors, and a **screenshot** | samples-controls + abap2UI5 |

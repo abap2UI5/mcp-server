@@ -222,6 +222,70 @@ test('removeApp rejects the same names deployApp does', () => {
   }
 });
 
+// ------------------------------------------------- readAppSource gate ----
+// read_app reads by name, through the SAME gate deploy and remove use: a
+// name carrying path separators must die as a name, never resolve as a path
+// out of src/zz_dev into real corpus sources.
+
+test('readAppSource rejects the names deployApp rejects', async () => {
+  const { readAppSource } = await import('../lib/runtime.mjs');
+  for (const bad of ['acl_my_app', '', '../../src/01/z2ui5_cl_smpc_app_001', '/etc/passwd', 'zcl_a.b', 'z2ui5_cl_' + 'a'.repeat(30)]) {
+    assert.throws(() => readAppSource(bad), /invalid class name/, `expected rejection for '${bad}'`);
+  }
+});
+
+/* The staleness half: a dev app deployed AFTER the last build is code
+ * run_app does not serve yet, and the report has to say so. Fake corpus and
+ * framework checkouts via the authoritative env vars. */
+test('readAppSource reports the source and whether the built backend carries it', async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-readapp-'));
+  const corpus = path.join(base, 'ai-demokit');
+  fs.mkdirSync(path.join(corpus, 'scripts'), { recursive: true });
+  fs.writeFileSync(path.join(corpus, 'scripts', 'e2e-build.mjs'), '');
+  const a2 = path.join(base, 'abap2UI5');
+  fs.mkdirSync(path.join(a2, 'node', 'srv'), { recursive: true });
+  fs.writeFileSync(path.join(a2, 'node', 'srv', 'express.mjs'), '');
+  const saved = {};
+  const wanted = { AI_DEMOKIT_HOME: corpus, SAMPLES_CONTROLS_HOME: '', A2UI5_HOME: a2 };
+  for (const [k, v] of Object.entries(wanted)) { saved[k] = process.env[k]; process.env[k] = v; }
+  try {
+    const { readAppSource } = await import('../lib/runtime.mjs');
+    // nothing deployed yet: found false, and the path it looked at is named
+    assert.equal(readAppSource('zcl_read_me').found, false);
+
+    const src = 'CLASS zcl_read_me DEFINITION PUBLIC. PUBLIC SECTION. INTERFACES z2ui5_if_app. ENDCLASS.';
+    deployApp({ className: 'zcl_read_me', source: src });
+
+    // no built backend: staleness is UNKNOWN, not fresh
+    let r = readAppSource('zcl_read_me');
+    assert.equal(r.found, true);
+    assert.equal(r.source, src + '\n');
+    assert.equal(r.staleInBackend, null);
+    assert.equal(r.backendBuiltAt, null);
+
+    // a build OLDER than the deploy: the backend does not carry this file
+    fs.mkdirSync(path.join(a2, 'node', 'output'), { recursive: true });
+    fs.writeFileSync(path.join(a2, 'node', 'output', 'init.mjs'), '');
+    const old = new Date(Date.now() - 60_000);
+    fs.utimesSync(path.join(a2, 'node', 'output', 'init.mjs'), old, old);
+    r = readAppSource('zcl_read_me');
+    assert.equal(r.staleInBackend, true);
+
+    // a build NEWER than the deploy carries it
+    const newer = new Date(Date.now() + 60_000);
+    fs.utimesSync(path.join(a2, 'node', 'output', 'init.mjs'), newer, newer);
+    r = readAppSource('zcl_read_me');
+    assert.equal(r.staleInBackend, false);
+    assert.ok(r.backendBuiltAt);
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
 /* Widening the namespace must not widen what can be WRITTEN. Every one of
  * these is a name whose only purpose is to leave src/zz_dev, and each has to
  * die in the name gate rather than in path.join. */

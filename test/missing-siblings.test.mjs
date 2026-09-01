@@ -106,6 +106,7 @@ test('every sibling-dependent tool degrades with an actionable error when the ch
       'SAMPLES_CONTROLS_HOME',
     );
     expectMissing(await call('build_backend', {}), CORPUS, 'SAMPLES_CONTROLS_HOME');
+    expectMissing(await call('read_app', { class_name: 'zcl_my_app' }), CORPUS, 'SAMPLES_CONTROLS_HOME');
     expectMissing(await call('remove_app', {}), CORPUS, 'SAMPLES_CONTROLS_HOME');
     expectMissing(await call('remove_app', { class_name: 'z2ui5_cl_demo' }), CORPUS, 'SAMPLES_CONTROLS_HOME');
 

@@ -58,6 +58,7 @@ import { oneOf, boundedInt, stringArray } from './lib/args.mjs';
 import {
   deployApp,
   removeApp,
+  readAppSource,
   listDevApps,
   lintApp,
   runScopeOf,
@@ -458,6 +459,21 @@ async function handle(name, args = {}, ctx = {}) {
         reply.next = 'run build_backend once, then run_app to see the app';
       }
       return text(reply);
+    }
+    case 'read_app': {
+      const miss = missingSibling('samples-controls');
+      if (miss) return miss;
+      const res = readAppSource(args.class_name);
+      if (!res.found) {
+        return toolError(`no dev app '${res.class}' in src/zz_dev (looked for ${res.file}) — `
+          + 'remove_app without arguments lists the deployed ones');
+      }
+      return text({
+        ...res,
+        ...(res.staleInBackend
+          ? { hint: 'deployed after the last build — run_app still boots the older code; run build_backend' }
+          : {}),
+      });
     }
     case 'validate_view': {
       const miss = missingSibling('linter');
