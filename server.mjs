@@ -97,10 +97,13 @@ function progressReporter({ progressToken, sendNotification }) {
   if (progressToken === undefined || progressToken === null || !sendNotification) return undefined;
   let lines = 0;
   let lastSent = 0;
-  return (line) => {
+  // `force` skips the throttle for the milestones a caller must not lose -
+  // the start/end marks around a phase, which are the whole progress story
+  // for a child that prints little (abaplint answers in one JSON blob)
+  return (line, force = false) => {
     lines += 1;
     const now = Date.now();
-    if (now - lastSent < 1000) return;
+    if (!force && now - lastSent < 1000) return;
     lastSent = now;
     Promise.resolve(
       sendNotification({
@@ -432,7 +435,15 @@ async function handle(name, args = {}, ctx = {}) {
       });
       const reply = { deployed: res.class, file: res.abapPath };
       if (args.lint !== false) {
-        reply.lint = await lintApp(res.class, { signal: ctx.signal });
+        /* Progress around the lint when the client asked for it: abaplint can
+         * take a minute over the whole corpus and prints nothing until its
+         * one JSON answer, so the forced start/end marks are the signal that
+         * the call is alive; whatever lines it does print stream throttled in
+         * between. */
+        const report = progressReporter(ctx);
+        if (report) report(`abaplint: linting ${res.class} against the corpus config`, true);
+        reply.lint = await lintApp(res.class, { signal: ctx.signal, onLine: report });
+        if (report) report(`abaplint: finished (${reply.lint.ok ? 'clean' : `${reply.lint.issues.length} finding(s)`})`, true);
         if (reply.lint.aborted) {
           return toolError('deploy_app cancelled during the lint — the class was already written to the '
             + 'dev sandbox; deploy again to lint it, or remove_app to take it back out');
@@ -483,6 +494,14 @@ async function handle(name, args = {}, ctx = {}) {
         delete cfg.baseline; // baseline is a repo-workflow concern; new source has no baseline entry
         applyConfig(opt, seen, cfg);
       }
+
+      /* Progress when the client asked for it: the linter's checkFiles emits
+       * { phase, done, total } through onProgress. Feature-detected by
+       * nothing at all - an older linter spreads options it does not know
+       * into its defaults and ignores them, so this costs an old checkout
+       * nothing and may not break it. */
+      const report = progressReporter(ctx);
+      if (report) opt.onProgress = (p) => report(`${p.phase} ${p.done}/${p.total}`);
 
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-validate-'));
       const file = path.join(dir, args.xml ? 'source.view.xml' : 'source.clas.abap');
@@ -544,6 +563,7 @@ async function handle(name, args = {}, ctx = {}) {
       } catch (e) {
         return toolError(String(e.message));
       }
+      const reportShot = progressReporter(ctx);
       const shots = await screenshotSource({
         screenshotFiles: lib.screenshotFiles,
         abapSource: args.abap_source,
@@ -551,6 +571,7 @@ async function handle(name, args = {}, ctx = {}) {
         sizes,
         theme: args.theme,
         model: args.model,
+        ...(reportShot ? { onProgress: (p) => reportShot(`${p.phase} ${p.done}/${p.total}`) } : {}),
       });
 
       /* One entry per view per viewport. A class can build more than one
