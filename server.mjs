@@ -62,6 +62,7 @@ import {
   lintApp,
   runScopeOf,
   buildBackend,
+  buildLog,
   backendBuilt,
   backendStatus,
   startBackend,
@@ -623,6 +624,20 @@ async function handle(name, args = {}, ctx = {}) {
       if (res.aborted) return toolError(`build cancelled by the client (mode ${res.mode || mode}):\n${res.tail}`);
       if (!res.ok) return toolError(`build failed (exit ${res.code}, mode ${res.mode || mode}):\n${res.tail}`);
       return text({ built: true, mode: res.mode, next: 'run_app { class_name } to boot and screenshot the app', tail: res.tail.split('\n').slice(-5).join('\n') });
+    }
+    case 'build_log': {
+      // no sibling needed: this reads the record the last build left behind
+      const log = buildLog({
+        tail: boundedInt(args.tail, { name: 'tail', dflt: 100, min: 1, max: 2000 }),
+        offset: args.offset === undefined || args.offset === null
+          ? undefined
+          : boundedInt(args.offset, { name: 'offset', dflt: 0, min: 0, max: Number.MAX_SAFE_INTEGER }),
+      });
+      if (!log) {
+        return toolError('no build log yet — build_backend writes it when it runs (and a log from an '
+          + 'earlier server would be read from the screenshot/tmp dir)');
+      }
+      return text(log);
     }
     case 'run_app': {
       // samples-controls serves the local @openui5 modules, abap2UI5 the backend

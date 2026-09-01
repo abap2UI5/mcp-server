@@ -183,6 +183,56 @@ test('buildBackend kills and reports a build that exceeds its timeout', async ()
   );
 });
 
+// ---------------------------------------------------------------- buildLog ----
+
+/* The build's FULL retained output outlives the result's short tail: sliced
+ * by tail/offset for the build_log tool, and persisted under the screenshot
+ * dir so a restarted server can still answer for the previous one's build. */
+test('buildLog serves the last build\'s output, sliced, with metadata, persisted', async () => {
+  const shots = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-shots-'));
+  try {
+    await withFakeRepos(
+      'for (let i = 1; i <= 8; i++) console.log("line " + i); process.exit(0);',
+      { A2UI5_MCP_SCREENSHOT_DIR: shots },
+      async () => {
+        const { buildLog } = await import('../lib/runtime.mjs');
+        const res = await buildBackend({ mode: 'full' });
+        assert.equal(res.ok, true);
+
+        const log = buildLog({ tail: 3 });
+        assert.equal(log.ok, true);
+        assert.equal(log.mode, 'full');
+        assert.equal(log.code, 0);
+        assert.ok(log.startedAt && log.finishedAt, 'the log says when the build ran');
+        assert.equal(log.totalLines, 8);
+        assert.deepEqual(log.lines, ['line 6', 'line 7', 'line 8'], 'no offset means the LAST lines');
+        assert.equal(log.start, 5);
+
+        const paged = buildLog({ tail: 2, offset: 1 });
+        assert.deepEqual(paged.lines, ['line 2', 'line 3']);
+        assert.equal(paged.start, 1);
+
+        // persisted for a server restarted after the build
+        const persisted = JSON.parse(fs.readFileSync(path.join(shots, 'last-build.json'), 'utf8'));
+        assert.equal(persisted.lines.length, 8);
+        assert.equal(persisted.ok, true);
+      },
+    );
+  } finally {
+    fs.rmSync(shots, { recursive: true, force: true });
+  }
+});
+
+test('sliceLog stays within bounds however it is paged', async () => {
+  const { sliceLog } = await import('../lib/runtime.mjs');
+  const lines = ['a', 'b', 'c'];
+  assert.deepEqual(sliceLog(lines, { tail: 10 }), { start: 0, lines: ['a', 'b', 'c'] });
+  assert.deepEqual(sliceLog(lines, { tail: 1 }), { start: 2, lines: ['c'] });
+  assert.deepEqual(sliceLog(lines, { tail: 5, offset: 2 }), { start: 2, lines: ['c'] });
+  assert.deepEqual(sliceLog(lines, { tail: 5, offset: 99 }), { start: 3, lines: [] });
+  assert.deepEqual(sliceLog([], { tail: 5 }), { start: 0, lines: [] });
+});
+
 // ---------------------------------------------------------------- lintApp ----
 
 /* The lint config has to sit in the corpus ROOT - abaplint resolves a config's

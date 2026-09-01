@@ -203,7 +203,8 @@ importing it in a test hangs the run rather than failing it — which is why
 it. `test/missing-siblings.test.mjs` boots the real server with the sibling env
 vars pointed at nonexistent directories and asserts every sibling-dependent
 tool degrades with its actionable error (this one runs everywhere);
-`test/smoke.test.mjs` boots the real server over stdio (initialize, 16 tools,
+`test/smoke.test.mjs` boots the real server over stdio (initialize, the full
+tool surface,
 a capabilities query, the resource list and a resource read, the prompt list
 and a rendered prompt) and **skips itself when the samples-controls sibling is
 absent**, so `npm test` is green in a bare checkout and exercises the full
@@ -222,7 +223,8 @@ setTimeout(() => { send({jsonrpc:"2.0",id:3,method:"tools/call",params:{name:"ca
 '
 ```
 
-Expect: an `initialize` result, 16 tools in `tools/list`, and capability rows
+Expect: an `initialize` result, every tool the TOOLS array defines in
+`tools/list`, and capability rows
 for "popup". Pure units that are testable without any sibling checkout (add
 tests here first): `stripJsonc` (`lib/runtime.mjs`), the CAPABILITIES.md
 table parser (`lib/capabilities.mjs`), the class-name/`z2ui5_if_app`
