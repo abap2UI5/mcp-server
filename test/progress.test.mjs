@@ -97,6 +97,85 @@ test('build_backend emits notifications/progress when the client sends a progres
   }
 });
 
+/* deploy_app's abaplint pass reports at least its start and end marks when
+ * the client sent a progressToken: abaplint prints nothing until its one JSON
+ * answer, so the forced marks are what says the call is alive. The corpus and
+ * abaplint are both faked (a scripted npx on PATH), the way the runtime lint
+ * test fakes them. */
+test('deploy_app reports the lint start and end when a progressToken is sent', { skip: process.platform === 'win32' && 'needs a POSIX shell on PATH' }, async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-lintprog-'));
+  const demokit = path.join(base, 'ai-demokit');
+  fs.mkdirSync(path.join(demokit, 'scripts'), { recursive: true });
+  fs.writeFileSync(path.join(demokit, 'scripts', 'e2e-build.mjs'), '');
+  fs.writeFileSync(path.join(demokit, 'abaplint.jsonc'), '{ "global": { "exclude": [] }, "rules": {} }');
+  const bin = path.join(base, 'bin');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'npx'), '#!/bin/sh\nsleep 0.2\necho "[]"\n');
+  fs.chmodSync(path.join(bin, 'npx'), 0o755);
+
+  const p = spawn('node', [path.join(ROOT, 'server.mjs')], {
+    stdio: ['pipe', 'pipe', 'ignore'],
+    env: {
+      ...process.env,
+      AI_DEMOKIT_HOME: demokit,
+      SAMPLES_CONTROLS_HOME: '',
+      PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+    },
+  });
+  let buf = '';
+  p.stdout.on('data', (d) => (buf += d));
+  const msgs = () =>
+    buf
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => {
+        try {
+          return JSON.parse(l);
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+  const send = (o) => p.stdin.write(JSON.stringify(o) + '\n');
+  const until = (pred, ms = 20000) =>
+    new Promise((res, rej) => {
+      const t0 = Date.now();
+      const iv = setInterval(() => {
+        const hit = msgs().find(pred);
+        if (hit) {
+          clearInterval(iv);
+          res(hit);
+        } else if (Date.now() - t0 > ms) {
+          clearInterval(iv);
+          rej(new Error(`timeout; got: ${buf.slice(-500)}`));
+        }
+      }, 50);
+    });
+
+  try {
+    send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'lint-progress', version: '0' } } });
+    await until((m) => m.id === 1);
+    send({
+      jsonrpc: '2.0', id: 2, method: 'tools/call',
+      params: {
+        name: 'deploy_app',
+        arguments: { class_name: 'zcl_prog_app', abap_source: 'CLASS zcl_prog_app DEFINITION PUBLIC. PUBLIC SECTION. INTERFACES z2ui5_if_app. ENDCLASS. CLASS zcl_prog_app IMPLEMENTATION. ENDCLASS.' },
+        _meta: { progressToken: 'tok-lint' },
+      },
+    });
+    const done = await until((m) => m.id === 2);
+    assert.ok(!done.result.isError, `deploy must succeed: ${JSON.stringify(done.result)}`);
+    const progress = msgs().filter((m) => m.method === 'notifications/progress');
+    assert.ok(progress.some((n) => /abaplint: linting zcl_prog_app/.test(n.params.message)),
+      `expected the lint start mark, got: ${JSON.stringify(progress.map((n) => n.params.message))}`);
+    assert.ok(progress.some((n) => /abaplint: finished/.test(n.params.message)),
+      `expected the lint end mark, got: ${JSON.stringify(progress.map((n) => n.params.message))}`);
+  } finally {
+    p.kill();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test('build_backend sends no progress notifications without a progressToken', async () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-noprogress-'));
   const demokit = path.join(base, 'ai-demokit');

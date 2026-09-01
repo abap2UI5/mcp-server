@@ -109,6 +109,23 @@ test('every written-out tool count matches the TOOLS array', () => {
   }
 });
 
+/* A description quoting the SIZE of a sibling artifact is a count nothing
+ * here re-measures: "the 669-line interface" was true when it was written and
+ * the interface is at 900+ and growing - the same trap lib/repos.mjs's own
+ * comment describes for sample counts. Sizes belong to the sibling that can
+ * state its own; a description says WHAT the artifact is instead. */
+test('no description pins a line count of a sibling artifact', () => {
+  const NUMBERED_LINES = /\b\d+[\s-]lines?\b/i;
+  for (const t of TOOLS) {
+    assert.ok(!NUMBERED_LINES.test(t.description),
+      `tool '${t.name}' quotes a line count that will rot - describe the artifact, not its size`);
+  }
+  for (const r of [...RESOURCES, ...RESOURCE_TEMPLATES]) {
+    assert.ok(!NUMBERED_LINES.test(r.description),
+      `resource '${r.uri || r.uriTemplate}' quotes a line count that will rot - describe the artifact, not its size`);
+  }
+});
+
 /* The resource surface gets the same treatment as the tools the moment it
  * exists: one source (lib/resources.mjs), and the documents that spell it out
  * are checked against it. */

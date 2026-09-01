@@ -39,28 +39,34 @@ import {
   ReadResourceRequestSchema,
   ListPromptsRequestSchema,
   GetPromptRequestSchema,
+  CompleteRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { searchCapabilities, capabilitySummary } from './lib/capabilities.mjs';
 import { searchExamples, exampleSummary, catalogueFiles } from './lib/examples.mjs';
 import { searchPitfalls } from './lib/pitfalls.mjs';
 import { readGuide, sliceGuide, guideChapters, guideFile, GUIDE_PATH } from './lib/guide.mjs';
-import { readApi, parseApi, searchApi, apiSummary, apiFile, API_PATH } from './lib/api.mjs';
+import { readApiParsed, searchApi, apiSummary, apiFile, API_PATH } from './lib/api.mjs';
 import { parseSizes, screenshotSource } from './lib/screenshot.mjs';
-import { resolveSamplesControls, resolveAppTemplate, importViewCheck, resolveLintConfig, SERVER_ROOT } from './lib/repos.mjs';
+import { resolveSamplesControls, resolveAppTemplate, importViewCheck, SERVER_ROOT } from './lib/repos.mjs';
 import { searchDocs, docsRoot } from './lib/docs.mjs';
 import { scaffold, readSpec, validClassName, classNameRule, templateFiles, SPEC_FILE } from './lib/scaffold.mjs';
+import { fixSource } from './lib/fixview.mjs';
+import { lintOptionsFor } from './lib/lintopts.mjs';
+import { getRenderer, dropRenderer, closeRenderers, rendererLooksDead } from './lib/renderer.mjs';
 import { TOOLS } from './lib/tools.mjs';
-import { RESOURCES, RESOURCE_TEMPLATES, readResource } from './lib/resources.mjs';
+import { RESOURCES, RESOURCE_TEMPLATES, GUIDE_CHAPTER_TEMPLATE, readResource } from './lib/resources.mjs';
 import { PROMPTS, getPrompt } from './lib/prompts.mjs';
 import { missingSiblingMessage } from './lib/siblings.mjs';
-import { oneOf, boundedInt } from './lib/args.mjs';
+import { oneOf, boundedInt, stringArray } from './lib/args.mjs';
 import {
   deployApp,
   removeApp,
+  readAppSource,
   listDevApps,
   lintApp,
   runScopeOf,
   buildBackend,
+  buildLog,
   backendBuilt,
   backendStatus,
   startBackend,
@@ -97,10 +103,13 @@ function progressReporter({ progressToken, sendNotification }) {
   if (progressToken === undefined || progressToken === null || !sendNotification) return undefined;
   let lines = 0;
   let lastSent = 0;
-  return (line) => {
+  // `force` skips the throttle for the milestones a caller must not lose -
+  // the start/end marks around a phase, which are the whole progress story
+  // for a child that prints little (abaplint answers in one JSON blob)
+  return (line, force = false) => {
     lines += 1;
     const now = Date.now();
-    if (now - lastSent < 1000) return;
+    if (!force && now - lastSent < 1000) return;
     lastSent = now;
     Promise.resolve(
       sendNotification({
@@ -153,6 +162,21 @@ async function explainRules(findings, withDetail) {
       : { summary: doc.summary };
   }
   return Object.keys(out).length ? out : null;
+}
+
+/* fixable: true on every finding that carries mechanical fixes — the flag
+ * that says fix_view can clear it. Feature-detected: an older linter without
+ * the ./fix export costs the agent the flag and nothing else, never the
+ * findings. */
+async function flagFixable(findings) {
+  let isFixable;
+  try {
+    ({ isFixable } = await importViewCheck('./fix'));
+  } catch {
+    return findings;
+  }
+  if (typeof isFixable !== 'function') return findings;
+  return findings.map((f) => (isFixable(f) ? { ...f, fixable: true } : f));
 }
 
 async function handle(name, args = {}, ctx = {}) {
@@ -307,15 +331,15 @@ async function handle(name, args = {}, ctx = {}) {
       // the client API is an interface in the framework sources
       const miss = missingSibling('abap2UI5');
       if (miss) return miss;
-      const raw = readApi();
-      if (raw === null) {
+      const api = readApiParsed();
+      if (api === null) {
         return toolError(`the abap2UI5 checkout has no ${API_PATH.join('/')} (looked in ${apiFile()}) — `
           + 'update it (git pull); the client API lives there');
       }
       const kind = oneOf(args.kind, {
         name: 'kind', allowed: ['methods', 'constants', 'types', 'all'], dflt: 'all',
       });
-      const parsed = parseApi(raw);
+      const parsed = api.parsed;
       // empty groups are omitted rather than sent as [], so a narrowed answer
       // is exactly as wide as what it found
       const pick = (r) => ({
@@ -411,9 +435,15 @@ async function handle(name, args = {}, ctx = {}) {
     case 'scope_of': {
       const miss = missingSibling('samples-controls');
       if (miss) return miss;
-      const entities = args.entities || [];
-      if (!entities.length) return toolError('pass at least one entity, e.g. ["sap.m.Wizard"]');
-      const { code, out } = await runScopeOf(entities);
+      if (args.entities === undefined || args.entities === null) {
+        return toolError('pass at least one entity, e.g. ["sap.m.Wizard"]');
+      }
+      /* Checked HERE because these entries become spawn argv (lib/args.mjs
+       * explains the contract): a bare string passes a length check and then
+       * shatters into one argument per character, a number throws inside
+       * spawn as a TypeError nobody can act on. */
+      const entities = stringArray(args.entities, { name: 'entities' });
+      const { code, out } = await runScopeOf(entities, { signal: ctx.signal });
       return text(`${out}\n\n(exit ${code}: 0 = all in scope, 1 = at least one out of scope or unresolved)`);
     }
     case 'deploy_app': {
@@ -426,7 +456,19 @@ async function handle(name, args = {}, ctx = {}) {
       });
       const reply = { deployed: res.class, file: res.abapPath };
       if (args.lint !== false) {
-        reply.lint = await lintApp(res.class);
+        /* Progress around the lint when the client asked for it: abaplint can
+         * take a minute over the whole corpus and prints nothing until its
+         * one JSON answer, so the forced start/end marks are the signal that
+         * the call is alive; whatever lines it does print stream throttled in
+         * between. */
+        const report = progressReporter(ctx);
+        if (report) report(`abaplint: linting ${res.class} against the corpus config`, true);
+        reply.lint = await lintApp(res.class, { signal: ctx.signal, onLine: report });
+        if (report) report(`abaplint: finished (${reply.lint.ok ? 'clean' : `${reply.lint.issues.length} finding(s)`})`, true);
+        if (reply.lint.aborted) {
+          return toolError('deploy_app cancelled during the lint — the class was already written to the '
+            + 'dev sandbox; deploy again to lint it, or remove_app to take it back out');
+        }
         if (!reply.lint.ok) {
           reply.hint = 'fix the lint findings and deploy again; build_backend is only worth running on a clean lint';
         }
@@ -435,6 +477,21 @@ async function handle(name, args = {}, ctx = {}) {
         reply.next = 'run build_backend once, then run_app to see the app';
       }
       return text(reply);
+    }
+    case 'read_app': {
+      const miss = missingSibling('samples-controls');
+      if (miss) return miss;
+      const res = readAppSource(args.class_name);
+      if (!res.found) {
+        return toolError(`no dev app '${res.class}' in src/zz_dev (looked for ${res.file}) — `
+          + 'remove_app without arguments lists the deployed ones');
+      }
+      return text({
+        ...res,
+        ...(res.staleInBackend
+          ? { hint: 'deployed after the last build — run_app still boots the older code; run build_backend' }
+          : {}),
+      });
     }
     case 'validate_view': {
       const miss = missingSibling('linter');
@@ -446,42 +503,48 @@ async function handle(name, args = {}, ctx = {}) {
        * config semantics. No internal file paths, no re-derived logic. */
       const lib = await importViewCheck('.');
       const { severityOf, severityRank, SEVERITIES } = await importViewCheck('./findings');
-      const { findConfigFrom, loadConfig, applyConfig } = await importViewCheck('./config');
+      const { opt, configFile } = await lintOptionsFor(args);
 
-      // explicit tool arguments win; the checked project's abap2ui5lint.jsonc
-      // fills the rest — an agent must not report findings the project's own
-      // CI has deliberately configured away
-      const opt = { minUi5: '1.71', allow: [], render: true, properties: true };
-      const seen = new Set(['properties']);
-      if (args.min_ui5) { opt.minUi5 = args.min_ui5; seen.add('minUi5'); }
-      if (args.allow) opt.allow = args.allow;
-      if (args.render === false) { opt.render = false; seen.add('render'); }
-      /* Which project's config that is, in order: the one named, the one the
-       * server was started in, the corpus. It used to be the corpus and only
-       * the corpus, which is right for porting samples and wrong for everyone
-       * else: an app in someone's own repository was judged by samples-
-       * controls' rule overrides, allow list and UI5 floor, with no argument
-       * to say otherwise — while this tool's description promised the
-       * opposite. The chosen file is reported back as `config`. */
-      const configFile = resolveLintConfig(findConfigFrom, {
-        projectDir: args.project_dir,
-        cwd: process.cwd(),
-        corpus: resolveSamplesControls(),
-      });
-      if (configFile) {
-        const cfg = loadConfig(configFile);
-        delete cfg.baseline; // baseline is a repo-workflow concern; new source has no baseline entry
-        applyConfig(opt, seen, cfg);
-      }
+      /* Progress when the client asked for it: the linter's checkFiles emits
+       * { phase, done, total } through onProgress. Feature-detected by
+       * nothing at all - an older linter spreads options it does not know
+       * into its defaults and ignores them, so this costs an old checkout
+       * nothing and may not break it. */
+      const report = progressReporter(ctx);
+      if (report) opt.onProgress = (p) => report(`${p.phase} ${p.done}/${p.total}`);
 
-      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-validate-'));
-      const file = path.join(dir, args.xml ? 'source.view.xml' : 'source.clas.abap');
+      const check = async (options) => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-validate-'));
+        const file = path.join(dir, args.xml ? 'source.view.xml' : 'source.clas.abap');
+        try {
+          fs.writeFileSync(file, args.xml || args.abap_source);
+          const [r] = await lib.checkFiles([file], options);
+          return r;
+        } finally {
+          fs.rmSync(dir, { recursive: true, force: true });
+        }
+      };
+      /* Warm renderer where the linter supports one (lib/renderer.mjs): the
+       * render gate's Chromium cold start dominates this call, and one warm
+       * browser serves every call (concurrent ones queue on its page pool).
+       * An older linter gets exactly the cold path it always had; a warm
+       * browser that died mid-call is dropped and the call retried cold. */
+      const GATE_POOL = { pages: 1 };
       let result;
-      try {
-        fs.writeFileSync(file, args.xml || args.abap_source);
-        [result] = await lib.checkFiles([file], opt);
-      } finally {
-        fs.rmSync(dir, { recursive: true, force: true });
+      const renderer = opt.render === false ? null : await getRenderer(GATE_POOL);
+      if (renderer) {
+        try {
+          result = await check({ ...opt, renderer });
+        } catch (e) {
+          await dropRenderer(GATE_POOL); // whatever threw, a fresh one next call
+          throw e;
+        }
+        if (rendererLooksDead(result.renderErrors)) {
+          await dropRenderer(GATE_POOL);
+          result = await check(opt);
+        }
+      } else {
+        result = await check(opt);
       }
 
       /* Every finding carries its severity, a ready-made message and (where
@@ -497,10 +560,13 @@ async function handle(name, args = {}, ctx = {}) {
       const failOn = opt.failOn || 'warning';
       const ok = failOn === 'never' || SEVERITIES.slice(severityRank(failOn)).every((s) => counts[s] === 0);
       const rules = await explainRules(result.findings, args.explain === true);
+      // additive: fixable: true per finding fix_view can clear (older linter
+      // without ./fix: no flag, findings untouched)
+      const findings = await flagFixable(result.findings);
       return text({
         ok,
         counts,
-        findings: result.findings,
+        findings,
         ...(rules ? { rules } : {}),
         renderErrors: result.renderErrors,
         reconstructedDocs: result.docs.length,
@@ -512,6 +578,44 @@ async function handle(name, args = {}, ctx = {}) {
           : counts.error === 0 && counts.hint > 0
             ? 'hints are advisory - an event without a handler is intended when the roundtrip alone is the point'
             : undefined,
+      });
+    }
+    case 'fix_view': {
+      const miss = missingSibling('linter');
+      if (miss) return miss;
+      if (!args.abap_source && !args.xml) return toolError('pass abap_source or xml');
+      const lib = await importViewCheck('.');
+      /* ./fix is newer than the linter's other exports; a checkout without it
+       * gets an actionable sentence and validate_view stays untouched. */
+      let fixLib;
+      try {
+        fixLib = await importViewCheck('./fix');
+      } catch {
+        return toolError('this linter checkout is too old for fix_view — its package exports no ./fix '
+          + '(applyFixes); update it (git pull). validate_view keeps working on this checkout.');
+      }
+      if (typeof fixLib.applyFixes !== 'function') {
+        return toolError('this linter checkout is too old for fix_view — ./fix exports no applyFixes; '
+          + 'update it (git pull). validate_view keeps working on this checkout.');
+      }
+      const { opt, configFile } = await lintOptionsFor(args, { forceNoRender: true });
+      const res = await fixSource({
+        checkFiles: lib.checkFiles,
+        applyFixes: fixLib.applyFixes,
+        abapSource: args.abap_source,
+        xml: args.xml,
+        opt,
+      });
+      const remaining = await flagFixable(res.remaining);
+      return text({
+        applied: res.applied,
+        fixed: res.fixed,
+        remaining,
+        config: configFile || undefined,
+        source: res.source,
+        note: res.applied
+          ? 'nothing was written — the corrected source above is yours to place; the remaining findings need decisions a mechanical fix cannot make'
+          : 'no finding carried a mechanical fix — the findings under `remaining` need decisions, not renames',
       });
     }
     case 'screenshot_view': {
@@ -534,14 +638,40 @@ async function handle(name, args = {}, ctx = {}) {
       } catch (e) {
         return toolError(String(e.message));
       }
-      const shots = await screenshotSource({
+      const reportShot = progressReporter(ctx);
+      const doShots = (renderer) => screenshotSource({
         screenshotFiles: lib.screenshotFiles,
         abapSource: args.abap_source,
         xml: args.xml,
         sizes,
         theme: args.theme,
         model: args.model,
+        ...(renderer ? { renderer } : {}),
+        ...(reportShot ? { onProgress: (p) => reportShot(`${p.phase} ${p.done}/${p.total}`) } : {}),
       });
+      /* Warm renderer per THEME (theme and css are baked in at open time —
+       * lib/renderer.mjs): the browser launch and UI5 boot cost more than
+       * every picture in the call put together. Cold path untouched on an
+       * older linter; a dead warm browser is dropped and the call retried
+       * cold, so a crashed Chromium costs one relaunch, never a wrong or
+       * empty answer. */
+      const shotPool = { theme: args.theme || 'sap_horizon', css: true };
+      const warmShot = await getRenderer(shotPool);
+      let shots;
+      if (warmShot) {
+        try {
+          shots = await doShots(warmShot);
+        } catch {
+          await dropRenderer(shotPool);
+          shots = await doShots(null);
+        }
+        if (shots && rendererLooksDead(shots.flatMap((s) => s.errors || []))) {
+          await dropRenderer(shotPool);
+          shots = await doShots(null);
+        }
+      } else {
+        shots = await doShots(null);
+      }
 
       /* One entry per view per viewport. A class can build more than one
        * document (a view and its popup fragment), and `index`/`kind` are what
@@ -587,9 +717,24 @@ async function handle(name, args = {}, ctx = {}) {
         name: 'mode', allowed: ['auto', 'incremental', 'full'], dflt: 'auto',
       });
       await stopBackend();
-      const res = await buildBackend({ mode, onLine: progressReporter(ctx) });
+      const res = await buildBackend({ mode, onLine: progressReporter(ctx), signal: ctx.signal });
+      if (res.aborted) return toolError(`build cancelled by the client (mode ${res.mode || mode}):\n${res.tail}`);
       if (!res.ok) return toolError(`build failed (exit ${res.code}, mode ${res.mode || mode}):\n${res.tail}`);
       return text({ built: true, mode: res.mode, next: 'run_app { class_name } to boot and screenshot the app', tail: res.tail.split('\n').slice(-5).join('\n') });
+    }
+    case 'build_log': {
+      // no sibling needed: this reads the record the last build left behind
+      const log = buildLog({
+        tail: boundedInt(args.tail, { name: 'tail', dflt: 100, min: 1, max: 2000 }),
+        offset: args.offset === undefined || args.offset === null
+          ? undefined
+          : boundedInt(args.offset, { name: 'offset', dflt: 0, min: 0, max: Number.MAX_SAFE_INTEGER }),
+      });
+      if (!log) {
+        return toolError('no build log yet — build_backend writes it when it runs (and a log from an '
+          + 'earlier server would be read from the screenshot/tmp dir)');
+      }
+      return text(log);
     }
     case 'run_app': {
       // samples-controls serves the local @openui5 modules, abap2UI5 the backend
@@ -601,6 +746,7 @@ async function handle(name, args = {}, ctx = {}) {
       const res = await runApp({
         className: args.class_name,
         timeoutMs: boundedInt(args.timeout_ms, { name: 'timeout_ms', dflt: 60000, min: 5000, max: 600000 }),
+        signal: ctx.signal,
       });
       const report = {
         class: res.class,
@@ -650,8 +796,25 @@ const PKG = JSON.parse(fs.readFileSync(path.join(SERVER_ROOT, 'package.json'), '
 
 const server = new Server(
   { name: 'abap2ui5', version: PKG.version },
-  { capabilities: { tools: {}, resources: {}, prompts: {} } },
+  /* logging: diagnostics travel as notifications/message once the transport
+   * is up (declaring the capability also gives the SDK's logging/setLevel
+   * handler something to filter by); completions: the guide-chapter resource
+   * template completes its {chapter} argument. */
+  { capabilities: { tools: {}, resources: {}, prompts: {}, logging: {}, completions: {} } },
 );
+
+/* One diagnostic channel. Through the MCP logging notification when the
+ * transport is connected — that is where a client actually shows it — and to
+ * stderr before the connect and whenever sending fails (stdout is the
+ * JSON-RPC channel; a stack trace in it is a protocol error on top of the
+ * original one). */
+function diagnostic(level, message) {
+  if (server.transport) {
+    server.sendLoggingMessage({ level, logger: 'abap2ui5', data: message }).catch(() => console.error(message));
+  } else {
+    console.error(message);
+  }
+}
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
 
@@ -668,11 +831,35 @@ server.setRequestHandler(ReadResourceRequestSchema, async (req) => readResource(
  * sibling checkout; the tools they send the agent to do. */
 server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: PROMPTS }));
 server.setRequestHandler(GetPromptRequestSchema, async (req) => getPrompt(req.params.name, req.params.arguments || {}));
+
+/* Completion for the one resource template: abap2ui5://guide/{chapter}. The
+ * chapters are the guide's own `## ` headings (guideChapters), read live like
+ * every other document. Advisory by contract, so it never errors the way a
+ * read does: no checkout, no guide, an unknown ref or argument all answer an
+ * EMPTY list — the client is typing ahead, not reading. */
+server.setRequestHandler(CompleteRequestSchema, async (req) => {
+  const empty = { completion: { values: [], total: 0, hasMore: false } };
+  const { ref, argument } = req.params;
+  if (!ref || ref.type !== 'ref/resource' || ref.uri !== GUIDE_CHAPTER_TEMPLATE) return empty;
+  if (!argument || argument.name !== 'chapter') return empty;
+  const md = readGuide();
+  if (md === null) return empty;
+  const want = String(argument.value || '').toLowerCase();
+  const values = guideChapters(md)
+    .filter((c) => c.toLowerCase().includes(want))
+    .slice(0, 100); // the protocol's ceiling per answer
+  return { completion: { values, total: values.length, hasMore: false } };
+});
 server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
   try {
     return await handle(req.params.name, req.params.arguments || {}, {
       progressToken: req.params._meta && req.params._meta.progressToken,
       sendNotification: extra && extra.sendNotification,
+      /* The SDK aborts this when the client sends notifications/cancelled for
+       * the request. The long-running tools hand it to spawnWithTimeout,
+       * which kills the child's whole process tree - a cancelled build must
+       * not keep transpiling under a request nobody is waiting for. */
+      signal: extra && extra.signal,
     });
   } catch (e) {
     return toolError(String((e && e.message) || e));
@@ -693,20 +880,20 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
  * written into it is a protocol error on top of the original one. */
 function logCrash(kind, err) {
   const detail = (err && err.stack) || String(err);
-  console.error(`abap2ui5 MCP server: ${kind} (the server stays up)\n${detail}`);
+  diagnostic('error', `abap2ui5 MCP server: ${kind} (the server stays up)\n${detail}`);
 }
 process.on('unhandledRejection', (reason) => logCrash('unhandled rejection', reason));
 process.on('uncaughtException', (err) => logCrash('uncaught exception', err));
 
 process.on('SIGINT', async () => {
-  await stopBackend().catch(() => {});
+  await Promise.all([stopBackend().catch(() => {}), closeRenderers()]);
   process.exit(0);
 });
 process.on('SIGTERM', async () => {
-  await stopBackend().catch(() => {});
+  await Promise.all([stopBackend().catch(() => {}), closeRenderers()]);
   process.exit(0);
 });
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error(`abap2ui5 MCP server ready (samples-controls: ${resolveSamplesControls()}, backend built: ${backendBuilt()})`);
+diagnostic('info', `abap2ui5 MCP server ready (samples-controls: ${resolveSamplesControls()}, backend built: ${backendBuilt()})`);

@@ -2,6 +2,54 @@
 
 ## Unreleased
 
+- **Three new tools.** `fix_view` applies the linter's mechanical fixes to a
+  source and returns the corrected source (it writes nothing — the agent
+  decides where it goes), reporting which findings were fixed and which
+  remain; `validate_view` findings now carry `fixable: true` where `fix_view`
+  can clear them. `build_log` pages through the last build's full retained
+  output — the error a 30-line tail cut off used to cost another
+  tens-of-minutes build to see — persisted across server restarts. `read_app`
+  reads a deployed dev app back from `src/zz_dev/` (same name gate as
+  deploy/remove) and says whether the built backend already carries it.
+- **Cancellation reaches the children.** The MCP request's abort signal
+  (`notifications/cancelled`) now kills the spawned process tree of
+  `build_backend`, `run_app`, `deploy_app`'s lint and `scope_of` — a
+  cancelled build no longer keeps transpiling under a request nobody is
+  waiting for.
+- **Two backend-lifecycle bugs.** A killed backend's late exit event cleared
+  the NEW backend's reference (kill() is asynchronous), leaving a live
+  express server that status denied and stop could not reach; and two
+  concurrent starts could spawn two servers onto one port — startBackend is
+  single-flight now, the way buildBackend already was.
+- **Logging and completions declared.** Diagnostics travel as MCP
+  `notifications/message` once the transport is up (stderr stays the
+  fallback), and the `abap2ui5://guide/{chapter}` template completes its
+  argument from the guide's live chapter headings — advisory, so a missing
+  checkout answers an empty list, never an error.
+- **A warm renderer for the fast loop.** Where the linter accepts an
+  already-open renderer (its `{ renderer }` option and `./render` export),
+  validate_view and screenshot_view keep one Chromium warm across calls —
+  the cold start dominated both — keyed per theme, shared by concurrent
+  calls (the renderer's own page pool queues them), closed on shutdown, and
+  dropped-and-relaunched when it dies (that call falls back cold). All
+  feature-detected: an older linter keeps exactly the cold path it had.
+- **Progress from the fast loop.** `validate_view` and `screenshot_view`
+  forward the linter's onProgress phases when a progressToken is sent (an
+  older linter simply ignores the option), and `deploy_app` marks its
+  abaplint pass with start/end progress.
+- **The live-read contract, made affordable.** Parses are cached per file
+  version (path, mtimeMs, size) — a pulled or edited file invalidates
+  itself — for the docs tree, the three sample catalogues, the client
+  interface and CAPABILITIES.md; the linter's package.json is no longer
+  re-parsed per import, and the benign-noise list is resolved per call
+  instead of frozen at server start, so a corpus checked out later is found
+  without a restart.
+- **Arguments that reach spawn argv are validated** (`scope_of` entities: an
+  array of bounded, non-empty strings, refused by name otherwise), and the
+  prose stopped quoting sizes of sibling artifacts ("the 669-line
+  interface") that nothing re-measures — a gate now refuses line-count
+  claims in tool and resource descriptions.
+
 ## 0.1.1 - 2026-08-31
 
 - **Every enumerated argument is checked, and every numeric one is bounded.**

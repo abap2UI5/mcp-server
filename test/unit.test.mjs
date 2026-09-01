@@ -3,7 +3,7 @@
 // test/smoke.test.mjs and DOES need the siblings.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { stripJsonc, BENIGN, deployApp, removeApp } from '../lib/runtime.mjs';
+import { stripJsonc, LOCAL_BENIGN, benignRules, deployApp, removeApp } from '../lib/runtime.mjs';
 import { parseCapabilities, searchCapabilities } from '../lib/capabilities.mjs';
 import { parseExamples, searchExamples, catalogueEntries, CATALOGUES } from '../lib/examples.mjs';
 import { CORPUS_DIRS, resolveLintConfig } from '../lib/repos.mjs';
@@ -12,7 +12,8 @@ import { sliceGuide, guideChapters } from '../lib/guide.mjs';
 import { parseApi, searchApi, apiSummary } from '../lib/api.mjs';
 import { searchDocs } from '../lib/docs.mjs';
 import { parseSizes } from '../lib/screenshot.mjs';
-import { oneOf, boundedInt } from '../lib/args.mjs';
+import { oneOf, boundedInt, stringArray } from '../lib/args.mjs';
+import { readCached } from '../lib/cache.mjs';
 import { scaffold, rename, validClassName, templateFiles, readSpec } from '../lib/scaffold.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -221,6 +222,70 @@ test('removeApp rejects the same names deployApp does', () => {
   }
 });
 
+// ------------------------------------------------- readAppSource gate ----
+// read_app reads by name, through the SAME gate deploy and remove use: a
+// name carrying path separators must die as a name, never resolve as a path
+// out of src/zz_dev into real corpus sources.
+
+test('readAppSource rejects the names deployApp rejects', async () => {
+  const { readAppSource } = await import('../lib/runtime.mjs');
+  for (const bad of ['acl_my_app', '', '../../src/01/z2ui5_cl_smpc_app_001', '/etc/passwd', 'zcl_a.b', 'z2ui5_cl_' + 'a'.repeat(30)]) {
+    assert.throws(() => readAppSource(bad), /invalid class name/, `expected rejection for '${bad}'`);
+  }
+});
+
+/* The staleness half: a dev app deployed AFTER the last build is code
+ * run_app does not serve yet, and the report has to say so. Fake corpus and
+ * framework checkouts via the authoritative env vars. */
+test('readAppSource reports the source and whether the built backend carries it', async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-readapp-'));
+  const corpus = path.join(base, 'ai-demokit');
+  fs.mkdirSync(path.join(corpus, 'scripts'), { recursive: true });
+  fs.writeFileSync(path.join(corpus, 'scripts', 'e2e-build.mjs'), '');
+  const a2 = path.join(base, 'abap2UI5');
+  fs.mkdirSync(path.join(a2, 'node', 'srv'), { recursive: true });
+  fs.writeFileSync(path.join(a2, 'node', 'srv', 'express.mjs'), '');
+  const saved = {};
+  const wanted = { AI_DEMOKIT_HOME: corpus, SAMPLES_CONTROLS_HOME: '', A2UI5_HOME: a2 };
+  for (const [k, v] of Object.entries(wanted)) { saved[k] = process.env[k]; process.env[k] = v; }
+  try {
+    const { readAppSource } = await import('../lib/runtime.mjs');
+    // nothing deployed yet: found false, and the path it looked at is named
+    assert.equal(readAppSource('zcl_read_me').found, false);
+
+    const src = 'CLASS zcl_read_me DEFINITION PUBLIC. PUBLIC SECTION. INTERFACES z2ui5_if_app. ENDCLASS.';
+    deployApp({ className: 'zcl_read_me', source: src });
+
+    // no built backend: staleness is UNKNOWN, not fresh
+    let r = readAppSource('zcl_read_me');
+    assert.equal(r.found, true);
+    assert.equal(r.source, src + '\n');
+    assert.equal(r.staleInBackend, null);
+    assert.equal(r.backendBuiltAt, null);
+
+    // a build OLDER than the deploy: the backend does not carry this file
+    fs.mkdirSync(path.join(a2, 'node', 'output'), { recursive: true });
+    fs.writeFileSync(path.join(a2, 'node', 'output', 'init.mjs'), '');
+    const old = new Date(Date.now() - 60_000);
+    fs.utimesSync(path.join(a2, 'node', 'output', 'init.mjs'), old, old);
+    r = readAppSource('zcl_read_me');
+    assert.equal(r.staleInBackend, true);
+
+    // a build NEWER than the deploy carries it
+    const newer = new Date(Date.now() + 60_000);
+    fs.utimesSync(path.join(a2, 'node', 'output', 'init.mjs'), newer, newer);
+    r = readAppSource('zcl_read_me');
+    assert.equal(r.staleInBackend, false);
+    assert.ok(r.backendBuiltAt);
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
 /* Widening the namespace must not widen what can be WRITTEN. Every one of
  * these is a name whose only purpose is to leave src/zz_dev, and each has to
  * die in the name gate rather than in path.join. */
@@ -237,13 +302,81 @@ test('a wider namespace is still no way out of the dev sandbox', () => {
   }
 });
 
+// ------------------------------------------------------ mtime file cache ----
+
+/* The live-read contract, made affordable: a parse is cached under
+ * (path, mtimeMs, size), so an unchanged file costs a stat and a CHANGED file
+ * - a git pull, an edit - invalidates itself. No TTL, no manual flush. */
+test('readCached parses once per file version and re-parses on change', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-cache-'));
+  const file = path.join(dir, 'doc.md');
+  try {
+    fs.writeFileSync(file, 'one');
+    let parses = 0;
+    const parse = (text) => { parses++; return text.toUpperCase(); };
+    assert.equal(readCached(file, parse), 'ONE');
+    assert.equal(readCached(file, parse), 'ONE');
+    assert.equal(parses, 1, 'an unchanged file is parsed once');
+
+    // same size, different mtime - an edit that touched the timestamp
+    fs.utimesSync(file, new Date(Date.now() - 5000), new Date(Date.now() - 5000));
+    assert.equal(readCached(file, parse), 'ONE');
+    assert.equal(parses, 2, 'a changed mtime invalidates');
+
+    // changed content (size differs) with whatever mtime the write produced
+    fs.writeFileSync(file, 'two three');
+    assert.equal(readCached(file, parse), 'TWO THREE');
+    assert.equal(parses, 3, 'changed content is re-parsed');
+    assert.equal(readCached(file, parse), 'TWO THREE');
+    assert.equal(parses, 3);
+
+    // a file that cannot be statted throws what fs throws - the caller keeps
+    // its own existsSync semantics, nothing broken lands in the cache
+    assert.throws(() => readCached(path.join(dir, 'missing.md'), parse), /ENOENT/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // ------------------------------------------------------- BENIGN filter ----
 
-test('BENIGN patterns match known console noise and not real errors', () => {
-  const noise = BENIGN.some((re) => re.test('Failed to load resource: favicon.ico 404'));
-  const real = BENIGN.some((re) => re.test("TypeError: Cannot read properties of undefined (reading 'getModel')"));
+test('the vendored BENIGN patterns match known console noise and not real errors', () => {
+  const noise = LOCAL_BENIGN.some((re) => re.test('Failed to load resource: favicon.ico 404'));
+  const real = LOCAL_BENIGN.some((re) => re.test("TypeError: Cannot read properties of undefined (reading 'getModel')"));
   assert.equal(noise, true); // known console noise is filtered
   assert.equal(real, false); // a real JS error is never swallowed
+});
+
+/* benignRules resolves the canonical list from the corpus PER CALL - it used
+ * to be frozen at module load, so a corpus checked out after server start was
+ * silently missed until a restart. */
+test('benignRules reads the corpus list live and falls back to the vendored copy', async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-benign-'));
+  const corpus = path.join(base, 'ai-demokit');
+  const saved = { demokit: process.env.AI_DEMOKIT_HOME, corpusHome: process.env.SAMPLES_CONTROLS_HOME };
+  process.env.AI_DEMOKIT_HOME = corpus;
+  process.env.SAMPLES_CONTROLS_HOME = '';
+  try {
+    // no corpus at all: the vendored copy applies
+    assert.deepEqual(await benignRules(), LOCAL_BENIGN);
+    // the corpus appears AFTER "server start" - no restart needed
+    fs.mkdirSync(path.join(corpus, 'scripts'), { recursive: true });
+    fs.writeFileSync(path.join(corpus, 'scripts', 'e2e-build.mjs'), '');
+    assert.deepEqual(await benignRules(), LOCAL_BENIGN, 'a corpus without lib-smoke.mjs still answers');
+    fs.writeFileSync(
+      path.join(corpus, 'scripts', 'lib-smoke.mjs'),
+      'export const BENIGN = [/canonical-noise/];',
+    );
+    const live = await benignRules();
+    assert.equal(live.length, 1);
+    assert.match('canonical-noise here', live[0]);
+  } finally {
+    if (saved.demokit === undefined) delete process.env.AI_DEMOKIT_HOME;
+    else process.env.AI_DEMOKIT_HOME = saved.demokit;
+    if (saved.corpusHome === undefined) delete process.env.SAMPLES_CONTROLS_HOME;
+    else process.env.SAMPLES_CONTROLS_HOME = saved.corpusHome;
+    fs.rmSync(base, { recursive: true, force: true });
+  }
 });
 
 // ----------------------------------------------------------- repo naming ----
@@ -1315,6 +1448,29 @@ test('a numeric argument is coerced, bounded and refused when it is not a number
   for (const bad of ['abc', {}, NaN, Infinity]) {
     assert.throws(() => boundedInt(bad, opts), /limit must be a number/, `expected rejection for ${String(bad)}`);
   }
+});
+
+/* A list argument that ends up as spawn argv has the failure modes coercion
+ * cannot repair: a bare string passes a length check and shatters into one
+ * argv entry per character, a number throws inside spawn as a TypeError
+ * nobody can act on. scope_of\'s entities go through this. */
+test('a string-list argument is exactly an array of non-empty strings, bounded', () => {
+  const opts = { name: 'entities' };
+  assert.deepEqual(stringArray(['sap.m.Wizard'], opts), ['sap.m.Wizard']);
+  assert.deepEqual(stringArray(['  sap.m.Bar '], opts), ['sap.m.Bar'], 'entries are trimmed');
+  // a bare string has .length and would shatter into characters in argv
+  assert.throws(() => stringArray('sap.m.Wizard', opts), /entities must be an array of strings/);
+  assert.throws(() => stringArray(42, opts), /entities must be an array of strings/);
+  assert.throws(() => stringArray([], opts), /entities is empty/);
+  assert.throws(() => stringArray(['sap.m.Bar', 7], opts), /non-empty string/);
+  assert.throws(() => stringArray(['sap.m.Bar', ''], opts), /non-empty string/);
+  assert.throws(() => stringArray(['   '], opts), /non-empty string/);
+  assert.throws(() => stringArray([null], opts), /non-empty string/);
+  assert.throws(
+    () => stringArray(Array.from({ length: 51 }, (_, i) => `e${i}`), opts),
+    /at most 50 per call/,
+  );
+  assert.throws(() => stringArray(['x'.repeat(201)], opts), /longer than 200 characters/);
 });
 
 /* Defence in depth under the tool layer: searchExamples used to return the
