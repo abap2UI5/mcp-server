@@ -3,7 +3,7 @@
 // test/smoke.test.mjs and DOES need the siblings.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { stripJsonc, BENIGN, deployApp, removeApp } from '../lib/runtime.mjs';
+import { stripJsonc, LOCAL_BENIGN, benignRules, deployApp, removeApp } from '../lib/runtime.mjs';
 import { parseCapabilities, searchCapabilities } from '../lib/capabilities.mjs';
 import { parseExamples, searchExamples, catalogueEntries, CATALOGUES } from '../lib/examples.mjs';
 import { CORPUS_DIRS, resolveLintConfig } from '../lib/repos.mjs';
@@ -276,11 +276,43 @@ test('readCached parses once per file version and re-parses on change', () => {
 
 // ------------------------------------------------------- BENIGN filter ----
 
-test('BENIGN patterns match known console noise and not real errors', () => {
-  const noise = BENIGN.some((re) => re.test('Failed to load resource: favicon.ico 404'));
-  const real = BENIGN.some((re) => re.test("TypeError: Cannot read properties of undefined (reading 'getModel')"));
+test('the vendored BENIGN patterns match known console noise and not real errors', () => {
+  const noise = LOCAL_BENIGN.some((re) => re.test('Failed to load resource: favicon.ico 404'));
+  const real = LOCAL_BENIGN.some((re) => re.test("TypeError: Cannot read properties of undefined (reading 'getModel')"));
   assert.equal(noise, true); // known console noise is filtered
   assert.equal(real, false); // a real JS error is never swallowed
+});
+
+/* benignRules resolves the canonical list from the corpus PER CALL - it used
+ * to be frozen at module load, so a corpus checked out after server start was
+ * silently missed until a restart. */
+test('benignRules reads the corpus list live and falls back to the vendored copy', async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-benign-'));
+  const corpus = path.join(base, 'ai-demokit');
+  const saved = { demokit: process.env.AI_DEMOKIT_HOME, corpusHome: process.env.SAMPLES_CONTROLS_HOME };
+  process.env.AI_DEMOKIT_HOME = corpus;
+  process.env.SAMPLES_CONTROLS_HOME = '';
+  try {
+    // no corpus at all: the vendored copy applies
+    assert.deepEqual(await benignRules(), LOCAL_BENIGN);
+    // the corpus appears AFTER "server start" - no restart needed
+    fs.mkdirSync(path.join(corpus, 'scripts'), { recursive: true });
+    fs.writeFileSync(path.join(corpus, 'scripts', 'e2e-build.mjs'), '');
+    assert.deepEqual(await benignRules(), LOCAL_BENIGN, 'a corpus without lib-smoke.mjs still answers');
+    fs.writeFileSync(
+      path.join(corpus, 'scripts', 'lib-smoke.mjs'),
+      'export const BENIGN = [/canonical-noise/];',
+    );
+    const live = await benignRules();
+    assert.equal(live.length, 1);
+    assert.match('canonical-noise here', live[0]);
+  } finally {
+    if (saved.demokit === undefined) delete process.env.AI_DEMOKIT_HOME;
+    else process.env.AI_DEMOKIT_HOME = saved.demokit;
+    if (saved.corpusHome === undefined) delete process.env.SAMPLES_CONTROLS_HOME;
+    else process.env.SAMPLES_CONTROLS_HOME = saved.corpusHome;
+    fs.rmSync(base, { recursive: true, force: true });
+  }
 });
 
 // ----------------------------------------------------------- repo naming ----
