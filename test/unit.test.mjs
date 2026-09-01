@@ -13,6 +13,7 @@ import { parseApi, searchApi, apiSummary } from '../lib/api.mjs';
 import { searchDocs } from '../lib/docs.mjs';
 import { parseSizes } from '../lib/screenshot.mjs';
 import { oneOf, boundedInt, stringArray } from '../lib/args.mjs';
+import { readCached } from '../lib/cache.mjs';
 import { scaffold, rename, validClassName, templateFiles, readSpec } from '../lib/scaffold.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -234,6 +235,42 @@ test('a wider namespace is still no way out of the dev sandbox', () => {
   ]) {
     assert.throws(() => deployApp({ className: escape, source: 'x' }), /invalid class name/, `deploy '${escape}'`);
     assert.throws(() => removeApp(escape), /invalid class name/, `remove '${escape}'`);
+  }
+});
+
+// ------------------------------------------------------ mtime file cache ----
+
+/* The live-read contract, made affordable: a parse is cached under
+ * (path, mtimeMs, size), so an unchanged file costs a stat and a CHANGED file
+ * - a git pull, an edit - invalidates itself. No TTL, no manual flush. */
+test('readCached parses once per file version and re-parses on change', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-cache-'));
+  const file = path.join(dir, 'doc.md');
+  try {
+    fs.writeFileSync(file, 'one');
+    let parses = 0;
+    const parse = (text) => { parses++; return text.toUpperCase(); };
+    assert.equal(readCached(file, parse), 'ONE');
+    assert.equal(readCached(file, parse), 'ONE');
+    assert.equal(parses, 1, 'an unchanged file is parsed once');
+
+    // same size, different mtime - an edit that touched the timestamp
+    fs.utimesSync(file, new Date(Date.now() - 5000), new Date(Date.now() - 5000));
+    assert.equal(readCached(file, parse), 'ONE');
+    assert.equal(parses, 2, 'a changed mtime invalidates');
+
+    // changed content (size differs) with whatever mtime the write produced
+    fs.writeFileSync(file, 'two three');
+    assert.equal(readCached(file, parse), 'TWO THREE');
+    assert.equal(parses, 3, 'changed content is re-parsed');
+    assert.equal(readCached(file, parse), 'TWO THREE');
+    assert.equal(parses, 3);
+
+    // a file that cannot be statted throws what fs throws - the caller keeps
+    // its own existsSync semantics, nothing broken lands in the cache
+    assert.throws(() => readCached(path.join(dir, 'missing.md'), parse), /ENOENT/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 

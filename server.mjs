@@ -44,7 +44,7 @@ import { searchCapabilities, capabilitySummary } from './lib/capabilities.mjs';
 import { searchExamples, exampleSummary, catalogueFiles } from './lib/examples.mjs';
 import { searchPitfalls } from './lib/pitfalls.mjs';
 import { readGuide, sliceGuide, guideChapters, guideFile, GUIDE_PATH } from './lib/guide.mjs';
-import { readApi, parseApi, searchApi, apiSummary, apiFile, API_PATH } from './lib/api.mjs';
+import { readApiParsed, searchApi, apiSummary, apiFile, API_PATH } from './lib/api.mjs';
 import { parseSizes, screenshotSource } from './lib/screenshot.mjs';
 import { resolveSamplesControls, resolveAppTemplate, importViewCheck, resolveLintConfig, SERVER_ROOT } from './lib/repos.mjs';
 import { searchDocs, docsRoot } from './lib/docs.mjs';
@@ -307,15 +307,15 @@ async function handle(name, args = {}, ctx = {}) {
       // the client API is an interface in the framework sources
       const miss = missingSibling('abap2UI5');
       if (miss) return miss;
-      const raw = readApi();
-      if (raw === null) {
+      const api = readApiParsed();
+      if (api === null) {
         return toolError(`the abap2UI5 checkout has no ${API_PATH.join('/')} (looked in ${apiFile()}) — `
           + 'update it (git pull); the client API lives there');
       }
       const kind = oneOf(args.kind, {
         name: 'kind', allowed: ['methods', 'constants', 'types', 'all'], dflt: 'all',
       });
-      const parsed = parseApi(raw);
+      const parsed = api.parsed;
       // empty groups are omitted rather than sent as [], so a narrowed answer
       // is exactly as wide as what it found
       const pick = (r) => ({
