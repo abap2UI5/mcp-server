@@ -112,6 +112,17 @@ test('every sibling-dependent tool degrades with an actionable error when the ch
       expectMissing(r, SANDBOX, 'SAMPLES_CONTROLS_HOME');
       assert.match(r.content[0].text, /A2UI5_HOME/, 'the sandbox message names the framework env var too');
     }
+    /* verify_app composes the stages: without a linter the validate stage
+     * is SKIPPED (said so), and the deploy stage is where it stops - with the
+     * sandbox message, and everything before it in the report. */
+    const verify = await call('verify_app', { class_name: 'zcl_demo', abap_source: 'CLASS zcl_demo DEFINITION. INTERFACES z2ui5_if_app.' });
+    const vr = JSON.parse(verify.content[0].text);
+    assert.equal(vr.ok, false);
+    assert.equal(vr.stoppedAt, 'deploy');
+    assert.match(vr.stages.validate.skipped, /linter checkout not found/);
+    assert.equal(vr.stages.deploy.ok, false);
+    assert.match(vr.stages.deploy.text, SANDBOX);
+    assert.equal(vr.stages.build, undefined, 'nothing after the failing stage runs');
     // auto with A2UI5_HOME set to nowhere: no clone (the env var is authoritative), so full - the corpus
     expectMissing(await call('build_backend', {}), CORPUS, 'SAMPLES_CONTROLS_HOME');
     expectMissing(await call('build_backend', { mode: 'full' }), CORPUS, 'SAMPLES_CONTROLS_HOME');

@@ -815,6 +815,57 @@ async function handle(name, args = {}, ctx = {}) {
       if (!res.ok) return toolError(`build failed (exit ${res.code}, mode ${res.mode || mode}):\n${res.tail}`);
       return text({ built: true, mode: res.mode, next: 'run_app { class_name } to boot and screenshot the app', tail: res.tail.split('\n').slice(-5).join('\n') });
     }
+    case 'verify_app': {
+      /* Composed out of the single tools' handlers, so a stage answers
+       * exactly what its tool answers and there is one implementation of
+       * each. A stage's tool error is the stage's failure; the loop stops
+       * there, and everything before it stays in the report. */
+      const stages = {};
+      const result = (label, r) => {
+        const text = r.content && r.content.find((c) => c.type === 'text');
+        let parsed;
+        try {
+          parsed = text ? JSON.parse(text.text) : null;
+        } catch {
+          parsed = text ? { text: text.text } : null;
+        }
+        stages[label] = { ok: !r.isError, ...(parsed && typeof parsed === 'object' ? parsed : { text: parsed }) };
+        return !r.isError;
+      };
+      const done = (stoppedAt, extra) => text({ ok: !stoppedAt, ...(stoppedAt ? { stoppedAt } : {}), stages, ...(extra || {}) });
+      // 1. validate - skipped, not failed, without a linter checkout
+      if (missingSiblingMessage('linter')) {
+        stages.validate = { skipped: missingSiblingMessage('linter') };
+      } else {
+        const v = await handle('validate_view', { abap_source: args.abap_source, render: args.render, project_dir: args.project_dir, explain: true }, ctx);
+        const vok = result('validate', v);
+        if (!vok || stages.validate.ok === false) return done('validate');
+      }
+      // 2. deploy (+ lint)
+      const d = await handle('deploy_app', { class_name: args.class_name, abap_source: args.abap_source, testclasses: args.testclasses, description: args.description }, ctx);
+      if (!result('deploy', d) || (stages.deploy.lint && stages.deploy.lint.ok === false)) return done('deploy');
+      // 3. build
+      const b = await handle('build_backend', { mode: 'auto' }, ctx);
+      if (!result('build', b)) return done('build');
+      // 4. unit, when there are tests
+      if (typeof args.testclasses === 'string' && args.testclasses.trim()) {
+        const u = await handle('run_unit_tests', { class_name: args.class_name }, ctx);
+        if (!result('unit', u) || stages.unit.ok === false) return done('unit');
+      } else {
+        stages.unit = { skipped: 'no testclasses given' };
+      }
+      // 5. boot
+      if (args.boot === false) {
+        stages.boot = { skipped: 'boot: false' };
+        return done(null);
+      }
+      const r = await handle('run_app', { class_name: args.class_name, timeout_ms: args.timeout_ms }, ctx);
+      const rok = result('boot', r);
+      const image = r.content && r.content.find((c) => c.type === 'image');
+      const reply = done(rok && stages.boot.ok !== false ? null : 'boot');
+      if (image) reply.content.push(image);
+      return reply;
+    }
     case 'setup_status': {
       // reads only: what resolves, what is built, what is missing and why
       return text(setupStatus());
@@ -890,7 +941,8 @@ async function handle(name, args = {}, ctx = {}) {
       const miss = missingLocalSibling('abap2UI5');
       if (miss) return miss;
       const report = progressReporter(ctx);
-      const res = await runUnitTests({ className: args.class_name, signal: ctx.signal, onLine: report });
+      const classNames = args.class_names === undefined ? undefined : stringArray(args.class_names, { name: 'class_names' });
+      const res = await runUnitTests({ className: args.class_name, classNames, signal: ctx.signal, onLine: report });
       if (res.aborted || res.timedOut) return toolError(res.error);
       if (res.class && res.tests.length === 0) {
         return text({

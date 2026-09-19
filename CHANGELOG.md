@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **Unit tests in CI, without a system.** `scripts/ci-unit.mjs` — shipped as
+  the bin `abap2ui5-unit` and wrapped by `action.yml` as the composite GitHub
+  Action `abap2UI5/mcp-server@v0` — clones the framework at the release the
+  project's `abaplint.jsonc` pins, gets its backend (the release asset, or
+  the framework's own build), deploys every class under `src` with its test
+  include into the framework sandbox, transpiles once and runs the tests
+  through the generated runner filtered to those classes; a step summary
+  names every test method and the first failure. Measured against
+  app-template's starter app: 17 s with a built framework next door.
+- **New tool `verify_app`.** Validate, deploy, build, unit and boot in one
+  call, stopping at the first failing stage; `stages` carries every result,
+  `stoppedAt` the stage to read.
+- **`build_backend` mode `transpile`.** The framework's own build in its
+  checkout (`npm run downport` + `auto_transpile`, a few minutes, no corpus)
+  — what `auto` falls back to when the release carries no prebuilt asset
+  yet, said in the log. `run_unit_tests` takes `class_names` for several
+  classes in one run.
+
 - **The whole loop with one checkout, or none.** The dev sandbox has a second
   home: with no samples-controls checkout, `deploy_app` writes into the
   abap2UI5 checkout's `node/zz_dev` and lints with app-template's own

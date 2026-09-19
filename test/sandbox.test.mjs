@@ -139,3 +139,63 @@ test('setupStatus reports the framework sandbox and the fake checkout', withFake
   assert.equal(st.backend.cloneTarget, frameworkCloneDir());
   assert.ok(st.settings.timeouts.A2UI5_MCP_UNIT_TIMEOUT_MS > 0);
 }));
+
+// ------------------------------------------------------ the CI unit runner ----
+
+import { frameworkPinOf, collectClasses, parseArgs, renderSummary } from '../scripts/ci-unit.mjs';
+import { filteredRunner, RUNNER_LOOP } from '../lib/runtime.mjs';
+
+test('the CI runner reads the project\'s framework pin, collects classes with their test includes, and renders', () => {
+  assert.equal(frameworkPinOf('{ "dependencies": [ { "url": "https://github.com/abap2UI5/abap2UI5", "branch": "1.144.0", "files": "/src/**/*.*" } ] }'), '1.144.0');
+  assert.equal(frameworkPinOf('{ "dependencies": [ { "url": "https://github.com/abap2UI5/abap2UI5.git", "branch": "main" } ] }'), null, 'a branch name is not a release pin');
+  assert.equal(frameworkPinOf('{ "dependencies": [ { "url": "https://github.com/other/repo", "branch": "1.0.0" } ] }'), null);
+  assert.equal(frameworkPinOf('not json'), null);
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-ci-unit-'));
+  try {
+    fs.mkdirSync(path.join(root, 'src', 'sub'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'src', 'zcl_a.clas.abap'), 'CLASS zcl_a');
+    fs.writeFileSync(path.join(root, 'src', 'zcl_a.clas.testclasses.abap'), 'CLASS ltcl FOR TESTING');
+    fs.writeFileSync(path.join(root, 'src', 'zcl_a.clas.xml'), '<x/>');
+    fs.writeFileSync(path.join(root, 'src', 'sub', 'zcl_b.clas.abap'), 'CLASS zcl_b');
+    fs.writeFileSync(path.join(root, 'src', 'zif_x.intf.abap'), 'INTERFACE');
+    const classes = collectClasses([path.join(root, 'src')]).sort((a, b) => a.cls.localeCompare(b.cls));
+    assert.deepEqual(classes.map((c) => [c.cls, Boolean(c.testclasses)]), [['zcl_a', true], ['zcl_b', false]]);
+    assert.equal(classes[0].testclasses, 'CLASS ltcl FOR TESTING');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+
+  const opts = parseArgs(['src', 'more', '--class', 'ZCL_A', '--framework', '1.144.0', '--json', '--keep']);
+  assert.deepEqual(opts.paths, ['src', 'more']);
+  assert.deepEqual(opts.classes, ['zcl_a']);
+  assert.equal(opts.framework, '1.144.0');
+  assert.equal(opts.json && opts.keep, true);
+  assert.deepEqual(parseArgs([]).paths, ['src']);
+  assert.throws(() => parseArgs(['--framework']), /needs a value/);
+  assert.throws(() => parseArgs(['--bogus']), /unknown option/);
+
+  const md = renderSummary({
+    framework: '1.144.0',
+    mode: 'incremental',
+    results: [
+      { cls: 'zcl_a', testclasses: true, tests: [{ localClass: 'ltcl', method: 'ok_one' }, { localClass: 'ltcl', method: 'bad_one' }], failed: { localClass: 'ltcl', method: 'bad_one', error: 'Error: boom' } },
+      { cls: 'zcl_b', testclasses: false },
+      { cls: 'zcl_c', testclasses: true, deployError: 'source does not implement z2ui5_if_app' },
+    ],
+  });
+  assert.match(md, /## abap2UI5 unit tests \(framework 1\.144\.0, backend: incremental\)/);
+  assert.match(md, /- ok  ZCL_A ltcl->ok_one/);
+  assert.match(md, /- \*\*FAIL\*\*  ZCL_A ltcl->bad_one/);
+  assert.match(md, /Error: boom/);
+  assert.match(md, /ZCL_B: no test include/);
+  assert.match(md, /ZCL_C\*\*: not deployed - source does not implement/);
+  assert.match(md, /2 test method\(s\) ran, 2 class\(es\) failing/);
+});
+
+test('filteredRunner narrows the generated runner to the named objects, or refuses an unknown shape', () => {
+  const src = `import "./init.mjs";\nasync function run() {\n  ${RUNNER_LOOP}\n  }\n}`;
+  const out = filteredRunner(src, ['zcl_a', 'ZCL_B']);
+  assert.match(out, /getData\(\)\.filter\(\(st\) => \["ZCL_A","ZCL_B"\]\.includes\(st\.objectName\)\)/);
+  assert.equal(filteredRunner('for (const x of getData()) {', ['zcl_a']), null);
+});

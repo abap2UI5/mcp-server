@@ -162,6 +162,43 @@ What still needs the corpus: `scope_of` (its script and the OpenUI5 checkout),
 `generation_rules` and `capabilities` (mirrored when absent), and
 `build_backend` mode `full`.
 
+**`build_backend` mode `transpile`** is the framework's own build
+(`transpileFramework`: `npm ci` when the checkout has no node_modules, then
+`npm run downport` and `npm run auto_transpile` in it) — what the release
+workflow runs to make the asset, run here for a checkout no asset exists for.
+Measured: 2 min 16 s on this machine. `auto` takes it when the prebuilt
+download answers 404, announced in the log; an explicit `prebuilt` does not.
+
+**`verify_app`** is the loop as ONE call, composed in `server.mjs` out of the
+single tools' handlers (`handle('validate_view', …)` and so on — one
+implementation per stage, never a second): validate, deploy, build, unit (when
+test classes were given), boot; the first failing stage stops it, everything
+before it stays in `stages`, `stoppedAt` names it, and a missing linter skips
+the validate stage rather than failing it.
+
+### The CI runner — `scripts/ci-unit.mjs`, `action.yml`, the `abap2ui5-unit` bin
+
+The same code as the tools, for a repository's CI and for a terminal: the
+framework at the release the PROJECT pins (the `branch` of the abap2UI5
+dependency in its `abaplint.jsonc` — the framework its lint already assumes),
+cloned into the workspace when no checkout is there; the backend by
+`buildBackend` mode `auto`; every `*.clas.abap` under the paths deployed into
+the framework sandbox with its `*.clas.testclasses.abap`; one incremental
+transpile; `runUnitTests({ classNames })` over the classes that carry tests
+(the generated runner is filtered to the SET — `filteredRunner`); a markdown
+summary, also into `GITHUB_STEP_SUMMARY`. Exit 1 on a failing test, 2 on a
+build or transpile failure. `action.yml` at the repository root wraps it as a
+composite GitHub Action (`abap2UI5/mcp-server@v0`) with the framework clone
+and its backend cached per pin under `~/.abap2ui5-mcp`; `package.json` ships
+the script as the second bin, so `npx -p @abap2ui5/mcp-server abap2ui5-unit
+src` is the local form. app-template's `check.yml` runs the action and its
+`npm run test:unit` the bin — that job and that script are consumers of this
+contract: the action's inputs (`paths`, `framework`, `node-version`), the
+bin's name and its exit codes. `test/sandbox.test.mjs` pins the pure half
+(the pin reader, the class collector, the argument parser, the summary,
+`filteredRunner`); the whole run was measured against app-template's starter
+app: 17 s with a built framework next door, its three tests green.
+
 A missing checkout degrades **per tool** (the server still starts;
 `resolve*` returns null and the affected tool returns a uniform, actionable
 error — which repo, how to clone it, which env var; the repo-and-hint table is
@@ -295,9 +332,9 @@ agent) find these artifacts in a dirty sibling worktree, mcp-server caused them:
   — the dev sandbox when there is no corpus checkout (gitignored there;
   `remove_app` deletes them again), and `<abap2UI5>/.abaplint-mcp-dev.jsonc`
   while a lint of it runs (removed in a `finally`, queued like the corpus one).
-- `<abap2UI5>/node/output/index-mcp-<class>.mjs` — the filtered copy of the
-  unit-test runner `run_unit_tests` writes for one class, removed in a
-  `finally`.
+- `<abap2UI5>/node/output/index-mcp-<class>.mjs` (or `index-mcp-selection.mjs`
+  for several classes) — the filtered copy of the unit-test runner
+  `run_unit_tests` writes, removed in a `finally`.
 - `~/.abap2ui5-mcp/abap2UI5` (`A2UI5_MCP_WORKSPACE`) — the framework clone
   `build_backend` mode `prebuilt` makes when no checkout is there at all: a
   real checkout with its npm install and its unpacked backend.

@@ -132,10 +132,13 @@ checkout is missing answers with the clone command and env var that fix it.
 | `run_app` | Boot an app headless: status, real page errors, and a **screenshot** | abap2UI5 (samples-controls serves UI5 locally when present; the CDN otherwise) |
 | `interact_app` | Boot an app, then click, fill, press and wait through a short script — the **event branch**, photographed | abap2UI5 (same as run_app) |
 | `run_unit_tests` | Run the deployed test classes (or the whole transpiled tree) in the open-abap runtime: assertions, not pictures | abap2UI5 |
+| `verify_app` | The whole loop in one call — validate, deploy, build, unit, boot — stopping at the first stage that fails | what the stages need |
 | `backend` | `status` / `start` / `stop` / `restart` of the local express backend | abap2UI5 (start/restart; status and stop always work) |
 | `remove_app` | Delete a dev app from the sandbox, or list the deployed ones | the sandbox's checkout |
 
-`interact_app` is `run_app` with hands: after the boot it clicks, fills and
+`verify_app` is the loop in one call: validate, deploy, build, unit tests and
+boot, stopping at the first stage that fails and reporting every stage before
+it. `interact_app` is `run_app` with hands: after the boot it clicks, fills and
 presses through a short script and photographs the result, which is how the
 event branch of an app becomes visible without a system; `run_unit_tests`
 runs the test classes `deploy_app` wrote beside the app (a local
@@ -153,6 +156,31 @@ before that file existed. `screenshot_view` and `run_app` answer the
 same question at three orders of magnitude apart: the first photographs the
 reconstructed **view** with no backend, the second the **running app** after a
 build. Most iterations should end at the first.
+
+## Unit tests in CI, without a system
+
+The same runtime runs an app repository's ABAP Unit tests in GitHub Actions
+(or at a terminal): the framework at the release the project's `abaplint.jsonc`
+pins, its backend downloaded or built once and cached, the classes transpiled
+into it, the tests run through the generated runner.
+
+```yaml
+- uses: abap2UI5/mcp-server@v0
+  with:
+    paths: src
+```
+
+```sh
+npx -p @abap2ui5/mcp-server abap2ui5-unit src     # the same, locally
+```
+
+The result is the job's verdict plus a step summary naming every test method
+and the first failure. [app-template](https://github.com/abap2UI5/app-template)
+ships the job in its `check.yml` and the command as `npm run test:unit`. What
+the runner cannot see is what the open-abap runtime cannot model (see
+`pitfalls`, area `abap`); a test that passes here passes on the system short of
+that, and a `PARTIALLY IMPLEMENTED` test double has to implement every method
+the code under test calls, because the runtime generates no empty stubs.
 
 ## Resources
 
