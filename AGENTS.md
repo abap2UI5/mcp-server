@@ -54,13 +54,64 @@ so `scope_of` needs it as much as it needs the corpus. It used to be named
 only inside that tool's description in `lib/tools.mjs`, which is the one place
 a maintainer setting a machine up does not look.
 
-Also: `A2UI5_MCP_PORT`, `A2UI5_MCP_OFFLINE=1` (no CDN fallback for UI5),
-`A2UI5_MCP_CHROMIUM` (browser path), `A2UI5_MCP_SCREENSHOT_DIR` (where
-`run_app` writes its PNGs; default `<tmp>/abap2ui5-mcp-screenshots`, and
-deliberately not the install directory — that is inside `node_modules` for an
-npx/npm install), and the child-process timeouts
-`A2UI5_MCP_LINT_TIMEOUT_MS` / `A2UI5_MCP_SCOPE_TIMEOUT_MS` (default 5 min)
-and `A2UI5_MCP_BUILD_TIMEOUT_MS` (default 30 min).
+Also: `A2UI5_MCP_PORT`, `A2UI5_MCP_OFFLINE=1` (no CDN fallback for UI5, and
+no GitHub mirror either), `A2UI5_MCP_CHROMIUM` (browser path),
+`A2UI5_MCP_SCREENSHOT_DIR` (where `run_app` and `interact_app` write their
+PNGs; default `<tmp>/abap2ui5-mcp-screenshots`, and deliberately not the
+install directory — that is inside `node_modules` for an npx/npm install),
+`A2UI5_MCP_PREBUILT_URL` (where `build_backend` mode `prebuilt` downloads
+from; default the framework release asset, see below), the mirror knobs
+`A2UI5_MCP_REMOTE=0` / `A2UI5_MCP_REMOTE_DIR` / `A2UI5_MCP_REMOTE_TTL_MS`
+(below), and the child-process timeouts `A2UI5_MCP_LINT_TIMEOUT_MS` /
+`A2UI5_MCP_SCOPE_TIMEOUT_MS` (default 5 min), `A2UI5_MCP_BUILD_TIMEOUT_MS`
+(default 30 min, also the prebuilt download) and `A2UI5_MCP_UNIT_TIMEOUT_MS`
+(default 10 min, the test runner).
+
+### The read-only GitHub mirror — the cheap half without any checkout
+
+The knowledge tools read committed FILES and nothing else: the guide, the
+interface, the two catalogues of pitfalls, the capability map, the porting
+brief, three sample catalogues, the docs tree, the template. None of that
+needs an npm install or a build, and yet every one of those tools was dead
+until three to six repositories had been cloned next to this one — in a fresh
+project that is the whole first hour. So `lib/remote.mjs` gives the cheap half
+a fallback: when NO local checkout resolves and NOTHING is configured, the
+files a tool reads are fetched from `raw.githubusercontent.com` (the docs tree
+listed through the repository tree API) into a per-user cache directory that
+looks like a checkout — same relative paths, plus a marker file
+`.abap2ui5-mirror.json` — and the resolvers hand that directory out as the
+repo. Every reader keeps reading files from a root; nothing is bundled or
+paraphrased; the copy is at most a day old (`A2UI5_MCP_REMOTE_TTL_MS`).
+`lib/repo-dirs.json` names the GitHub repository per key (the `a2ui5` entry
+exists for this — the framework's resolver used to carry its names as
+literals), `REMOTE_FILES` in `lib/remote.mjs` says which files each mirror
+carries, and `REMOTE_TOOLS` which tools trigger which mirror; `server.mjs`
+hydrates before the tool runs and before a resource read.
+
+Three rules, each pinned by `test/remote.test.mjs` and
+`test/missing-siblings.test.mjs`:
+
+- **A set env var stays authoritative.** `A2UI5_HOME=/nowhere` is a
+  misconfiguration to report, never to download around — the mirror is only
+  the answer to "nothing configured, nothing next to me", and the
+  missing-checkout message says so when an env var is the reason.
+- **The mirror is read-only, and the tools that write or build refuse it.**
+  `deploy_app`, `read_app`, `remove_app`, `scope_of`, `build_backend`,
+  `run_app`, `interact_app`, `run_unit_tests` and `backend start` resolve
+  with `{ local: true }` (`missingLocalSiblingMessage` in `lib/siblings.mjs`)
+  and answer a mirror with the clone command. `corpus()` and `a2Local()` in
+  `lib/runtime.mjs` are the two doors to the sandbox and the backend, and
+  both are local-only.
+- **A failed download degrades to what was there before.** With a cached
+  mirror the stale copy stands in (`stale: true`); without one the tool
+  degrades with its usual message plus the reason (`remoteStatus`). A
+  half-fetched mirror is never written: every file arrives first, then all of
+  them are written, then the marker.
+
+`read_example` is the tool that made the mirror worth having: an `examples`
+hit is a class name and a path, and an agent without the checkout could not
+read it. It fetches single files on demand (`fetchRemoteFile`, under the same
+path whitelist `safeRelPath`), from the checkout when there is one.
 
 A missing checkout degrades **per tool** (the server still starts;
 `resolve*` returns null and the affected tool returns a uniform, actionable
@@ -125,8 +176,19 @@ changes upstream, this repo must change in the same breath:
   fixed in samples-controls' `generate-samples-md` (rows now lead with the
   control entity, `| **sap.ui.table.Table** — Basic<br>…`); the row pattern
   reads both the old and the fixed shape, so pre-fix checkouts keep working.
-- abap2UI5 core: `node/srv/express.mjs`, `node/setup/abap_transpile.json`,
-  `node/downport/`, `node/output/init.mjs`, the two `.claude/skills/*-check/`
+- abap2UI5 core: `node/srv/express.mjs`, `node/setup/abap_transpile.json`
+  (its `libs[].folder` entries are what the incremental transpile checks for
+  under the checkout before it clones open-abap-core itself), `node/downport/`,
+  `node/output/init.mjs`, **`node/output/index.mjs`** (the transpiler's
+  generated unit-test runner — `run_unit_tests` filters it on the one loop
+  line `for (const st of getData()) {`, `RUNNER_LOOP` in `lib/runtime.mjs`;
+  a template change in `@abaplint/transpiler` costs the filter, reported, not
+  the run), the **release asset `backend-<version>.tar.gz`** with
+  `backend-manifest.json` at its root (packed by the framework's
+  `node/setup/pack-backend.mjs`, attached by `backend-prebuilt.yaml`; the
+  name, the three directories and the manifest are the contract
+  `downloadPrebuilt` reads — a rename over there is a failed download here,
+  reported by URL), the two `.claude/skills/*-check/`
   catalogues, and **`docs/agents/building-apps.md`** — the app-building guide
   `app_guide` serves. Its `## ` headings are the chapters that tool slices on;
   a rename of the file is a broken tool here (reported, not silent — the tool
@@ -167,11 +229,23 @@ changes upstream, this repo must change in the same breath:
 The server **writes into the sibling checkouts**. When you (or another
 agent) find these artifacts in a dirty sibling worktree, mcp-server caused them:
 
-- `<samples-controls>/src/zz_dev/*.clas.abap` + `.clas.xml` + `package.devc.xml` —
-  deployed dev apps (`remove_app` deletes them again).
+- `<samples-controls>/src/zz_dev/*.clas.abap` + `.clas.xml` (+
+  `.clas.testclasses.abap` when `deploy_app` was given `testclasses`) +
+  `package.devc.xml` — deployed dev apps (`remove_app` deletes them again).
 - `<abap2UI5>/e2e-transpile.json` — temporary incremental-build config
   (deleted on close).
-- `<abap2UI5>/node/` — a clone of `open-abap-core` during builds.
+- `<abap2UI5>/node/` — a clone of `open-abap-core` during builds; and, after
+  `build_backend` mode `prebuilt`, the unpacked release archive:
+  `node/downport`, `node/output`, `node/deps` plus `backend-manifest.json`
+  at the checkout root (the framework gitignores all four — its
+  `backend-prebuilt.yaml` workflow is what packs them).
+- `<abap2UI5>/node/output/index-mcp-<class>.mjs` — the filtered copy of the
+  unit-test runner `run_unit_tests` writes for one class, removed in a
+  `finally`.
+- `<tmp>/abap2ui5-mcp-remote/<repo>/` — the read-only GitHub mirrors (not a
+  sibling worktree, but the same question "where did this come from": a
+  directory that carries `.abap2ui5-mirror.json` is one, and deleting it is
+  always safe).
 
 `<samples-controls>/.abaplint-mcp-dev.jsonc` (the patched lint config for
 deployed dev apps, gitignored there) used to be on that list and is not any

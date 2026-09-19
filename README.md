@@ -76,6 +76,23 @@ A Claude Code started inside the checkout picks the server up automatically
 via the committed [`.mcp.json`](.mcp.json); the
 [devcontainer](.devcontainer/devcontainer.json) runs the same setup on create.
 
+**Level 0 — no checkout at all.** The knowledge tools (`app_guide`,
+`api_reference`, `pitfalls`, `capabilities`, `examples`, `read_example`,
+`docs_search`, `scaffold_app`, `generation_rules`) read committed files, so
+when no checkout resolves and no env var is set they read them from GitHub
+instead: the files land in a per-user cache (`<tmp>/abap2ui5-mcp-remote`, a
+day at a time) that the server treats as a read-only checkout. `npx --yes
+@abap2ui5/mcp-server` in a fresh project therefore answers the first questions
+at once; the tools that write or build (`deploy_app`, `build_backend`,
+`run_app`, …) still need the real checkouts and say so. `A2UI5_MCP_REMOTE=0`
+or `A2UI5_MCP_OFFLINE=1` switches the mirror off.
+
+**The backend without the tens-of-minutes build.** `build_backend` downloads
+the framework's released backend (`backend-<version>.tar.gz`, attached to each
+abap2UI5 release) into the abap2UI5 checkout the first time — a minute — and
+re-transpiles only the deployed apps afterwards. The full corpus build stays
+available as `mode: "full"` for a checkout on an unreleased commit.
+
 ## Tools
 
 Every tool reads live from a sibling checkout, and each one needs a specific
@@ -92,7 +109,8 @@ checkout is missing answers with the clone command and env var that fix it.
 | `app_guide` | How to build an app, live from the framework checkout | abap2UI5 |
 | `api_reference` | The client API (`z2ui5_if_client`) with its ABAP-Doc: methods, parameters, defaults, the `cs_*` constants | abap2UI5 |
 | `scaffold_app` | The files a new project starts from, live from app-template; `{ class: … }` renames throughout, sidecar `CLSNAME` included | app-template |
-| `examples` | Search the three sample catalogues, verification status and all — answers with a class to read, never a snippet to trust | any of samples / samples-controls / samples-stack |
+| `examples` | Search the three sample catalogues, verification status and all — answers with a class to read, never a snippet to trust | any of samples / samples-controls / samples-stack (or the GitHub mirror) |
+| `read_example` | Read the source of a sample an `examples` hit named — from the checkout, or fetched from GitHub | the sample's repository (or the GitHub mirror) |
 | `docs_search` | Full-text search over the documentation site's pages: page, heading, snippet and the published URL | docs |
 | `generation_rules` | The rulebook for porting a UI5 demo-kit sample into samples-controls | samples-controls |
 | `pitfalls` | The defects a green run does not catch: `{ area: "abap" }` and `{ area: "view" }` | abap2UI5 |
@@ -102,11 +120,20 @@ checkout is missing answers with the clone command and env var that fix it.
 | `screenshot_view` | See the view in seconds — no build, no backend | linter |
 | `deploy_app` | Write the class + abapGit sidecar into the gitignored sandbox, then abaplint it | samples-controls |
 | `read_app` | Read a deployed dev app's source back, and whether the built backend already carries it | samples-controls |
-| `build_backend` | Rebuild the transpiled Node backend; incremental after the first full build | samples-controls + abap2UI5 |
+| `build_backend` | Get the transpiled Node backend: `prebuilt` downloads the framework's released one (a minute), `incremental` re-transpiles the dev apps on top of it, `full` runs the corpus' e2e-build | abap2UI5 (`full` also needs samples-controls) |
 | `build_log` | Page through the last build's full output — the error the result's short tail cut off | nothing (reads the record the last build left) |
-| `run_app` | Boot an app headless: status, real page errors, and a **screenshot** | samples-controls + abap2UI5 |
+| `run_app` | Boot an app headless: status, real page errors, and a **screenshot** | abap2UI5 (samples-controls serves UI5 locally when present; the CDN otherwise) |
+| `interact_app` | Boot an app, then click, fill, press and wait through a short script — the **event branch**, photographed | abap2UI5 (same as run_app) |
+| `run_unit_tests` | Run the deployed test classes (or the whole transpiled tree) in the open-abap runtime: assertions, not pictures | abap2UI5 |
 | `backend` | `status` / `start` / `stop` / `restart` of the local express backend | abap2UI5 (start/restart; status and stop always work) |
 | `remove_app` | Delete a dev app from the sandbox, or list the deployed ones | samples-controls |
+
+`interact_app` is `run_app` with hands: after the boot it clicks, fills and
+presses through a short script and photographs the result, which is how the
+event branch of an app becomes visible without a system; `run_unit_tests`
+runs the test classes `deploy_app` wrote beside the app (a local
+`z2ui5_if_client` double, see the app guide's chapter 9) in the open-abap
+runtime and answers with assertions.
 
 `examples` degrades per catalogue instead of failing: it searches the
 checkouts it finds and names the ones it could not, so a thinner answer never

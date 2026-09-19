@@ -143,8 +143,24 @@ test('every sibling-dependent tool degrades with an actionable error when the ch
       'AI_VIEW_CHECK_HOME',
     );
 
-    // abap2UI5-backed tools (run_app checks samples-controls first — both missing here)
-    expectMissing(await call('run_app', { class_name: 'z2ui5_cl_demo' }), CORPUS, 'SAMPLES_CONTROLS_HOME');
+    // abap2UI5-backed tools: the backend lives there, and since the prebuilt
+    // backend exists the corpus is no longer a precondition of running an app
+    // (it only serves UI5 locally when it happens to be there)
+    const A2 = /abap2UI5 checkout not found/;
+    expectMissing(await call('run_app', { class_name: 'z2ui5_cl_demo' }), A2, 'A2UI5_HOME');
+    expectMissing(await call('interact_app', { class_name: 'z2ui5_cl_demo', actions: [{ action: 'click', text: 'Save' }] }), A2, 'A2UI5_HOME');
+    expectMissing(await call('run_unit_tests', {}), A2, 'A2UI5_HOME');
+    expectMissing(await call('run_unit_tests', { class_name: 'z2ui5_cl_demo' }), A2, 'A2UI5_HOME');
+    expectMissing(await call('build_backend', { mode: 'prebuilt' }), A2, 'A2UI5_HOME');
+    expectMissing(await call('build_backend', { mode: 'incremental' }), A2, 'A2UI5_HOME');
+    /* read_example: the catalogues are the three sample repositories, and
+     * with every env var pointing nowhere the mirror is not consulted either
+     * (a set env var is authoritative) - so a class lookup names them, and a
+     * repo + path names the one repository it was asked about. */
+    const byClass = await call('read_example', { class: 'Z2UI5_CL_SMP_APP_493' });
+    assert.equal(byClass.isError, true);
+    assert.match(byClass.content[0].text, /no sample class/);
+    expectMissing(await call('read_example', { repo: 'samples', path: 'src/01/z2ui5_cl_smp_app_493.clas.abap' }), /samples\/src\/01|could not be read/, 'SAMPLES|mirror|GitHub');
     // the pitfalls catalogues live in the abap2UI5 checkout, not in the corpus
     expectMissing(await call('pitfalls', {}), /abap2UI5 checkout not found/, 'A2UI5_HOME');
     expectMissing(await call('pitfalls', { area: 'view' }), /abap2UI5 checkout not found/, 'A2UI5_HOME');

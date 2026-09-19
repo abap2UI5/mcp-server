@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+- **The cheap half works without a single checkout.** When no local checkout
+  resolves and no env var is set, the knowledge tools (`app_guide`,
+  `api_reference`, `pitfalls`, `capabilities`, `examples`, `docs_search`,
+  `scaffold_app`, `generation_rules`) and the resources read their files from
+  GitHub into a per-user cache that the server treats as a read-only checkout
+  (`lib/remote.mjs`; a day old at most, `A2UI5_MCP_REMOTE=0` or
+  `A2UI5_MCP_OFFLINE=1` switch it off). A set env var stays authoritative and a
+  failed download degrades to the old message plus the reason. The tools that
+  write or build refuse the mirror with the clone command. `lib/repo-dirs.json`
+  gained the framework's own entry (`a2ui5`) for the mirror URL.
+- **New tool `read_example`.** The source of a sample an `examples` hit named,
+  by class or by repo + path — from the checkout, or fetched from GitHub.
+- **`build_backend` mode `prebuilt`, and `auto` uses it first.** The
+  framework's release workflow attaches `backend-<version>.tar.gz` to every
+  release; the server downloads and unpacks it into the abap2UI5 checkout in
+  about a minute instead of the tens-of-minutes full build, and needs only that
+  checkout for it. The incremental transpile now works on top of it (the
+  framework's own `node/deps` libraries are used when they are there; the
+  corpus-style clone and patch only otherwise). `run_app` no longer requires
+  samples-controls: UI5 comes from the CDN when the corpus is not there to
+  serve it locally. A failed download is reported, never turned into a full
+  build.
+- **New tool `interact_app`.** Boot an app, then click, fill, press and wait
+  through a short script and photograph the result — the event branch of
+  `main( )`, which no tool without a system could reach before. The first
+  failing action stops the script; the picture is still taken.
+- **New tool `run_unit_tests`, and `deploy_app` takes `testclasses`.** The
+  local test classes are written beside the app (the sidecar carries
+  `WITH_UNIT_TESTS`), transpiled by the next build, and run in the open-abap
+  runtime — filtered to the one class through the generated runner, or the
+  whole tree. `remove_app` and `read_app` know about the include.
+
 - **Three new tools.** `fix_view` applies the linter's mechanical fixes to a
   source and returns the corrected source (it writes nothing — the agent
   decides where it goes), reporting which findings were fixed and which

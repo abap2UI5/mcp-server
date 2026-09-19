@@ -164,7 +164,7 @@ test('buildBackend joins a same-mode call and fails fast on a conflicting mode',
       // rather than reporting an in-flight build)
       const after = await buildBackend({ mode: 'incremental' });
       assert.equal(after.inFlight, undefined);
-      assert.match(after.tail, /prior full build/);
+      assert.match(after.tail, /prior build/);
     },
   );
 });
