@@ -42,7 +42,7 @@ import {
   CompleteRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { searchCapabilities, capabilitySummary } from './lib/capabilities.mjs';
-import { searchExamples, exampleSummary, catalogueFiles } from './lib/examples.mjs';
+import { searchExamples, exampleSummary, catalogueFiles, findExample } from './lib/examples.mjs';
 import { searchPitfalls } from './lib/pitfalls.mjs';
 import { readGuide, sliceGuide, guideChapters, guideFile, GUIDE_PATH } from './lib/guide.mjs';
 import { readApiParsed, searchApi, apiSummary, apiFile, API_PATH } from './lib/api.mjs';
@@ -56,7 +56,9 @@ import { getRenderer, dropRenderer, closeRenderers, rendererLooksDead } from './
 import { TOOLS } from './lib/tools.mjs';
 import { RESOURCES, RESOURCE_TEMPLATES, GUIDE_CHAPTER_TEMPLATE, readResource } from './lib/resources.mjs';
 import { PROMPTS, getPrompt } from './lib/prompts.mjs';
-import { missingSiblingMessage } from './lib/siblings.mjs';
+import { missingSiblingMessage, missingLocalSiblingMessage } from './lib/siblings.mjs';
+import { hydrate, REMOTE_TOOLS, resourceRepos, fetchRemoteFile, isRemoteCheckout } from './lib/remote.mjs';
+import { resolveKey, RESOLVERS } from './lib/repos.mjs';
 import { oneOf, boundedInt, stringArray } from './lib/args.mjs';
 import {
   deployApp,
@@ -72,7 +74,12 @@ import {
   startBackend,
   stopBackend,
   runApp,
+  interactApp,
+  runUnitTests,
+  sandbox,
+  setupStatus,
 } from './lib/runtime.mjs';
+import { explicitEnv } from './lib/repos.mjs';
 
 function text(s) {
   return { content: [{ type: 'text', text: typeof s === 'string' ? s : JSON.stringify(s, null, 2) }] };
@@ -91,6 +98,35 @@ function toolError(message) {
 function missingSibling(...repos) {
   const msg = missingSiblingMessage(...repos);
   return msg ? toolError(msg) : null;
+}
+
+/* The same for a tool that WRITES into or BUILDS out of a checkout: the
+ * read-only GitHub mirror (lib/remote.mjs) that serves the knowledge tools
+ * is refused here, with the clone command, rather than written into. */
+function missingLocalSibling(...repos) {
+  const msg = missingLocalSiblingMessage(...repos);
+  return msg ? toolError(msg) : null;
+}
+
+/* The dev sandbox - the corpus' src/zz_dev, or the framework's node/zz_dev
+ * when there is no corpus (lib/runtime.mjs sandbox) - as a tool error when
+ * neither checkout is there. */
+function missingSandbox() {
+  try {
+    sandbox();
+    return null;
+  } catch (e) {
+    return toolError(String(e.message));
+  }
+}
+
+/* The mirror step: before a knowledge tool (or a resource read) runs, make
+ * sure every repository it reads is there - a local checkout, or the mirror
+ * fetched into the cache when nothing local resolves and nothing is
+ * configured. Never throws: a failed download leaves the tool to degrade with
+ * its usual message, which then also names the reason (lib/siblings.mjs). */
+async function hydrateRepos(keys) {
+  await Promise.all((keys || []).map((key) => hydrate(key, { local: resolveKey(key, { local: true }) })));
 }
 
 /* Throttled MCP progress from a long child's output: one
@@ -213,7 +249,7 @@ async function handle(name, args = {}, ctx = {}) {
           + missing.map((m) => `  ${m.repo}: ${m.why}`).join('\n'),
         );
       }
-      const searched = found.map((c) => c.repo);
+      const searched = found.map((c) => c.repo + (isRemoteCheckout(c.root) ? ' (GitHub mirror)' : ''));
       const notSearched = missing.map((m) => `${m.repo}: ${m.why}`);
       /* Both filters are checked before anything is read: an unknown repo or
        * area filters every entry away, and the empty result that produces is
@@ -244,6 +280,52 @@ async function handle(name, args = {}, ctx = {}) {
         repositories: Object.fromEntries(found.map((c) => [c.repo, c.url])),
         next: 'read the `path` of the closest match, in the repository its `repo` names — it is a complete, gated app, not a fragment',
         entries: hits,
+      });
+    }
+    case 'read_example': {
+      const KEY_OF = { samples: 'samples', 'samples-controls': 'corpus', 'samples-stack': 'samplesStack' };
+      let repo = args.repo;
+      let file = args.path;
+      if (args.class) {
+        await hydrateRepos(['samples', 'corpus', 'samplesStack']);
+        const hit = findExample(args.class);
+        if (!hit) {
+          return toolError(`no sample class '${args.class}' in the catalogues that could be read`
+            + ' — `examples` answers with the class names it knows; pass repo + path for a file the catalogues do not list');
+        }
+        repo = hit.repo;
+        file = hit.path;
+      }
+      repo = oneOf(repo, { name: 'repo', allowed: Object.keys(KEY_OF) });
+      if (!repo || !file) return toolError('pass `class` (a sample class name from `examples`), or `repo` and `path`');
+      if (typeof file !== 'string' || !/^src\/[A-Za-z0-9_./-]+\.(abap|xml|json|md)$/.test(file) || file.includes('..')) {
+        return toolError(`refusing path '${file}' — a sample lives under src/ of its repository (an .abap, .xml, .json or .md file), e.g. src/01/z2ui5_cl_smp_app_493.clas.abap`);
+      }
+      const key = KEY_OF[repo];
+      await hydrateRepos([key]);
+      const root = resolveKey(key);
+      let at;
+      let from;
+      if (root && !isRemoteCheckout(root) && fs.existsSync(path.join(root, file))) {
+        at = path.join(root, file);
+        from = root;
+      } else {
+        try {
+          at = await fetchRemoteFile(key, file);
+          from = 'GitHub (read-only mirror)';
+        } catch (e) {
+          return toolError(`${repo}/${file} could not be read — ${String(e.message)}`
+            + (root ? `; the checkout at ${root} does not have it either (git pull?)` : ''));
+        }
+      }
+      const source = fs.readFileSync(at, 'utf8');
+      return text({
+        repo,
+        path: file,
+        from,
+        lines: source.split('\n').length,
+        source,
+        next: 'take the pattern, not the file: an app of your own keeps its own class name, package and events (app_guide chapter 2)',
       });
     }
     case 'app_guide': {
@@ -433,7 +515,7 @@ async function handle(name, args = {}, ctx = {}) {
       return text({ matches: total, catalogues: found });
     }
     case 'scope_of': {
-      const miss = missingSibling('samples-controls');
+      const miss = missingLocalSibling('samples-controls');
       if (miss) return miss;
       if (args.entities === undefined || args.entities === null) {
         return toolError('pass at least one entity, e.g. ["sap.m.Wizard"]');
@@ -447,14 +529,15 @@ async function handle(name, args = {}, ctx = {}) {
       return text(`${out}\n\n(exit ${code}: 0 = all in scope, 1 = at least one out of scope or unresolved)`);
     }
     case 'deploy_app': {
-      const miss = missingSibling('samples-controls');
+      const miss = missingSandbox();
       if (miss) return miss;
       const res = deployApp({
         className: args.class_name,
         source: args.abap_source,
         description: args.description,
+        testclasses: args.testclasses,
       });
-      const reply = { deployed: res.class, file: res.abapPath };
+      const reply = { deployed: res.class, file: res.abapPath, ...(res.testclassesPath ? { testclasses: res.testclassesPath } : {}) };
       if (args.lint !== false) {
         /* Progress around the lint when the client asked for it: abaplint can
          * take a minute over the whole corpus and prints nothing until its
@@ -474,12 +557,14 @@ async function handle(name, args = {}, ctx = {}) {
         }
       }
       if (!reply.lint || reply.lint.ok) {
-        reply.next = 'run build_backend once, then run_app to see the app';
+        reply.next = res.testclassesPath
+          ? 'run build_backend once, then run_app to see the app and run_unit_tests to run its tests'
+          : 'run build_backend once, then run_app to see the app';
       }
       return text(reply);
     }
     case 'read_app': {
-      const miss = missingSibling('samples-controls');
+      const miss = missingSandbox();
       if (miss) return miss;
       const res = readAppSource(args.class_name);
       if (!res.found) {
@@ -704,23 +789,86 @@ async function handle(name, args = {}, ctx = {}) {
       return { content, isError: !taken.length };
     }
     case 'build_backend': {
-      // the build pipeline lives in samples-controls; the abap2UI5 checkout is
-      // resolved (and clearly reported) by the build itself, which can also
-      // bootstrap the in-repo .abap2UI5 clone on a full build
-      const miss = missingSibling('samples-controls');
-      if (miss) return miss;
       /* Checked BEFORE the running backend is stopped and before a build is
        * started: an unrecognised mode used to fall through to the auto branch,
        * and a typo therefore cost a full build - tens of minutes - instead of
        * a sentence. */
       const mode = oneOf(args.mode, {
-        name: 'mode', allowed: ['auto', 'incremental', 'full'], dflt: 'auto',
+        name: 'mode', allowed: ['auto', 'incremental', 'prebuilt', 'transpile', 'full'], dflt: 'auto',
       });
+      /* Which checkout a build needs depends on the mode: the full e2e-build
+       * is the corpus' script (and can bootstrap the in-repo .abap2UI5 clone);
+       * prebuilt and incremental work inside the abap2UI5 checkout alone. The
+       * build itself reports the rest (a missing prior build, a failed
+       * download) in its tail. */
+      const a2 = resolveKey('a2ui5', { local: true });
+      /* prebuilt (and auto without a prior build) can CLONE the framework
+       * when nothing is there and nothing is configured; a set A2UI5_HOME
+       * that points nowhere is reported instead. full is the corpus' script. */
+      const cloneable = !a2 && !explicitEnv('a2ui5') && (mode === 'prebuilt' || mode === 'auto');
+      const needsCorpus = mode === 'full' || (mode === 'auto' && !a2 && !cloneable);
+      const miss = needsCorpus ? missingLocalSibling('samples-controls') : (cloneable ? null : missingLocalSibling('abap2UI5'));
+      if (miss) return miss;
       await stopBackend();
       const res = await buildBackend({ mode, onLine: progressReporter(ctx), signal: ctx.signal });
       if (res.aborted) return toolError(`build cancelled by the client (mode ${res.mode || mode}):\n${res.tail}`);
       if (!res.ok) return toolError(`build failed (exit ${res.code}, mode ${res.mode || mode}):\n${res.tail}`);
       return text({ built: true, mode: res.mode, next: 'run_app { class_name } to boot and screenshot the app', tail: res.tail.split('\n').slice(-5).join('\n') });
+    }
+    case 'verify_app': {
+      /* Composed out of the single tools' handlers, so a stage answers
+       * exactly what its tool answers and there is one implementation of
+       * each. A stage's tool error is the stage's failure; the loop stops
+       * there, and everything before it stays in the report. */
+      const stages = {};
+      const result = (label, r) => {
+        const text = r.content && r.content.find((c) => c.type === 'text');
+        let parsed;
+        try {
+          parsed = text ? JSON.parse(text.text) : null;
+        } catch {
+          parsed = text ? { text: text.text } : null;
+        }
+        stages[label] = { ok: !r.isError, ...(parsed && typeof parsed === 'object' ? parsed : { text: parsed }) };
+        return !r.isError;
+      };
+      const done = (stoppedAt, extra) => text({ ok: !stoppedAt, ...(stoppedAt ? { stoppedAt } : {}), stages, ...(extra || {}) });
+      // 1. validate - skipped, not failed, without a linter checkout
+      if (missingSiblingMessage('linter')) {
+        stages.validate = { skipped: missingSiblingMessage('linter') };
+      } else {
+        const v = await handle('validate_view', { abap_source: args.abap_source, render: args.render, project_dir: args.project_dir, explain: true }, ctx);
+        const vok = result('validate', v);
+        if (!vok || stages.validate.ok === false) return done('validate');
+      }
+      // 2. deploy (+ lint)
+      const d = await handle('deploy_app', { class_name: args.class_name, abap_source: args.abap_source, testclasses: args.testclasses, description: args.description }, ctx);
+      if (!result('deploy', d) || (stages.deploy.lint && stages.deploy.lint.ok === false)) return done('deploy');
+      // 3. build
+      const b = await handle('build_backend', { mode: 'auto' }, ctx);
+      if (!result('build', b)) return done('build');
+      // 4. unit, when there are tests
+      if (typeof args.testclasses === 'string' && args.testclasses.trim()) {
+        const u = await handle('run_unit_tests', { class_name: args.class_name }, ctx);
+        if (!result('unit', u) || stages.unit.ok === false) return done('unit');
+      } else {
+        stages.unit = { skipped: 'no testclasses given' };
+      }
+      // 5. boot
+      if (args.boot === false) {
+        stages.boot = { skipped: 'boot: false' };
+        return done(null);
+      }
+      const r = await handle('run_app', { class_name: args.class_name, timeout_ms: args.timeout_ms }, ctx);
+      const rok = result('boot', r);
+      const image = r.content && r.content.find((c) => c.type === 'image');
+      const reply = done(rok && stages.boot.ok !== false ? null : 'boot');
+      if (image) reply.content.push(image);
+      return reply;
+    }
+    case 'setup_status': {
+      // reads only: what resolves, what is built, what is missing and why
+      return text(setupStatus());
     }
     case 'build_log': {
       // no sibling needed: this reads the record the last build left behind
@@ -737,8 +885,9 @@ async function handle(name, args = {}, ctx = {}) {
       return text(log);
     }
     case 'run_app': {
-      // samples-controls serves the local @openui5 modules, abap2UI5 the backend
-      const miss = missingSibling('samples-controls', 'abap2UI5');
+      // abap2UI5 carries the backend; samples-controls, when it is there,
+      // serves the local @openui5 modules (the CDN otherwise)
+      const miss = missingLocalSibling('abap2UI5');
       if (miss) return miss;
       /* Bounded: the boot timeout is how long this call holds a browser and a
        * backend open, and a client that sends 0, a string or a day's worth of
@@ -759,6 +908,53 @@ async function handle(name, args = {}, ctx = {}) {
       if (res.base64) content.push({ type: 'image', data: res.base64, mimeType: 'image/png' });
       return { content, isError: !res.booted };
     }
+    case 'interact_app': {
+      const miss = missingLocalSibling('abap2UI5');
+      if (miss) return miss;
+      let res;
+      try {
+        res = await interactApp({
+          className: args.class_name,
+          actions: args.actions,
+          timeoutMs: boundedInt(args.timeout_ms, { name: 'timeout_ms', dflt: 60000, min: 5000, max: 600000 }),
+          actionTimeoutMs: boundedInt(args.action_timeout_ms, { name: 'action_timeout_ms', dflt: 10000, min: 500, max: 120000 }),
+          signal: ctx.signal,
+        });
+      } catch (e) {
+        return toolError(String((e && e.message) || e));
+      }
+      const report = {
+        class: res.class,
+        booted: res.booted,
+        ok: res.ok,
+        actions: res.actions,
+        ...(res.notPerformed ? { notPerformed: res.notPerformed } : {}),
+        errors: res.errors,
+        screenshot: res.screenshotPath,
+        ...(res.booted ? {} : { hint: 'the app did not boot, so no action was performed - run_app shows the boot on its own' }),
+      };
+      const content = [{ type: 'text', text: JSON.stringify(report, null, 2) }];
+      if (res.base64) content.push({ type: 'image', data: res.base64, mimeType: 'image/png' });
+      return { content, isError: !res.booted };
+    }
+    case 'run_unit_tests': {
+      const miss = missingLocalSibling('abap2UI5');
+      if (miss) return miss;
+      const report = progressReporter(ctx);
+      const classNames = args.class_names === undefined ? undefined : stringArray(args.class_names, { name: 'class_names' });
+      const res = await runUnitTests({ className: args.class_name, classNames, signal: ctx.signal, onLine: report });
+      if (res.aborted || res.timedOut) return toolError(res.error);
+      if (res.class && res.tests.length === 0) {
+        return text({
+          ...res,
+          hint: `no test class of ${res.class} in the built backend — deploy_app with \`testclasses\`, then build_backend (a deploy after the last build is not in it yet: read_app says so)`,
+        });
+      }
+      return text({
+        ...res,
+        ...(res.ok ? {} : { hint: res.failed ? 'the first failing test stops the runner; fix it, deploy, build, run again' : 'the runner failed before or outside a test - the error is what it printed' }),
+      });
+    }
     case 'backend': {
       /* An unknown action used to fall through to `status`, so a misspelled
        * `stop` answered with a report that the backend is running - which is
@@ -768,7 +964,7 @@ async function handle(name, args = {}, ctx = {}) {
       });
       if (action === 'start' || action === 'restart') {
         // status/stop work without any checkout; starting needs the backend
-        const miss = missingSibling('abap2UI5');
+        const miss = missingLocalSibling('abap2UI5');
         if (miss) return miss;
       }
       if (action === 'start') return text(await startBackend());
@@ -780,7 +976,7 @@ async function handle(name, args = {}, ctx = {}) {
       return text(backendStatus());
     }
     case 'remove_app': {
-      const miss = missingSibling('samples-controls');
+      const miss = missingSandbox();
       if (miss) return miss;
       if (!args.class_name) return text({ devApps: listDevApps() });
       const removed = removeApp(args.class_name);
@@ -824,7 +1020,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }))
  * it as the read request's JSON-RPC error. */
 server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: RESOURCES }));
 server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({ resourceTemplates: RESOURCE_TEMPLATES }));
-server.setRequestHandler(ReadResourceRequestSchema, async (req) => readResource(req.params.uri));
+server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
+  await hydrateRepos(resourceRepos(req.params.uri));
+  return readResource(req.params.uri);
+});
 
 /* The two workflow prompts (lib/prompts.mjs): orchestration scripts over the
  * existing tools — build-an-abap2ui5-app and port-a-ui5-sample. They read no
@@ -842,6 +1041,7 @@ server.setRequestHandler(CompleteRequestSchema, async (req) => {
   const { ref, argument } = req.params;
   if (!ref || ref.type !== 'ref/resource' || ref.uri !== GUIDE_CHAPTER_TEMPLATE) return empty;
   if (!argument || argument.name !== 'chapter') return empty;
+  await hydrateRepos(['a2ui5']);
   const md = readGuide();
   if (md === null) return empty;
   const want = String(argument.value || '').toLowerCase();
@@ -852,6 +1052,7 @@ server.setRequestHandler(CompleteRequestSchema, async (req) => {
 });
 server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
   try {
+    await hydrateRepos(REMOTE_TOOLS[req.params.name]);
     return await handle(req.params.name, req.params.arguments || {}, {
       progressToken: req.params._meta && req.params._meta.progressToken,
       sendNotification: extra && extra.sendNotification,
@@ -896,4 +1097,5 @@ process.on('SIGTERM', async () => {
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-diagnostic('info', `abap2ui5 MCP server ready (samples-controls: ${resolveSamplesControls()}, backend built: ${backendBuilt()})`);
+diagnostic('info', `abap2ui5 MCP server ready (samples-controls: ${resolveSamplesControls({ local: true })}, backend built: ${backendBuilt()}, `
+  + `GitHub mirror for missing checkouts: ${Object.keys(RESOLVERS).some((k) => !resolveKey(k, { local: true })) ? 'on demand' : 'not needed'})`);

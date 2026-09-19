@@ -2,6 +2,84 @@
 
 ## Unreleased
 
+- **Review round over the new tools, six fixes.** `build_backend` mode
+  `transpile` passed the schema and the build but not the server's own mode
+  gate; `verify_app` never hydrated the app-template mirror its deploy stage
+  reads, so its message named a remedy that did not work through it; the
+  `abap2ui5-unit` bin did nothing when started through npm's symlink (the
+  main guard compared the link, not the real path) and `--help` printed its
+  shebang; a workspace clone on another release than the project's pin was
+  used instead of replaced; a download that died mid-stream could turn the
+  "never rejects" download into a rejection on Windows; and the mirror tests
+  failed in a sibling workspace although nothing was wrong.
+
+- **Unit tests in CI, without a system.** `scripts/ci-unit.mjs` — shipped as
+  the bin `abap2ui5-unit` and wrapped by `action.yml` as the composite GitHub
+  Action `abap2UI5/mcp-server@v0` — clones the framework at the release the
+  project's `abaplint.jsonc` pins, gets its backend (the release asset, or
+  the framework's own build), deploys every class under `src` with its test
+  include into the framework sandbox, transpiles once and runs the tests
+  through the generated runner filtered to those classes; a step summary
+  names every test method and the first failure. Measured against
+  app-template's starter app: 17 s with a built framework next door.
+- **New tool `verify_app`.** Validate, deploy, build, unit and boot in one
+  call, stopping at the first failing stage; `stages` carries every result,
+  `stoppedAt` the stage to read.
+- **`build_backend` mode `transpile`.** The framework's own build in its
+  checkout (`npm run downport` + `auto_transpile`, a few minutes, no corpus)
+  — what `auto` falls back to when the release carries no prebuilt asset
+  yet, said in the log. `run_unit_tests` takes `class_names` for several
+  classes in one run.
+
+- **The whole loop with one checkout, or none.** The dev sandbox has a second
+  home: with no samples-controls checkout, `deploy_app` writes into the
+  abap2UI5 checkout's `node/zz_dev` and lints with app-template's own
+  `abaplint.jsonc` (the framework sources as the dependency — the lint a real
+  project runs, 2-3 s), the incremental build copies from there, `read_app`,
+  `remove_app` and `run_unit_tests` follow. `build_backend` mode `prebuilt`
+  (and `auto` without a prior build) clones the framework's latest release
+  into `~/.abap2ui5-mcp` (`A2UI5_MCP_WORKSPACE`) when no checkout is there
+  and nothing is configured. `deploy_app`'s sidecar now carries the UTF-8 BOM
+  abapGit writes — the template's `xml_bom` rule caught its absence on the
+  first deploy into the new sandbox.
+- **New tool `setup_status`.** One read: which checkout each tool would use
+  (local, GitHub mirror, or missing and why), the sandbox and what is
+  deployed in it, whether the backend is built, prebuilt and running, where a
+  framework clone would land, and whether git, tar, npx and a Chromium are
+  there.
+
+- **The cheap half works without a single checkout.** When no local checkout
+  resolves and no env var is set, the knowledge tools (`app_guide`,
+  `api_reference`, `pitfalls`, `capabilities`, `examples`, `docs_search`,
+  `scaffold_app`, `generation_rules`) and the resources read their files from
+  GitHub into a per-user cache that the server treats as a read-only checkout
+  (`lib/remote.mjs`; a day old at most, `A2UI5_MCP_REMOTE=0` or
+  `A2UI5_MCP_OFFLINE=1` switch it off). A set env var stays authoritative and a
+  failed download degrades to the old message plus the reason. The tools that
+  write or build refuse the mirror with the clone command. `lib/repo-dirs.json`
+  gained the framework's own entry (`a2ui5`) for the mirror URL.
+- **New tool `read_example`.** The source of a sample an `examples` hit named,
+  by class or by repo + path — from the checkout, or fetched from GitHub.
+- **`build_backend` mode `prebuilt`, and `auto` uses it first.** The
+  framework's release workflow attaches `backend-<version>.tar.gz` to every
+  release; the server downloads and unpacks it into the abap2UI5 checkout in
+  about a minute instead of the tens-of-minutes full build, and needs only that
+  checkout for it. The incremental transpile now works on top of it (the
+  framework's own `node/deps` libraries are used when they are there; the
+  corpus-style clone and patch only otherwise). `run_app` no longer requires
+  samples-controls: UI5 comes from the CDN when the corpus is not there to
+  serve it locally. A failed download is reported, never turned into a full
+  build.
+- **New tool `interact_app`.** Boot an app, then click, fill, press and wait
+  through a short script and photograph the result — the event branch of
+  `main( )`, which no tool without a system could reach before. The first
+  failing action stops the script; the picture is still taken.
+- **New tool `run_unit_tests`, and `deploy_app` takes `testclasses`.** The
+  local test classes are written beside the app (the sidecar carries
+  `WITH_UNIT_TESTS`), transpiled by the next build, and run in the open-abap
+  runtime — filtered to the one class through the generated runner, or the
+  whole tree. `remove_app` and `read_app` know about the include.
+
 - **Three new tools.** `fix_view` applies the linter's mechanical fixes to a
   source and returns the corrected source (it writes nothing — the agent
   decides where it goes), reporting which findings were fixed and which

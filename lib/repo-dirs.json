@@ -1,7 +1,18 @@
 {
-  "note": "Directory names each sibling checkout can carry, newest first, plus the env vars that override the guess. THE source of truth for the ecosystem's rename history - lib/repos.mjs resolves from it, and abap2UI5/vscode-extension snapshots it into src/data/repo-dirs.json. Add a name here when a repository is renamed; never keep a second list somewhere else. The `server` entry is this repository itself: it resolves nothing for its own sake, but the extension looks for a local checkout of it by directory name and would miss one carrying the previous name.",
+  "note": "Directory names each sibling checkout can carry, newest first, plus the env vars that override the guess. THE source of truth for the ecosystem's rename history - lib/repos.mjs resolves from it, and abap2UI5/vscode-extension snapshots it into src/data/repo-dirs.json. Add a name here when a repository is renamed; never keep a second list somewhere else. The `server` entry is this repository itself: it resolves nothing for its own sake, but the extension looks for a local checkout of it by directory name and would miss one carrying the previous name. Every repository the server reads has an entry - including the framework (`a2ui5`), whose resolver used to carry its names as literals - because the entry is also what names the GitHub repository the read-only mirror (lib/remote.mjs) fetches from when no checkout is there; `branch` (default main) is the branch it reads.",
   "probes": "`probe` is the file that proves a candidate directory is a checkout of that repository. Where that file alone cannot tell two repositories apart, `identify` narrows it: each entry names a JSON file, a top-level key and what the value has to be (`equals`, compared case-insensitively) or has to contain (`hasKeys`). A check whose file is absent, unparseable, or missing that key is SKIPPED rather than failed - an older checkout from before the file existed must keep resolving, which is the whole reason `probe` is the cheap existence test it is. `required: true` reverses that for a check reading the probe file itself, where a missing key is proof rather than ignorance.",
   "repos": {
+    "a2ui5": {
+      "repository": "abap2UI5/abap2UI5",
+      "why": "The framework: the app-building guide, the client interface api_reference parses, the two pitfall catalogues, and the transpiled backend run_app boots. Resolved with one extra candidate the others do not have - the in-repo .abap2UI5 clone samples-controls' `npm run node:setup` creates (lib/repos.mjs adds it).",
+      "dirs": [
+        "abap2UI5"
+      ],
+      "env": [
+        "A2UI5_HOME"
+      ],
+      "probe": "node/srv/express.mjs"
+    },
     "corpus": {
       "repository": "abap2UI5/samples-controls",
       "why": "The corpus: the UI5 demo kit rebuilt control by control, port by port. e2e-build, the capability map, the scope gate, the deploy sandbox and the @openui5 packages the render/boot path serves. (No count here on purpose - each repository states its own in its generated SAMPLES.md / STATUS.md, and a number copied into a description is one nothing re-measures.)",
@@ -28,8 +39,16 @@
       ],
       "probe": "SAMPLES.md",
       "identify": [
-        { "file": "catalogue.json", "key": "repository", "equals": "abap2UI5/samples" },
-        { "file": "package.json", "key": "name", "equals": "abap2UI5-samples" }
+        {
+          "file": "catalogue.json",
+          "key": "repository",
+          "equals": "abap2UI5/samples"
+        },
+        {
+          "file": "package.json",
+          "key": "name",
+          "equals": "abap2UI5-samples"
+        }
       ]
     },
     "samplesStack": {
@@ -44,8 +63,16 @@
       ],
       "probe": "SAMPLES.md",
       "identify": [
-        { "file": "catalogue.json", "key": "repo", "equals": "abap2UI5/samples-stack" },
-        { "file": "package.json", "key": "name", "equals": "abap2ui5-samples-stack" }
+        {
+          "file": "catalogue.json",
+          "key": "repo",
+          "equals": "abap2UI5/samples-stack"
+        },
+        {
+          "file": "package.json",
+          "key": "name",
+          "equals": "abap2ui5-samples-stack"
+        }
       ]
     },
     "appTemplate": {
@@ -71,7 +98,11 @@
       ],
       "probe": "docs/index.md",
       "identify": [
-        { "file": "package.json", "key": "name", "equals": "abap2ui5-docs" }
+        {
+          "file": "package.json",
+          "key": "name",
+          "equals": "abap2ui5-docs"
+        }
       ]
     },
     "viewCheck": {
@@ -87,7 +118,15 @@
       ],
       "probe": "package.json",
       "identify": [
-        { "file": "package.json", "key": "exports", "hasKeys": [".", "./findings"], "required": true }
+        {
+          "file": "package.json",
+          "key": "exports",
+          "hasKeys": [
+            ".",
+            "./findings"
+          ],
+          "required": true
+        }
       ]
     },
     "server": {

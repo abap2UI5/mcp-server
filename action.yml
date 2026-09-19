@@ -1,0 +1,78 @@
+# abap2UI5 unit tests, without a SAP system.
+#
+# Runs an app repository's ABAP Unit tests (every *.clas.testclasses.abap next
+# to a *.clas.abap under `paths`) in the transpiled Node backend, the way the
+# MCP server's run_unit_tests does: the framework is cloned at the release the
+# project pins (the `branch` of the abap2UI5 dependency in its abaplint.jsonc),
+# its backend is downloaded from that release's assets or built once (a few
+# minutes), the classes are transpiled into it and their tests run. The
+# result is the job's verdict and a step summary.
+#
+#   - uses: abap2UI5/mcp-server@v0
+#     with:
+#       paths: src
+#
+# The framework clone and its backend are cached per release, so the first
+# run pays the build and later runs pay seconds. scripts/ci-unit.mjs is the
+# whole implementation and the same command a developer runs locally
+# (`npx -p @abap2ui5/mcp-server abap2ui5-unit src`).
+name: abap2UI5 unit tests
+description: Run an app repository's ABAP Unit tests in the transpiled abap2UI5 backend, no SAP system needed
+branding:
+  icon: check-circle
+  color: blue
+
+inputs:
+  paths:
+    description: Files or directories holding the app classes (space-separated; default src)
+    required: false
+    default: src
+  framework:
+    description: The abap2UI5 release to test against (X.Y.Z); default the project's abaplint.jsonc pin, else the latest release
+    required: false
+    default: ''
+  node-version:
+    description: The Node.js version to run with
+    required: false
+    default: '22'
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    # The pin decides the cache key: a project that bumps its framework gets
+    # a fresh clone and backend, one that does not reuses last week's.
+    - id: pin
+      shell: bash
+      run: |
+        pin="${{ inputs.framework }}"
+        if [ -z "$pin" ]; then
+          pin=$(node "${{ github.action_path }}/scripts/ci-unit.mjs" --print-pin 2>/dev/null || true)
+        fi
+        echo "pin=${pin:-latest}" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.abap2ui5-mcp
+        key: abap2ui5-backend-${{ runner.os }}-${{ steps.pin.outputs.pin }}-${{ hashFiles(format('{0}/package-lock.json', github.action_path)) }}
+
+    - shell: bash
+      run: npm ci --no-audit --no-fund
+      working-directory: ${{ github.action_path }}
+      env:
+        PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+
+    - shell: bash
+      env:
+        PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+        A2UI5_UNIT_FRAMEWORK: ${{ inputs.framework }}
+      run: |
+        set -- ${{ inputs.paths }}
+        if [ -n "$A2UI5_UNIT_FRAMEWORK" ]; then
+          node "${{ github.action_path }}/scripts/ci-unit.mjs" "$@" --framework "$A2UI5_UNIT_FRAMEWORK"
+        else
+          node "${{ github.action_path }}/scripts/ci-unit.mjs" "$@"
+        fi

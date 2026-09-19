@@ -100,15 +100,32 @@ test('every sibling-dependent tool degrades with an actionable error when the ch
     expectMissing(await call('scaffold_app', {}), /app-template/, 'APP_TEMPLATE_HOME');
     expectMissing(await call('scaffold_app', { class: 'zcl_my_app' }), /app-template/, 'APP_TEMPLATE_HOME');
     expectMissing(await call('scope_of', { entities: ['sap.m.Wizard'] }), CORPUS, 'SAMPLES_CONTROLS_HOME');
-    expectMissing(
+    /* The dev sandbox has two homes - the corpus, or the framework checkout -
+     * so with both absent the message names both, and the env var of each. */
+    const SANDBOX = /no dev sandbox/;
+    for (const r of [
       await call('deploy_app', { class_name: 'z2ui5_cl_demo', abap_source: 'CLASS z2ui5_cl_demo DEFINITION. INTERFACES z2ui5_if_app.' }),
-      CORPUS,
-      'SAMPLES_CONTROLS_HOME',
-    );
+      await call('read_app', { class_name: 'zcl_my_app' }),
+      await call('remove_app', {}),
+      await call('remove_app', { class_name: 'z2ui5_cl_demo' }),
+    ]) {
+      expectMissing(r, SANDBOX, 'SAMPLES_CONTROLS_HOME');
+      assert.match(r.content[0].text, /A2UI5_HOME/, 'the sandbox message names the framework env var too');
+    }
+    /* verify_app composes the stages: without a linter the validate stage
+     * is SKIPPED (said so), and the deploy stage is where it stops - with the
+     * sandbox message, and everything before it in the report. */
+    const verify = await call('verify_app', { class_name: 'zcl_demo', abap_source: 'CLASS zcl_demo DEFINITION. INTERFACES z2ui5_if_app.' });
+    const vr = JSON.parse(verify.content[0].text);
+    assert.equal(vr.ok, false);
+    assert.equal(vr.stoppedAt, 'deploy');
+    assert.match(vr.stages.validate.skipped, /linter checkout not found/);
+    assert.equal(vr.stages.deploy.ok, false);
+    assert.match(vr.stages.deploy.text, SANDBOX);
+    assert.equal(vr.stages.build, undefined, 'nothing after the failing stage runs');
+    // auto with A2UI5_HOME set to nowhere: no clone (the env var is authoritative), so full - the corpus
     expectMissing(await call('build_backend', {}), CORPUS, 'SAMPLES_CONTROLS_HOME');
-    expectMissing(await call('read_app', { class_name: 'zcl_my_app' }), CORPUS, 'SAMPLES_CONTROLS_HOME');
-    expectMissing(await call('remove_app', {}), CORPUS, 'SAMPLES_CONTROLS_HOME');
-    expectMissing(await call('remove_app', { class_name: 'z2ui5_cl_demo' }), CORPUS, 'SAMPLES_CONTROLS_HOME');
+    expectMissing(await call('build_backend', { mode: 'full' }), CORPUS, 'SAMPLES_CONTROLS_HOME');
 
     /* The sample catalogues - three repositories, none of them the corpus, and
      * the error has to name each one rather than sending the reader to
@@ -143,8 +160,26 @@ test('every sibling-dependent tool degrades with an actionable error when the ch
       'AI_VIEW_CHECK_HOME',
     );
 
-    // abap2UI5-backed tools (run_app checks samples-controls first — both missing here)
-    expectMissing(await call('run_app', { class_name: 'z2ui5_cl_demo' }), CORPUS, 'SAMPLES_CONTROLS_HOME');
+    // abap2UI5-backed tools: the backend lives there, and since the prebuilt
+    // backend exists the corpus is no longer a precondition of running an app
+    // (it only serves UI5 locally when it happens to be there)
+    const A2 = /abap2UI5 checkout not found/;
+    expectMissing(await call('run_app', { class_name: 'z2ui5_cl_demo' }), A2, 'A2UI5_HOME');
+    expectMissing(await call('interact_app', { class_name: 'z2ui5_cl_demo', actions: [{ action: 'click', text: 'Save' }] }), A2, 'A2UI5_HOME');
+    expectMissing(await call('run_unit_tests', {}), A2, 'A2UI5_HOME');
+    expectMissing(await call('run_unit_tests', { class_name: 'z2ui5_cl_demo' }), A2, 'A2UI5_HOME');
+    expectMissing(await call('build_backend', { mode: 'prebuilt' }), A2, 'A2UI5_HOME');
+    expectMissing(await call('build_backend', { mode: 'incremental' }), A2, 'A2UI5_HOME');
+    // every mode the schema offers passes the server's gate (transpile used to be refused as unknown)
+    expectMissing(await call('build_backend', { mode: 'transpile' }), A2, 'A2UI5_HOME');
+    /* read_example: the catalogues are the three sample repositories, and
+     * with every env var pointing nowhere the mirror is not consulted either
+     * (a set env var is authoritative) - so a class lookup names them, and a
+     * repo + path names the one repository it was asked about. */
+    const byClass = await call('read_example', { class: 'Z2UI5_CL_SMP_APP_493' });
+    assert.equal(byClass.isError, true);
+    assert.match(byClass.content[0].text, /no sample class/);
+    expectMissing(await call('read_example', { repo: 'samples', path: 'src/01/z2ui5_cl_smp_app_493.clas.abap' }), /samples\/src\/01|could not be read/, 'SAMPLES|mirror|GitHub');
     // the pitfalls catalogues live in the abap2UI5 checkout, not in the corpus
     expectMissing(await call('pitfalls', {}), /abap2UI5 checkout not found/, 'A2UI5_HOME');
     expectMissing(await call('pitfalls', { area: 'view' }), /abap2UI5 checkout not found/, 'A2UI5_HOME');
@@ -158,6 +193,19 @@ test('every sibling-dependent tool degrades with an actionable error when the ch
     expectMissing(await call('docs_search', { query: 'value help' }), /docs checkout not found/, 'DOCS_HOME');
     expectMissing(await call('backend', { action: 'start' }), /abap2UI5 checkout not found/, 'A2UI5_HOME');
     expectMissing(await call('backend', { action: 'restart' }), /abap2UI5 checkout not found/, 'A2UI5_HOME');
+
+    // setup_status answers without any checkout: every repo missing, each with its hint
+    const setup = await call('setup_status', {});
+    assert.ok(!setup.isError, `setup_status must not fail: ${JSON.stringify(setup)}`);
+    const st = JSON.parse(setup.content[0].text);
+    for (const key of ['a2ui5', 'corpus', 'samples', 'samplesStack', 'appTemplate', 'docs', 'viewCheck']) {
+      assert.equal(st.repos[key].missing, true, `${key} must be reported missing`);
+      assert.ok(st.repos[key].hint, `${key} needs a hint`);
+    }
+    assert.equal(st.repos.a2ui5.env, 'A2UI5_HOME');
+    assert.equal(st.sandbox.missing, true);
+    assert.equal(st.backend.built, false);
+    assert.equal(typeof st.programs.git, 'boolean');
 
     // backend status/stop never need a checkout
     const status = await call('backend', { action: 'status' });
