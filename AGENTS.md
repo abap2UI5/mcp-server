@@ -62,7 +62,7 @@ install directory — that is inside `node_modules` for an npx/npm install),
 `A2UI5_MCP_PREBUILT_URL` (where `build_backend` mode `prebuilt` downloads
 from; default the framework release asset, see below), the mirror knobs
 `A2UI5_MCP_REMOTE=0` / `A2UI5_MCP_REMOTE_DIR` / `A2UI5_MCP_REMOTE_TTL_MS`
-(below), and the child-process timeouts `A2UI5_MCP_LINT_TIMEOUT_MS` /
+(below), `A2UI5_MCP_WORKSPACE` (where a framework clone lands, below), and the child-process timeouts `A2UI5_MCP_LINT_TIMEOUT_MS` /
 `A2UI5_MCP_SCOPE_TIMEOUT_MS` (default 5 min), `A2UI5_MCP_BUILD_TIMEOUT_MS`
 (default 30 min, also the prebuilt download) and `A2UI5_MCP_UNIT_TIMEOUT_MS`
 (default 10 min, the test runner).
@@ -112,6 +112,55 @@ Three rules, each pinned by `test/remote.test.mjs` and
 hit is a class name and a path, and an agent without the checkout could not
 read it. It fetches single files on demand (`fetchRemoteFile`, under the same
 path whitelist `safeRelPath`), from the checkout when there is one.
+
+### The expensive half with one checkout — or none
+
+The corpus used to be a precondition of every tool past `validate_view`: the
+deploy sandbox was its `src/zz_dev`, the lint its `abaplint.jsonc`, the build
+its `e2e-build.mjs`, the UI5 runtime its `node_modules/@openui5`. Three of the
+four are optional now, and the fourth is a download:
+
+- **The dev sandbox has two homes** (`sandbox()` in `lib/runtime.mjs`): the
+  corpus' `src/zz_dev` when a corpus checkout is there, the framework
+  checkout's `node/zz_dev` otherwise (the framework gitignores it). Both
+  answer `{ kind, root, dir }`, and `deployApp`, `readAppSource`, `removeApp`,
+  `listDevApps`, the lint and the incremental build's copy step ask
+  `sandbox()` and nothing else. The lint differs per home on purpose: the
+  corpus' relaxed config for the corpus (`corpusLintConfig`), and for the
+  framework sandbox **app-template's `abaplint.jsonc`** retargeted at it
+  (`frameworkLintConfig`: `global.files` on the sandbox, the framework's
+  `src/` as the local `dependencies[].folder` instead of the clone the
+  template asks abaplint for, the customer namespace as the naming rule) —
+  the lint a real project runs, read from the template checkout or its
+  mirror (`REMOTE_TOOLS.deploy_app` hydrates the template for that one
+  read). Measured here: 2.6 s for a lint, 9 s for the incremental transpile,
+  1.4 s for the class's unit tests. Deploying into that sandbox is also what
+  found that `deploy_app`'s sidecar had no BOM: the template config enables
+  `xml_bom`, the corpus config never asked.
+- **`build_backend` mode `prebuilt` clones the framework when nothing is
+  there** (`cloneFramework`): a shallow clone of the latest release (asked of
+  the GitHub releases API; the default branch when that cannot be reached)
+  into `A2UI5_MCP_WORKSPACE`, default `~/.abap2ui5-mcp/abap2UI5`, which
+  `resolveA2UI5` lists as its last LOCAL candidate — a real checkout, not a
+  mirror. Only when no `A2UI5_HOME` is set: a set env var that points nowhere
+  is reported, never cloned around. `auto` takes that path too when there is
+  no prior build.
+- **`run_app` serves UI5 from the CDN** when no corpus is there to serve the
+  local `@openui5` packages (`libRoots` answers an empty list; `A2UI5_MCP_OFFLINE`
+  keeps the hermetic 404).
+- **`setup_status`** is the read that says which of the above applies right
+  now: per repository local / mirror / missing (with the env var or clone
+  that fixes it), the sandbox and what is deployed there, the backend
+  (built, prebuilt manifest, running, unit-test runner), the clone target,
+  and whether git, tar, npx and a Chromium are on the machine. Reads only.
+  `test/sandbox.test.mjs` pins the sandbox rules against a fake framework
+  checkout under `A2UI5_HOME`; `test/missing-siblings.test.mjs` pins that the
+  sandbox message names both env vars and that `setup_status` answers with
+  every checkout absent.
+
+What still needs the corpus: `scope_of` (its script and the OpenUI5 checkout),
+`generation_rules` and `capabilities` (mirrored when absent), and
+`build_backend` mode `full`.
 
 A missing checkout degrades **per tool** (the server still starts;
 `resolve*` returns null and the affected tool returns a uniform, actionable
@@ -204,7 +253,10 @@ changes upstream, this repo must change in the same breath:
   beside it. `docs_search` (`lib/docs.mjs`) walks the same tree with the same
   exclusions and hands back that URL pair; a change to either upstream is a
   change here.
-- app-template: **`template.json`** — the template's own description of what a
+- app-template: **`abaplint.jsonc`** — the framework sandbox lints with it
+  (`frameworkLintConfig` rewrites `global.files`, `dependencies` and
+  `rules.object_naming` and keeps everything else), so a renamed key there is
+  a lint that judges by other rules here. And **`template.json`** — the template's own description of what a
   project takes from it (the placeholder class, `files.shared` / `files.named`,
   and the substitutions that make them somebody's). `lib/scaffold.mjs` EXECUTES
   that description and keeps no list of its own; a checkout without the file is
@@ -239,9 +291,16 @@ agent) find these artifacts in a dirty sibling worktree, mcp-server caused them:
   `node/downport`, `node/output`, `node/deps` plus `backend-manifest.json`
   at the checkout root (the framework gitignores all four — its
   `backend-prebuilt.yaml` workflow is what packs them).
+- `<abap2UI5>/node/zz_dev/*.clas.abap` + `.clas.xml` (+ `.clas.testclasses.abap`)
+  — the dev sandbox when there is no corpus checkout (gitignored there;
+  `remove_app` deletes them again), and `<abap2UI5>/.abaplint-mcp-dev.jsonc`
+  while a lint of it runs (removed in a `finally`, queued like the corpus one).
 - `<abap2UI5>/node/output/index-mcp-<class>.mjs` — the filtered copy of the
   unit-test runner `run_unit_tests` writes for one class, removed in a
   `finally`.
+- `~/.abap2ui5-mcp/abap2UI5` (`A2UI5_MCP_WORKSPACE`) — the framework clone
+  `build_backend` mode `prebuilt` makes when no checkout is there at all: a
+  real checkout with its npm install and its unpacked backend.
 - `<tmp>/abap2ui5-mcp-remote/<repo>/` — the read-only GitHub mirrors (not a
   sibling worktree, but the same question "where did this come from": a
   directory that carries `.abap2ui5-mirror.json` is one, and deleting it is

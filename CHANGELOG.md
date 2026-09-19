@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- **The whole loop with one checkout, or none.** The dev sandbox has a second
+  home: with no samples-controls checkout, `deploy_app` writes into the
+  abap2UI5 checkout's `node/zz_dev` and lints with app-template's own
+  `abaplint.jsonc` (the framework sources as the dependency — the lint a real
+  project runs, 2-3 s), the incremental build copies from there, `read_app`,
+  `remove_app` and `run_unit_tests` follow. `build_backend` mode `prebuilt`
+  (and `auto` without a prior build) clones the framework's latest release
+  into `~/.abap2ui5-mcp` (`A2UI5_MCP_WORKSPACE`) when no checkout is there
+  and nothing is configured. `deploy_app`'s sidecar now carries the UTF-8 BOM
+  abapGit writes — the template's `xml_bom` rule caught its absence on the
+  first deploy into the new sandbox.
+- **New tool `setup_status`.** One read: which checkout each tool would use
+  (local, GitHub mirror, or missing and why), the sandbox and what is
+  deployed in it, whether the backend is built, prebuilt and running, where a
+  framework clone would land, and whether git, tar, npx and a Chromium are
+  there.
+
 - **The cheap half works without a single checkout.** When no local checkout
   resolves and no env var is set, the knowledge tools (`app_guide`,
   `api_reference`, `pitfalls`, `capabilities`, `examples`, `docs_search`,

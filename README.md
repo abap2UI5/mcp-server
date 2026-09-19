@@ -87,11 +87,17 @@ at once; the tools that write or build (`deploy_app`, `build_backend`,
 `run_app`, …) still need the real checkouts and say so. `A2UI5_MCP_REMOTE=0`
 or `A2UI5_MCP_OFFLINE=1` switches the mirror off.
 
-**The backend without the tens-of-minutes build.** `build_backend` downloads
-the framework's released backend (`backend-<version>.tar.gz`, attached to each
-abap2UI5 release) into the abap2UI5 checkout the first time — a minute — and
-re-transpiles only the deployed apps afterwards. The full corpus build stays
-available as `mode: "full"` for a checkout on an unreleased commit.
+**The backend without the tens-of-minutes build, and without the corpus.**
+`build_backend` downloads the framework's released backend
+(`backend-<version>.tar.gz`, attached to each abap2UI5 release) into the
+abap2UI5 checkout the first time — a minute — and re-transpiles only the
+deployed apps afterwards; with no framework checkout at all it clones the
+release into `~/.abap2ui5-mcp` first. `deploy_app` then writes into that
+checkout's `node/zz_dev` and lints with app-template's own abaplint config,
+`run_app` boots against it with UI5 from the CDN, `run_unit_tests` runs the
+deployed test classes. The full corpus build stays available as
+`mode: "full"` for a checkout on an unreleased commit, and `setup_status`
+says which of all this applies on the machine in front of you.
 
 ## Tools
 
@@ -105,6 +111,7 @@ checkout is missing answers with the clone command and env var that fix it.
 
 | Tool | What it does | Needs |
 |---|---|---|
+| `setup_status` | What resolves, what is built, what is missing and how to fix it — one read, call it first | nothing |
 | `capabilities` | Whether abap2UI5 can express a UI5 feature at all, from the verified capability map | samples-controls |
 | `app_guide` | How to build an app, live from the framework checkout | abap2UI5 |
 | `api_reference` | The client API (`z2ui5_if_client`) with its ABAP-Doc: methods, parameters, defaults, the `cs_*` constants | abap2UI5 |
@@ -118,15 +125,15 @@ checkout is missing answers with the clone command and env var that fix it.
 | `validate_view` | The linter's gates in seconds, judged by your project's own `abap2ui5lint.jsonc` | linter |
 | `fix_view` | Apply the linter's mechanical fixes and get the corrected source back — writes nothing | linter |
 | `screenshot_view` | See the view in seconds — no build, no backend | linter |
-| `deploy_app` | Write the class + abapGit sidecar into the gitignored sandbox, then abaplint it | samples-controls |
-| `read_app` | Read a deployed dev app's source back, and whether the built backend already carries it | samples-controls |
-| `build_backend` | Get the transpiled Node backend: `prebuilt` downloads the framework's released one (a minute), `incremental` re-transpiles the dev apps on top of it, `full` runs the corpus' e2e-build | abap2UI5 (`full` also needs samples-controls) |
+| `deploy_app` | Write the class + abapGit sidecar (+ test include) into the gitignored sandbox, then abaplint it | samples-controls, or abap2UI5 alone (its `node/zz_dev`, linted with app-template's config) |
+| `read_app` | Read a deployed dev app's source back, and whether the built backend already carries it | the sandbox's checkout |
+| `build_backend` | Get the transpiled Node backend: `prebuilt` downloads the framework's released one (a minute; clones the framework into `~/.abap2ui5-mcp` first when there is no checkout at all), `incremental` re-transpiles the dev apps on top of it, `full` runs the corpus' e2e-build | abap2UI5, or nothing (`full` needs samples-controls) |
 | `build_log` | Page through the last build's full output — the error the result's short tail cut off | nothing (reads the record the last build left) |
 | `run_app` | Boot an app headless: status, real page errors, and a **screenshot** | abap2UI5 (samples-controls serves UI5 locally when present; the CDN otherwise) |
 | `interact_app` | Boot an app, then click, fill, press and wait through a short script — the **event branch**, photographed | abap2UI5 (same as run_app) |
 | `run_unit_tests` | Run the deployed test classes (or the whole transpiled tree) in the open-abap runtime: assertions, not pictures | abap2UI5 |
 | `backend` | `status` / `start` / `stop` / `restart` of the local express backend | abap2UI5 (start/restart; status and stop always work) |
-| `remove_app` | Delete a dev app from the sandbox, or list the deployed ones | samples-controls |
+| `remove_app` | Delete a dev app from the sandbox, or list the deployed ones | the sandbox's checkout |
 
 `interact_app` is `run_app` with hands: after the boot it clicks, fills and
 presses through a short script and photographs the result, which is how the

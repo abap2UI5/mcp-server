@@ -166,15 +166,27 @@ test('deployApp rejects a class name outside the customer namespace', () => {
  * one name every tool here refused. */
 test('deployApp accepts the customer-namespace names a user app actually has', () => {
   const source = (cls) => `CLASS ${cls} DEFINITION. INTERFACES z2ui5_if_app. ENDCLASS.`;
-  for (const good of ['zcl_app_001', 'ycl_app', 'z2ui5_cl_my_app', 'zcx_error']) {
-    // it gets past validation - what stops it here is the missing corpus
-    // checkout it would write into, which is a different error entirely
-    assert.doesNotThrow(
-      () => { try { deployApp({ className: good, source: source(good) }); } catch (e) {
-        if (/invalid class name/.test(e.message)) throw e;
-      } },
-      `expected '${good}' to pass the name gate`,
-    );
+  /* Both sandbox homes pointed nowhere: the name gate runs first, and what
+   * stops the deploy after it is the missing sandbox - a different error
+   * entirely, and one that must not be a write into a sibling checkout that
+   * happens to be next to this repository (the framework's node/zz_dev is a
+   * sandbox now, and a test may not leave apps in it). */
+  const saved = { corpus: process.env.SAMPLES_CONTROLS_HOME, a2: process.env.A2UI5_HOME };
+  process.env.SAMPLES_CONTROLS_HOME = path.join(os.tmpdir(), 'a2ui5-no-corpus-here');
+  process.env.A2UI5_HOME = path.join(os.tmpdir(), 'a2ui5-no-framework-here');
+  try {
+    for (const good of ['zcl_app_001', 'ycl_app', 'z2ui5_cl_my_app', 'zcx_error']) {
+      assert.throws(
+        () => deployApp({ className: good, source: source(good) }),
+        /no dev sandbox/,
+        `expected '${good}' to pass the name gate and stop at the sandbox`,
+      );
+    }
+  } finally {
+    for (const [k, v] of [['SAMPLES_CONTROLS_HOME', saved.corpus], ['A2UI5_HOME', saved.a2]]) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
   }
 });
 

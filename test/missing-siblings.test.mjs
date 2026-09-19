@@ -100,15 +100,21 @@ test('every sibling-dependent tool degrades with an actionable error when the ch
     expectMissing(await call('scaffold_app', {}), /app-template/, 'APP_TEMPLATE_HOME');
     expectMissing(await call('scaffold_app', { class: 'zcl_my_app' }), /app-template/, 'APP_TEMPLATE_HOME');
     expectMissing(await call('scope_of', { entities: ['sap.m.Wizard'] }), CORPUS, 'SAMPLES_CONTROLS_HOME');
-    expectMissing(
+    /* The dev sandbox has two homes - the corpus, or the framework checkout -
+     * so with both absent the message names both, and the env var of each. */
+    const SANDBOX = /no dev sandbox/;
+    for (const r of [
       await call('deploy_app', { class_name: 'z2ui5_cl_demo', abap_source: 'CLASS z2ui5_cl_demo DEFINITION. INTERFACES z2ui5_if_app.' }),
-      CORPUS,
-      'SAMPLES_CONTROLS_HOME',
-    );
+      await call('read_app', { class_name: 'zcl_my_app' }),
+      await call('remove_app', {}),
+      await call('remove_app', { class_name: 'z2ui5_cl_demo' }),
+    ]) {
+      expectMissing(r, SANDBOX, 'SAMPLES_CONTROLS_HOME');
+      assert.match(r.content[0].text, /A2UI5_HOME/, 'the sandbox message names the framework env var too');
+    }
+    // auto with A2UI5_HOME set to nowhere: no clone (the env var is authoritative), so full - the corpus
     expectMissing(await call('build_backend', {}), CORPUS, 'SAMPLES_CONTROLS_HOME');
-    expectMissing(await call('read_app', { class_name: 'zcl_my_app' }), CORPUS, 'SAMPLES_CONTROLS_HOME');
-    expectMissing(await call('remove_app', {}), CORPUS, 'SAMPLES_CONTROLS_HOME');
-    expectMissing(await call('remove_app', { class_name: 'z2ui5_cl_demo' }), CORPUS, 'SAMPLES_CONTROLS_HOME');
+    expectMissing(await call('build_backend', { mode: 'full' }), CORPUS, 'SAMPLES_CONTROLS_HOME');
 
     /* The sample catalogues - three repositories, none of them the corpus, and
      * the error has to name each one rather than sending the reader to
@@ -174,6 +180,19 @@ test('every sibling-dependent tool degrades with an actionable error when the ch
     expectMissing(await call('docs_search', { query: 'value help' }), /docs checkout not found/, 'DOCS_HOME');
     expectMissing(await call('backend', { action: 'start' }), /abap2UI5 checkout not found/, 'A2UI5_HOME');
     expectMissing(await call('backend', { action: 'restart' }), /abap2UI5 checkout not found/, 'A2UI5_HOME');
+
+    // setup_status answers without any checkout: every repo missing, each with its hint
+    const setup = await call('setup_status', {});
+    assert.ok(!setup.isError, `setup_status must not fail: ${JSON.stringify(setup)}`);
+    const st = JSON.parse(setup.content[0].text);
+    for (const key of ['a2ui5', 'corpus', 'samples', 'samplesStack', 'appTemplate', 'docs', 'viewCheck']) {
+      assert.equal(st.repos[key].missing, true, `${key} must be reported missing`);
+      assert.ok(st.repos[key].hint, `${key} needs a hint`);
+    }
+    assert.equal(st.repos.a2ui5.env, 'A2UI5_HOME');
+    assert.equal(st.sandbox.missing, true);
+    assert.equal(st.backend.built, false);
+    assert.equal(typeof st.programs.git, 'boolean');
 
     // backend status/stop never need a checkout
     const status = await call('backend', { action: 'status' });

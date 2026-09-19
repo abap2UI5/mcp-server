@@ -76,7 +76,10 @@ import {
   runApp,
   interactApp,
   runUnitTests,
+  sandbox,
+  setupStatus,
 } from './lib/runtime.mjs';
+import { explicitEnv } from './lib/repos.mjs';
 
 function text(s) {
   return { content: [{ type: 'text', text: typeof s === 'string' ? s : JSON.stringify(s, null, 2) }] };
@@ -103,6 +106,18 @@ function missingSibling(...repos) {
 function missingLocalSibling(...repos) {
   const msg = missingLocalSiblingMessage(...repos);
   return msg ? toolError(msg) : null;
+}
+
+/* The dev sandbox - the corpus' src/zz_dev, or the framework's node/zz_dev
+ * when there is no corpus (lib/runtime.mjs sandbox) - as a tool error when
+ * neither checkout is there. */
+function missingSandbox() {
+  try {
+    sandbox();
+    return null;
+  } catch (e) {
+    return toolError(String(e.message));
+  }
 }
 
 /* The mirror step: before a knowledge tool (or a resource read) runs, make
@@ -514,7 +529,7 @@ async function handle(name, args = {}, ctx = {}) {
       return text(`${out}\n\n(exit ${code}: 0 = all in scope, 1 = at least one out of scope or unresolved)`);
     }
     case 'deploy_app': {
-      const miss = missingLocalSibling('samples-controls');
+      const miss = missingSandbox();
       if (miss) return miss;
       const res = deployApp({
         className: args.class_name,
@@ -549,7 +564,7 @@ async function handle(name, args = {}, ctx = {}) {
       return text(reply);
     }
     case 'read_app': {
-      const miss = missingLocalSibling('samples-controls');
+      const miss = missingSandbox();
       if (miss) return miss;
       const res = readAppSource(args.class_name);
       if (!res.found) {
@@ -786,14 +801,23 @@ async function handle(name, args = {}, ctx = {}) {
        * prebuilt and incremental work inside the abap2UI5 checkout alone. The
        * build itself reports the rest (a missing prior build, a failed
        * download) in its tail. */
-      const needsCorpus = mode === 'full' || (mode === 'auto' && !resolveKey('a2ui5', { local: true }));
-      const miss = needsCorpus ? missingLocalSibling('samples-controls') : missingLocalSibling('abap2UI5');
+      const a2 = resolveKey('a2ui5', { local: true });
+      /* prebuilt (and auto without a prior build) can CLONE the framework
+       * when nothing is there and nothing is configured; a set A2UI5_HOME
+       * that points nowhere is reported instead. full is the corpus' script. */
+      const cloneable = !a2 && !explicitEnv('a2ui5') && (mode === 'prebuilt' || mode === 'auto');
+      const needsCorpus = mode === 'full' || (mode === 'auto' && !a2 && !cloneable);
+      const miss = needsCorpus ? missingLocalSibling('samples-controls') : (cloneable ? null : missingLocalSibling('abap2UI5'));
       if (miss) return miss;
       await stopBackend();
       const res = await buildBackend({ mode, onLine: progressReporter(ctx), signal: ctx.signal });
       if (res.aborted) return toolError(`build cancelled by the client (mode ${res.mode || mode}):\n${res.tail}`);
       if (!res.ok) return toolError(`build failed (exit ${res.code}, mode ${res.mode || mode}):\n${res.tail}`);
       return text({ built: true, mode: res.mode, next: 'run_app { class_name } to boot and screenshot the app', tail: res.tail.split('\n').slice(-5).join('\n') });
+    }
+    case 'setup_status': {
+      // reads only: what resolves, what is built, what is missing and why
+      return text(setupStatus());
     }
     case 'build_log': {
       // no sibling needed: this reads the record the last build left behind
@@ -900,7 +924,7 @@ async function handle(name, args = {}, ctx = {}) {
       return text(backendStatus());
     }
     case 'remove_app': {
-      const miss = missingLocalSibling('samples-controls');
+      const miss = missingSandbox();
       if (miss) return miss;
       if (!args.class_name) return text({ devApps: listDevApps() });
       const removed = removeApp(args.class_name);
