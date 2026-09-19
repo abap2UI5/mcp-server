@@ -199,6 +199,15 @@ bin's name and its exit codes. `test/sandbox.test.mjs` pins the pure half
 `filteredRunner`); the whole run was measured against app-template's starter
 app: 17 s with a built framework next door, its three tests green.
 
+`interact_app`'s hands are proven without UI5: `test/interact-browser.test.mjs`
+serves a static page with a wrapper-plus-inner input, two buttons and a
+delayed answer, and drives `performAction` through the four actions in the
+headless Chromium `run_app` would use (skipped where there is none) — the
+view-prefixed id, the inner input, the Tab commit, the click by text, the
+wait for text. What it cannot prove is the UI5 page itself, which needs the
+CDN or the corpus' packages; that half is the manual one.
+`setup.sh --no-corpus` is the setup for the corpus-free loop.
+
 A missing checkout degrades **per tool** (the server still starts;
 `resolve*` returns null and the affected tool returns a uniform, actionable
 error — which repo, how to clone it, which env var; the repo-and-hint table is

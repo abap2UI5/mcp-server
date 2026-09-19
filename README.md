@@ -72,6 +72,10 @@ the headless browser (existing checkouts are reused, safe to re-run):
 git clone https://github.com/abap2UI5/mcp-server && ./mcp-server/setup.sh
 ```
 
+`setup.sh --no-corpus` clones the framework and the linter only, which is
+the whole loop for an app of your own since the framework sandbox exists;
+the corpus is for `scope_of`, the full build and the locally served UI5.
+
 A Claude Code started inside the checkout picks the server up automatically
 via the committed [`.mcp.json`](.mcp.json); the
 [devcontainer](.devcontainer/devcontainer.json) runs the same setup on create.
