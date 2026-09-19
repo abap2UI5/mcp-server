@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Review round over the new tools, six fixes.** `build_backend` mode
+  `transpile` passed the schema and the build but not the server's own mode
+  gate; `verify_app` never hydrated the app-template mirror its deploy stage
+  reads, so its message named a remedy that did not work through it; the
+  `abap2ui5-unit` bin did nothing when started through npm's symlink (the
+  main guard compared the link, not the real path) and `--help` printed its
+  shebang; a workspace clone on another release than the project's pin was
+  used instead of replaced; a download that died mid-stream could turn the
+  "never rejects" download into a rejection on Windows; and the mirror tests
+  failed in a sibling workspace although nothing was wrong.
+
 - **Unit tests in CI, without a system.** `scripts/ci-unit.mjs` — shipped as
   the bin `abap2ui5-unit` and wrapped by `action.yml` as the composite GitHub
   Action `abap2UI5/mcp-server@v0` — clones the framework at the release the

@@ -170,6 +170,8 @@ test('every sibling-dependent tool degrades with an actionable error when the ch
     expectMissing(await call('run_unit_tests', { class_name: 'z2ui5_cl_demo' }), A2, 'A2UI5_HOME');
     expectMissing(await call('build_backend', { mode: 'prebuilt' }), A2, 'A2UI5_HOME');
     expectMissing(await call('build_backend', { mode: 'incremental' }), A2, 'A2UI5_HOME');
+    // every mode the schema offers passes the server's gate (transpile used to be refused as unknown)
+    expectMissing(await call('build_backend', { mode: 'transpile' }), A2, 'A2UI5_HOME');
     /* read_example: the catalogues are the three sample repositories, and
      * with every env var pointing nowhere the mirror is not consulted either
      * (a set env var is authoritative) - so a class lookup names them, and a

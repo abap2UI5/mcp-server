@@ -74,6 +74,9 @@ test('the tool and resource tables name real tools, resources and repo keys', ()
   for (const uri of RESOURCE_URIS) {
     for (const k of resourceRepos(uri)) assert.ok(REMOTE_FILES[k], `resource ${uri} maps to repo key '${k}' without a file list`);
   }
+  // verify_app runs deploy_app's handler inside one request: the hydrate step
+  // is keyed on the tool the client called, so it has to name the same reads
+  for (const k of REMOTE_TOOLS.deploy_app) assert.ok(REMOTE_TOOLS.verify_app.includes(k), `verify_app must hydrate '${k}' like deploy_app`);
   assert.deepEqual(resourceRepos('abap2ui5://guide/5'), ['a2ui5']);
   assert.deepEqual(resourceRepos('abap2ui5://nothing'), []);
 });
@@ -81,7 +84,10 @@ test('the tool and resource tables name real tools, resources and repo keys', ()
 test('hydrate fetches the fixed file list into a mirror the resolver then hands out', withEnv(async (t, dir) => {
   const files = Object.fromEntries(REMOTE_FILES.corpus.map((f) => [`/${f}`, `content of ${f}`]));
   const fetchImpl = fakeFetch(files);
-  assert.equal(resolveKey('corpus'), null, 'nothing resolves before the mirror exists (no corpus sibling in this checkout)');
+  // a local sibling checkout, when the workspace has one, wins over the mirror
+  // by design - the resolver assertions below only hold without one
+  const localCorpus = resolveKey('corpus', { local: true });
+  if (!localCorpus) assert.equal(resolveKey('corpus'), null, 'nothing resolves before the mirror exists');
   const res = await hydrate('corpus', { local: null, fetchImpl });
   assert.equal(res.fetched, true);
   assert.equal(res.root, remoteRoot('corpus'));
@@ -94,8 +100,10 @@ test('hydrate fetches the fixed file list into a mirror the resolver then hands 
   assert.equal(marker.repository, 'abap2UI5/samples-controls');
   assert.deepEqual(marker.files, REMOTE_FILES.corpus);
   // the mirror is now what the resolver answers - but never as a LOCAL checkout
-  assert.equal(resolveKey('corpus'), res.root);
-  assert.equal(resolveKey('corpus', { local: true }), null);
+  if (!localCorpus) {
+    assert.equal(resolveKey('corpus'), res.root);
+    assert.equal(resolveKey('corpus', { local: true }), null);
+  }
   // fresh: a second hydrate costs nothing
   const again = await hydrate('corpus', { local: null, fetchImpl });
   assert.equal(again.fromCache, true);
@@ -183,7 +191,7 @@ test('the template mirror follows template.json, the docs mirror the repository 
   assert.equal(d.fetched, true);
   assert.deepEqual(readMarker(d.root).files, ['package.json', 'docs/index.md', 'docs/advanced/linter.md']);
   assert.ok(!fs.existsSync(path.join(d.root, 'docs/public')), 'the excluded directories are not mirrored');
-  assert.equal(resolveKey('docs'), d.root);
+  if (!resolveKey('docs', { local: true })) assert.equal(resolveKey('docs'), d.root);
 }));
 
 test('fetchRemoteFile reads one file on demand, from the cache while fresh', withEnv(async () => {

@@ -794,7 +794,7 @@ async function handle(name, args = {}, ctx = {}) {
        * and a typo therefore cost a full build - tens of minutes - instead of
        * a sentence. */
       const mode = oneOf(args.mode, {
-        name: 'mode', allowed: ['auto', 'incremental', 'prebuilt', 'full'], dflt: 'auto',
+        name: 'mode', allowed: ['auto', 'incremental', 'prebuilt', 'transpile', 'full'], dflt: 'auto',
       });
       /* Which checkout a build needs depends on the mode: the full e2e-build
        * is the corpus' script (and can bootstrap the in-repo .abap2UI5 clone);

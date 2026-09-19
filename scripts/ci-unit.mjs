@@ -111,6 +111,17 @@ export function parseArgs(argv) {
   return opts;
 }
 
+/** Is the resolved framework checkout the clone THIS script makes, at another
+ *  release than the project pins? Then it is replaced rather than used: the
+ *  workspace clone resolves as a sibling candidate, so "unset A2UI5_HOME" is
+ *  no way to a clone of the pin - only re-cloning is. A checkout somebody
+ *  else provided (a sibling, an env var) is never replaced. Pure. */
+export function staleWorkspaceClone({ a2, have, pin, cloneDir, envSet }) {
+  if (!a2 || !pin || envSet) return false;
+  if (path.resolve(a2) !== path.resolve(cloneDir)) return false;
+  return have !== pin;
+}
+
 /** The markdown the step summary and the terminal share. */
 export function renderSummary({ framework, mode, results }) {
   const lines = [`## abap2UI5 unit tests (framework ${framework}, backend: ${mode})`, ''];
@@ -156,7 +167,7 @@ async function main(argv) {
     return 2;
   }
   if (opts.help) {
-    console.log(fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('*/')[0].replace(/^\/\*\n/, '').replace(/^ \* ?/gm, ''));
+    console.log(fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('*/')[0].replace(/^#!.*\n\/\*\n/, '').replace(/^ \* ?/gm, ''));
     return 0;
   }
   const log = (line) => console.error(`${TOOL}: ${line}`);
@@ -171,6 +182,10 @@ async function main(argv) {
   }
   if (opts.home) process.env.A2UI5_HOME = path.resolve(opts.home);
   let a2 = resolveA2UI5({ local: true });
+  if (a2 && staleWorkspaceClone({ a2, have: readVersion(a2), pin, cloneDir: frameworkCloneDir(), envSet: Boolean(explicitEnv('a2ui5')) })) {
+    // this script's own clone, on another release than the pin: cloneFramework replaces it
+    a2 = null;
+  }
   if (a2) {
     const have = readVersion(a2);
     if (pin && have && have !== pin) log(`using ${a2} (abap2UI5 ${have}) although the project pins ${pin} - point A2UI5_HOME elsewhere or unset it to get a clone of the pin`);
@@ -250,7 +265,20 @@ async function main(argv) {
   return exit;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+/* Run as a program, not when imported by a test. Compared by REAL path: npm
+ * installs the bin as a symlink (node_modules/.bin/abap2ui5-unit), which is
+ * what process.argv[1] carries, while import.meta.url is the resolved file -
+ * a plain path comparison made the bin exit 0 without doing anything. */
+function isMain() {
+  if (!process.argv[1]) return false;
+  try {
+    return fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url);
+  } catch {
+    return false;
+  }
+}
+
+if (isMain()) {
   main(process.argv.slice(2)).then((code) => process.exit(code), (e) => {
     console.error(`${TOOL}: ${(e && e.stack) || e}`);
     process.exit(2);

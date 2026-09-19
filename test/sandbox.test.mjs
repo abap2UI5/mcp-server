@@ -142,7 +142,9 @@ test('setupStatus reports the framework sandbox and the fake checkout', withFake
 
 // ------------------------------------------------------ the CI unit runner ----
 
-import { frameworkPinOf, collectClasses, parseArgs, renderSummary } from '../scripts/ci-unit.mjs';
+import { execFileSync as run } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { frameworkPinOf, collectClasses, parseArgs, renderSummary, staleWorkspaceClone } from '../scripts/ci-unit.mjs';
 import { filteredRunner, RUNNER_LOOP } from '../lib/runtime.mjs';
 
 test('the CI runner reads the project\'s framework pin, collects classes with their test includes, and renders', () => {
@@ -191,6 +193,39 @@ test('the CI runner reads the project\'s framework pin, collects classes with th
   assert.match(md, /ZCL_B: no test include/);
   assert.match(md, /ZCL_C\*\*: not deployed - source does not implement/);
   assert.match(md, /2 test method\(s\) ran, 2 class\(es\) failing/);
+});
+
+test('the abap2ui5-unit bin runs when invoked through npm\'s bin symlink', () => {
+  /* npm installs a bin as node_modules/.bin/<name> -> the script; process.argv[1]
+   * then carries the LINK. The main guard used to compare that plain path with
+   * the module's real one and never matched, so the bin exited 0 having done
+   * nothing. Skipped where a symlink cannot be made (Windows without the
+   * privilege). */
+  const script = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ci-unit.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-bin-'));
+  try {
+    const link = path.join(dir, 'abap2ui5-unit');
+    try {
+      fs.symlinkSync(script, link);
+    } catch {
+      return; // no symlinks here: nothing to prove
+    }
+    const out = run(process.execPath, [link, '--help'], { encoding: 'utf8' });
+    assert.match(out, /^abap2ui5-unit/, 'the usage, from the header comment - without the shebang');
+    assert.equal(run(process.execPath, [link, '--print-pin'], { encoding: 'utf8', cwd: dir }), '\n', 'no abaplint.jsonc here: an empty pin');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the CI runner replaces its own workspace clone when it is not at the pin, and nothing else', () => {
+  const cloneDir = path.join('/ws', 'abap2UI5');
+  assert.equal(staleWorkspaceClone({ a2: cloneDir, have: '1.143.0', pin: '1.144.0', cloneDir, envSet: false }), true);
+  assert.equal(staleWorkspaceClone({ a2: cloneDir, have: '1.144.0', pin: '1.144.0', cloneDir, envSet: false }), false, 'at the pin: kept');
+  assert.equal(staleWorkspaceClone({ a2: cloneDir, have: '1.143.0', pin: null, cloneDir, envSet: false }), false, 'no pin: whatever is there');
+  assert.equal(staleWorkspaceClone({ a2: '/elsewhere/abap2UI5', have: '1.143.0', pin: '1.144.0', cloneDir, envSet: false }), false, 'a sibling is somebody else\'s checkout');
+  assert.equal(staleWorkspaceClone({ a2: cloneDir, have: '1.143.0', pin: '1.144.0', cloneDir, envSet: true }), false, 'A2UI5_HOME pointing at it is a choice');
+  assert.equal(staleWorkspaceClone({ a2: null, have: null, pin: '1.144.0', cloneDir, envSet: false }), false);
 });
 
 test('filteredRunner narrows the generated runner to the named objects, or refuses an unknown shape', () => {
