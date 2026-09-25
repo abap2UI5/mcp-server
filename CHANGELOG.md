@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0 - 2026-09-25
+
 - **Review round over the new tools, six fixes.** `build_backend` mode
   `transpile` passed the schema and the build but not the server's own mode
   gate; `verify_app` never hydrated the app-template mirror its deploy stage
