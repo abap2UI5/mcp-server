@@ -21,7 +21,8 @@ name: Publish to npm
 # One-time setup, in this order - the workflow cannot do either step itself:
 #
 #   1. The npm organisation `abap2ui5` has to own the scope. It already does:
-#      @abap2ui5/linter and @abap2ui5/render-runtime are published under it.
+#      @abap2ui5/linter and @abap2ui5/linter-render (formerly
+#      @abap2ui5/render-runtime) are published under it.
 #   2. Trusted publishing can only be configured for a package that already
 #      exists, so the FIRST publish is manual, from a maintainer's machine
 #      after `npm login`:

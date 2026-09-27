@@ -30,8 +30,8 @@ getting right the first time.
 Everything below needs a human with npm credentials; no workflow can do it.
 
 The npm organisation `abap2ui5` already owns the scope (`@abap2ui5/linter`
-and `@abap2ui5/render-runtime` are published under it), so step 1 of the
-linter's checklist does not apply here.
+and `@abap2ui5/linter-render`, formerly `@abap2ui5/render-runtime`, are
+published under it), so step 1 of the linter's checklist does not apply here.
 
 Trusted publishing can only be configured for a package that **already
 exists**, so the first publish is manual:

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Dependencies:** `@modelcontextprotocol/sdk` ^1.30.1 and `playwright`
+  ^1.63.0 (lockfile refreshed within range). The linter's render runtime is
+  now published as `@abap2ui5/linter-render` (formerly
+  `@abap2ui5/render-runtime`); the docs and comments that name the install
+  say so.
+
 ## 0.2.0 - 2026-09-25
 
 - **Review round over the new tools, six fixes.** `build_backend` mode
