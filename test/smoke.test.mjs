@@ -21,7 +21,7 @@ const HAVE_A2UI5 = !!resolveA2UI5();
 const HAVE_DOCS = !!resolveDocs();
 /* The picture needs more than the linter checkout: the UI5 sources and the
  * browser that renders them, which is an opt-in install there
- * (@abap2ui5/render-runtime + `playwright install chromium`). Absent, this is
+ * (@abap2ui5/linter-render + `playwright install chromium`). Absent, this is
  * not a failure of anything in THIS repo. */
 const HAVE_RENDER_RUNTIME = HAVE_LINTER
   && fs.existsSync(path.join(resolveViewCheck(), 'node_modules', '@openui5', 'sap.m'));
