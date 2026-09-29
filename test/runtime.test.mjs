@@ -63,12 +63,15 @@ test('spawnWithTimeout leaves a fast child alone and streams its lines', async (
  * build must not keep transpiling under a request nobody waits for. */
 test('spawnWithTimeout kills the child promptly when the signal aborts', async () => {
   const ac = new AbortController();
-  setTimeout(() => ac.abort(), 200);
+  // aborted once the child has spoken, not after a fixed 200 ms: a node child
+  // on a loaded machine (the suite runs its files in parallel) can take longer
+  // than that to print, and the kept-output assertion below then failed on
+  // timing, not on the behaviour it is about
   const t0 = Date.now();
   const res = await spawnWithTimeout(
     process.execPath,
     ['-e', 'console.log("started"); setInterval(() => {}, 1000);'],
-    { timeoutMs: 30000, signal: ac.signal },
+    { timeoutMs: 30000, signal: ac.signal, onLine: (l) => { if (/started/.test(l)) ac.abort(); } },
   );
   assert.equal(res.aborted, true);
   assert.equal(res.timedOut, false, 'an abort is reported as an abort, not as a timeout');
