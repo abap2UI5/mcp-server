@@ -1835,3 +1835,44 @@ test('validate_view falls back to the property gate when the render gate cannot 
   // render: false asked for, so the throw is about something else - it stands
   await assert.rejects(withRenderFallback({ render: false, withRender: async () => { throw new Error('parse'); }, withoutRender: async () => ({}) }), /parse/);
 });
+
+// ------------------------------------------------------- small contracts ----
+
+/* The generation_rules footer linked docs/cookbook/overview, a page the site
+ * never had. Every docs URL this repository hands out is checked against the
+ * docs sources when a local docs checkout is there (the CI smoke job clones
+ * one); on a bare checkout there is nothing to check against. */
+test('every abap2ui5.github.io/docs link the server or README hands out names a real page', async (t) => {
+  const { resolveDocs } = await import('../lib/repos.mjs');
+  const docs = resolveDocs({ local: true });
+  if (!docs) return t.skip('no local docs checkout');
+  const files = ['server.mjs', 'README.md', ...fs.readdirSync(path.join(ROOT, 'lib')).filter((f) => f.endsWith('.mjs')).map((f) => `lib/${f}`)];
+  const seen = new Set();
+  for (const f of files) {
+    for (const m of fs.readFileSync(path.join(ROOT, f), 'utf8').matchAll(/https:\/\/abap2ui5\.github\.io\/docs\/([A-Za-z0-9_./-]+)/g)) {
+      const page = m[1].replace(/#.*$/, '').replace(/\.(html|md)$/, '').replace(/\/$/, '/index');
+      if (!page || page.includes('...') || seen.has(page)) continue;
+      seen.add(page);
+      assert.ok(fs.existsSync(path.join(docs, 'docs', `${page}.md`)), `${f} links docs/${m[1]}, which is no page (docs/${page}.md)`);
+    }
+  }
+  assert.ok(seen.size > 0);
+});
+
+/* scaffold_app's schema advertised ^[zy]c[lx]_ while the template (and the
+ * fallback here) enforce ^z(cl|cx)_ - an agent following the schema got
+ * `ycl_…` refused. */
+test('scaffold_app advertises the class rule it enforces', async () => {
+  const { TOOLS } = await import('../lib/tools.mjs');
+  const { classNameRule } = await import('../lib/scaffold.mjs');
+  const desc = TOOLS.find((x) => x.name === 'scaffold_app').inputSchema.properties.class.description;
+  const prefix = classNameRule(null).rule.split('[')[0]; // ^z(cl|cx)_
+  assert.ok(desc.includes(prefix), `the schema says ${desc}`);
+  assert.doesNotMatch(desc, /\[zy\]/);
+});
+
+test('a list argument\'s error shows an example of THAT argument', () => {
+  assert.throws(() => stringArray('zcl_x', { name: 'class_names', example: '["zcl_my_app"]' }), /e\.g\. \["zcl_my_app"\]/);
+  assert.throws(() => stringArray([], { name: 'class_names', example: '["zcl_my_app"]' }), /e\.g\. \["zcl_my_app"\]/);
+  assert.throws(() => stringArray('sap.m.Wizard', { name: 'entities' }), /e\.g\. \["sap\.m\.Wizard"\]/, 'the default stays scope_of\'s');
+});

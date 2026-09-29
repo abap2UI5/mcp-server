@@ -466,7 +466,7 @@ async function handle(name, args = {}, ctx = {}) {
         rules +
           '\n\n---\nThis is the PORTING brief. Building an app of your own instead? Call `app_guide`.\n' +
           'More depth: AGENTS.md (conventions, gates), CAPABILITIES.md via the capabilities tool, ' +
-          'and https://abap2ui5.github.io/docs/cookbook/overview for the cookbook.',
+          'and https://abap2ui5.github.io/docs/cookbook/index.html for the cookbook.',
       );
     }
     case 'docs_search': {
@@ -955,7 +955,7 @@ async function handle(name, args = {}, ctx = {}) {
       const miss = missingLocalSibling('abap2UI5');
       if (miss) return miss;
       const report = progressReporter(ctx);
-      const classNames = args.class_names === undefined ? undefined : stringArray(args.class_names, { name: 'class_names' });
+      const classNames = args.class_names === undefined ? undefined : stringArray(args.class_names, { name: 'class_names', example: '["zcl_my_app", "zcl_my_other_app"]' });
       const res = await runUnitTests({ className: args.class_name, classNames, signal: ctx.signal, onLine: report });
       if (res.aborted || res.timedOut) return toolError(res.error);
       if (res.class && res.tests.length === 0) {

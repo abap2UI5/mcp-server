@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Three wrong pointers.** `generation_rules` linked
+  `docs/cookbook/overview`, a page the site never had (now the cookbook's
+  index; a test checks every docs link against a local docs checkout);
+  `scaffold_app`'s schema advertised `^[zy]c[lx]_` while the template enforces
+  `^z(cl|cx)_`; and `run_unit_tests`' `class_names` errors showed the example
+  `["sap.m.Wizard"]`, which is `scope_of`'s.
 - **`validate_view` keeps the property findings when the render gate cannot
   start.** Without `@abap2ui5/linter-render`, or with a Chromium that will not
   launch, the linter throws, and the tool returned that throw - an error or
