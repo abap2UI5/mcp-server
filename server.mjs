@@ -83,6 +83,7 @@ import {
   killChildren,
   backendKind,
   npmModeProblem,
+  npmPreferenceProblem,
 } from './lib/runtime.mjs';
 import { explicitEnv } from './lib/repos.mjs';
 
@@ -895,7 +896,10 @@ async function handle(name, args = {}, ctx = {}) {
       const cloneable = !a2 && !explicitEnv('a2ui5') && (mode === 'prebuilt' || mode === 'transpile' || (mode === 'auto' && kind === 'clone'));
       const needsCorpus = mode === 'full' || (mode === 'auto' && kind === 'missing');
       let miss = null;
-      if (needsCorpus) miss = missingLocalSibling('samples-controls');
+      // refused before the running backend is stopped: a build nothing would serve
+      const unserved = npmPreferenceProblem({ mode, a2 });
+      if (unserved) miss = toolError(unserved);
+      else if (needsCorpus) miss = missingLocalSibling('samples-controls');
       else if (onNpm) miss = npmModeProblem(kind) ? toolError(npmModeProblem(kind)) : null;
       else if (!cloneable) miss = missingLocalSibling('abap2UI5');
       if (miss) return miss;

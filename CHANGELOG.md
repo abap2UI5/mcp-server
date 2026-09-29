@@ -66,6 +66,14 @@
   fixture (`failed.fixture`, with the method that threw), and the runner
   keeps 100 stack frames instead of 10, so a failure deep in the code under
   test keeps the test class's frame.
+- **`build_backend` refuses a checkout build under
+  `A2UI5_MCP_BACKEND=npm`.** Mode `npm` was already refused beside a
+  checkout in use, but the mirror case went through: with the package
+  chosen as the backend, modes `prebuilt`, `transpile` and `full` built a
+  checkout (or cloned one first) and answered `built: true`, while
+  `run_app` and `run_unit_tests` kept running on the package and said
+  "backend not built". They are refused now, before a running backend is
+  stopped, and `setup_status`'s hint no longer suggests them there.
 - **The registry lookup and the install read the same npm config.** `npm
   view` ran in the directory the server was started in, the install in the
   workspace: a project `.npmrc` there decided which registry was asked for

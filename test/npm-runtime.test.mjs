@@ -14,6 +14,7 @@ import path from 'node:path';
 import {
   decideBackend, backendKind, sandbox, deployApp, removeApp, readAppSource, listDevApps, lintApp, buildBackend,
   backendBuilt, runUnitTests, setupStatus, backendStatus, frameworkLintConfig, npmLintTarget, npmModeProblem, planBuild,
+  npmPreferenceProblem,
 } from '../lib/runtime.mjs';
 import { resetNpmBackend, appsDir } from '../lib/npm-backend.mjs';
 import { fakeRelease, fakeTemplate, APP, TESTS, VERSION, CORE_SHA } from './helpers/npm-fixture.mjs';
@@ -320,4 +321,40 @@ test('abap2ui5-unit tests every class and interface of the project, in a sandbox
   assert.deepEqual(Object.fromEntries(fs.readdirSync(box).map((f) => [f, fs.readFileSync(path.join(box, f), 'utf8')])), before);
   assert.deepEqual(fs.readdirSync(workspace).filter((f) => /^unit-/.test(f)), [], 'the run\'s own sandbox is removed');
   assert.deepEqual(fs.readdirSync(path.join(workspace, 'runtime', VERSION)).filter((f) => /^(apps-unit-|\.apps-|\.staging-)/.test(f)), []);
+}));
+
+/* A2UI5_MCP_BACKEND=npm makes the package the backend in use even beside a
+ * checkout. mode npm was refused while a CHECKOUT is in use ("would build a
+ * backend nothing serves") - but the mirror case went through: under the npm
+ * preference, modes prebuilt, transpile and full built (or cloned and built)
+ * a checkout's backend that run_app, run_unit_tests and backend start then
+ * ignored, and build_backend reported `built: true` while run_app answered
+ * "backend not built". */
+test('under A2UI5_MCP_BACKEND=npm a checkout build is refused as the backend nothing serves', { skip: process.platform === 'win32' && 'npm scripts of a fake checkout' }, withNpm(async (t, { root }) => {
+  const a2 = path.join(root, 'abap2UI5');
+  fs.mkdirSync(path.join(a2, 'node', 'srv'), { recursive: true });
+  fs.writeFileSync(path.join(a2, 'node', 'srv', 'express.mjs'), '');
+  fs.mkdirSync(path.join(a2, 'node_modules', '@abaplint', 'transpiler-cli'), { recursive: true });
+  fs.writeFileSync(path.join(a2, 'package.json'), JSON.stringify({
+    name: 'abap2ui5', version: '1.145.0',
+    scripts: {
+      downport: 'node -e ""',
+      auto_transpile: 'node -e "require(\'fs\').mkdirSync(\'node/output\',{recursive:true});require(\'fs\').writeFileSync(\'node/output/init.mjs\',\'\')"',
+    },
+  }));
+  process.env.A2UI5_HOME = a2;
+  assert.equal(backendKind(), 'npm', 'the preference wins over the checkout');
+  for (const mode of ['transpile', 'prebuilt', 'full']) {
+    const res = await buildBackend({ mode });
+    assert.equal(res.ok, false, `${mode}: ${res.tail}`);
+    assert.match(res.tail, /A2UI5_MCP_BACKEND=npm/, mode);
+    assert.match(res.tail, /nothing serves/, mode);
+  }
+  assert.ok(!fs.existsSync(path.join(a2, 'node', 'output')), 'the checkout was not built');
+  // the pure half: the preference is what decides, not the kind alone
+  assert.match(planBuild({ mode: 'prebuilt', kind: 'npm', a2, preference: 'npm' }).problem, /nothing serves/);
+  assert.match(npmPreferenceProblem({ mode: 'transpile', a2: null, preference: 'npm' }), /a framework clone into a backend nothing serves/);
+  assert.equal(npmPreferenceProblem({ mode: 'auto', a2, preference: 'npm' }), null);
+  assert.equal(npmPreferenceProblem({ mode: 'prebuilt', a2, preference: 'clone' }), null);
+  assert.deepEqual(planBuild({ mode: 'prebuilt', kind: 'npm', canClone: true }), { effective: 'prebuilt' }, 'without the preference prebuilt is the way to the clone, which is then served');
 }));

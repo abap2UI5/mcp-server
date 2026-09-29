@@ -162,7 +162,11 @@ and deleting `~/.abap2ui5-mcp/abap2UI5` goes back to the npm default
 `transpile` clone when there is no checkout - they genuinely need one - and
 are therefore the explicit way to the clone; mode `npm` is refused while a
 checkout is the backend in use (it would build a backend nothing serves),
-before the running backend is stopped.
+before the running backend is stopped - and the mirror case the same way:
+under `A2UI5_MCP_BACKEND=npm` the package stays the backend in use whatever
+a build makes, so modes `prebuilt`, `transpile` and `full` are refused
+(`npmPreferenceProblem`) instead of building a checkout (or cloning one)
+that run_app then ignores while build_backend reports it built.
 
 #### The npm backend - `lib/npm-backend.mjs`, `lib/npm-host.mjs`
 
