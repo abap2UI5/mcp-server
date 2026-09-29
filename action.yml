@@ -8,9 +8,13 @@
 # minutes), the classes are transpiled into it and their tests run. The
 # result is the job's verdict and a step summary.
 #
-#   - uses: abap2UI5/mcp-server@v0
+#   - uses: abap2UI5/mcp-server@v0.2.0
 #     with:
 #       paths: src
+#
+# (`@v0`, the floating major tag, is moved to each release by release.yml -
+# it exists from the first release after 0.2.0 on; pin a release tag until
+# then.)
 #
 # The framework clone and its backend are cached per release, so the first
 # run pays the build and later runs pay seconds. scripts/ci-unit.mjs is the

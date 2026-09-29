@@ -85,8 +85,9 @@ Done once, by hand, before there was anything on npm — repeat it if
 `package.json`'s `files`, `bin` or `dependencies` ever change:
 
 - **The manifest carries everything a published package needs**: `name`,
-  `version`, `description`, `bin` (`abap2ui5-mcp` → `server.mjs`, which has
-  its shebang), `files`, `engines` (node >= 22), `repository`, `homepage`,
+  `version`, `description`, `bin` (`mcp-server` and `abap2ui5-mcp` →
+  `server.mjs`, which has its shebang; `abap2ui5-unit` → the CI runner),
+  `files`, `engines` (node >= 22), `repository`, `homepage`,
   `bugs`, `license`, `keywords`, `publishConfig.access: public`. No `main` and
   no `exports`, deliberately: this is a program, not a library.
 - **The tarball is `server.mjs`, `lib/`, `README.md`, `LICENSE` and
@@ -104,6 +105,17 @@ Done once, by hand, before there was anything on npm — repeat it if
   (`The packed tarball starts and answers`) instead of a thing to remember —
   `npm test` runs against the working tree, where a `lib/` module missing from
   `files` still exists, so nothing else in the suite can see that defect.
+- **npx runs the tarball the way users do.** 0.2.0 had no bin named after
+  the package, so `npx --yes @abap2ui5/mcp-server` — the registration every
+  document gives — failed with "could not determine executable to run", and
+  the step above stayed green because it called the bin by name. The bin
+  `mcp-server` is that name; `scripts/pack-smoke.mjs` (the workflow step
+  `npx runs the packed tarball the way users do`) runs `npx --yes <tarball>`,
+  `npx -p <tarball> abap2ui5-mcp` and `npx -p <tarball> abap2ui5-unit
+  --help`, answers an MCP `initialize` and checks the server exits when stdin
+  closes. Run it by hand (`npm pack && node scripts/pack-smoke.mjs
+  abap2ui5-mcp-server-*.tgz`) before tagging a release that touches `bin`
+  or `files`.
 - **The level-1 tools work from the tarball**: with only `AI_VIEW_CHECK_HOME`
   pointed at a linter checkout, `validate_view` returned `ok: true` on a clean
   view and `screenshot_view` returned a PNG. Neither needs the corpus.
@@ -132,6 +144,14 @@ after the tag. Worth remembering before cutting one.
 
 ## After a release
 
+**The floating major tag.** The composite action is used as
+`abap2UI5/mcp-server@v0`; the workflow's `move-major-tag` job points `v0` at
+each release it publishes (it needs `contents: write`, and nothing else in the
+workflow does). 0.2.0 was released before that job existed, so `v0` did not
+exist until the next release — the README pins `@v0.2.0` until then. Creating
+it once by hand is the other way:
+`git tag -f v0 v0.2.0^{} && git push -f origin refs/tags/v0`.
+
 Both of these were done when 0.1.0 landed; they are here as the checklist for
 the release after a **rename**, which is when they come back:
 
@@ -139,5 +159,6 @@ the release after a **rename**, which is when they come back:
   registers this server via `npx --yes @abap2ui5/mcp-server` — unpinned, because
   the server's compatibility is with the corpora it reads and not with that
   extension. A rename of this package is a change in that repository.
-- The README's setup section leads with `npx @abap2ui5/mcp-server` and mentions
+- The README's setup section leads with `npx --yes -p @abap2ui5/mcp-server
+  abap2ui5-mcp` (the form every version answers) and mentions
   a checkout only for working on the server itself.

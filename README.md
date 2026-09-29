@@ -44,8 +44,13 @@ The server itself is on npm, so it needs no checkout. Register it with Claude
 Code:
 
 ```sh
-claude mcp add abap2ui5 -- npx --yes @abap2ui5/mcp-server
+claude mcp add abap2ui5 -- npx --yes -p @abap2ui5/mcp-server abap2ui5-mcp
 ```
+
+(`-p … abap2ui5-mcp` names the bin explicitly, which every published version
+answers. The shorter `npx --yes @abap2ui5/mcp-server` needs a bin named after
+the package, which 0.2.0 and earlier do not have — npx stops there with "could
+not determine executable to run".)
 
 (The install is ~45 MB, 19 MB of it a Playwright driver only `run_app` uses —
 paid on the first start, cached after. From a checkout instead:
@@ -85,8 +90,8 @@ via the committed [`.mcp.json`](.mcp.json); the
 `docs_search`, `scaffold_app`, `generation_rules`) read committed files, so
 when no checkout resolves and no env var is set they read them from GitHub
 instead: the files land in a per-user cache (`<tmp>/abap2ui5-mcp-remote`, a
-day at a time) that the server treats as a read-only checkout. `npx --yes
-@abap2ui5/mcp-server` in a fresh project therefore answers the first questions
+day at a time) that the server treats as a read-only checkout. `npx --yes -p
+@abap2ui5/mcp-server abap2ui5-mcp` in a fresh project therefore answers the first questions
 at once; the tools that write or build (`deploy_app`, `build_backend`,
 `run_app`, …) still need the real checkouts and say so. `A2UI5_MCP_REMOTE=0`
 or `A2UI5_MCP_OFFLINE=1` switches the mirror off.
@@ -169,10 +174,15 @@ pins, its backend downloaded or built once and cached, the classes transpiled
 into it, the tests run through the generated runner.
 
 ```yaml
-- uses: abap2UI5/mcp-server@v0
+- uses: abap2UI5/mcp-server@v0.2.0
   with:
     paths: src
 ```
+
+Pin a release tag. The release workflow moves a floating major tag (`@v0`)
+to every release it publishes; until the first release after 0.2.0 has done
+that, `@v0` does not exist and a workflow naming it fails to resolve the
+action.
 
 ```sh
 npx -p @abap2ui5/mcp-server abap2ui5-unit src     # the same, locally

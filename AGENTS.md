@@ -188,10 +188,18 @@ transpile; `runUnitTests({ classNames })` over the classes that carry tests
 (the generated runner is filtered to the SET — `filteredRunner`); a markdown
 summary, also into `GITHUB_STEP_SUMMARY`. Exit 1 on a failing test, 2 on a
 build or transpile failure. `action.yml` at the repository root wraps it as a
-composite GitHub Action (`abap2UI5/mcp-server@v0`) with the framework clone
+composite GitHub Action (`abap2UI5/mcp-server@v0` — a floating tag the
+release workflow's `move-major-tag` job moves to each release; it did not exist
+for 0.2.0, so the README pins `@v0.2.0` until one has) with the framework clone
 and its backend cached per pin under `~/.abap2ui5-mcp`; `package.json` ships
-the script as the second bin, so `npx -p @abap2ui5/mcp-server abap2ui5-unit
-src` is the local form. app-template's `check.yml` runs the action and its
+the script as a bin of its own, so `npx -p @abap2ui5/mcp-server abap2ui5-unit
+src` is the local form. **The bins are a contract too**: `mcp-server` (the
+package's unscoped name — what `npx --yes @abap2ui5/mcp-server` runs; without
+it npx cannot pick between the others and refuses), `abap2ui5-mcp` (the
+explicit form, `npx -p @abap2ui5/mcp-server abap2ui5-mcp`, which every version
+answers) and `abap2ui5-unit`. `test/unit.test.mjs` pins the first, and
+`scripts/pack-smoke.mjs` — a release workflow step — runs all three through
+npx against the packed tarball. app-template's `check.yml` runs the action and its
 `npm run test:unit` the bin — that job and that script are consumers of this
 contract: the action's inputs (`paths`, `framework`, `node-version`), the
 bin's name and its exit codes. `test/sandbox.test.mjs` pins the pure half

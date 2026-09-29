@@ -1706,3 +1706,23 @@ test('a template without its own description is reported, not guessed at', () =>
   assert.equal(noSpec, true);
   assert.deepEqual(files, []);
 });
+
+// ------------------------------------------------------------------- bins ----
+
+/* `npx --yes @abap2ui5/mcp-server` runs the bin named after the package's
+ * UNSCOPED name, or the only bin when there is exactly one. 0.2.0 had two
+ * bins and neither was called `mcp-server`, so every registration the docs
+ * give failed with "could not determine executable to run". The release
+ * workflow proves the whole npx path against the tarball
+ * (scripts/pack-smoke.mjs); this pins the manifest half on every `npm test`. */
+test('the package carries a bin named after its unscoped name, and keeps the explicit ones', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+  const unscoped = pkg.name.replace(/^@[^/]+\//, '');
+  assert.equal(pkg.bin[unscoped], 'server.mjs', `npx ${pkg.name} runs bin '${unscoped}' - it must be the server`);
+  assert.equal(pkg.bin['abap2ui5-mcp'], 'server.mjs', 'the explicit form every version answers stays');
+  assert.equal(pkg.bin['abap2ui5-unit'], 'scripts/ci-unit.mjs', 'the CI runner bin is a contract with app-template');
+  for (const file of new Set(Object.values(pkg.bin))) {
+    assert.ok(pkg.files.some((f) => file === f || file.startsWith(f)), `${file} is a bin and must be in files`);
+    assert.match(fs.readFileSync(path.join(ROOT, file), 'utf8'), /^#!\/usr\/bin\/env node\n/, `${file} needs its shebang`);
+  }
+});

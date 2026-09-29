@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **`npx --yes @abap2ui5/mcp-server` runs the server.** 0.2.0 shipped two
+  bins, `abap2ui5-mcp` and `abap2ui5-unit`, and none named after the package,
+  so npx stopped with "could not determine executable to run" - the command
+  the README, the docs, the VS Code extension and app-template's `.mcp.json`
+  all give. The bin `mcp-server` fixes that from this version on; the README
+  now leads with `npx --yes -p @abap2ui5/mcp-server abap2ui5-mcp`, which 0.2.0
+  answers too. The release workflow runs the packed tarball through npx the
+  way users do (`scripts/pack-smoke.mjs`) and moves the floating major tag
+  `v0` - which `uses: abap2UI5/mcp-server@v0` names and which never existed -
+  to each release; until then the README pins `@v0.2.0`.
 - **The server exits with its client.** It stopped only on SIGINT/SIGTERM,
   but a client ends a stdio session by closing the pipe, and under `npx` a
   SIGTERM reaches npm rather than the server - so node, the warm Chromium and
