@@ -74,6 +74,10 @@
   `run_app` and `run_unit_tests` kept running on the package and said
   "backend not built". They are refused now, before a running backend is
   stopped, and `setup_status`'s hint no longer suggests them there.
+- **`setup_status` names the abaplint install the next build makes.** After
+  `abap2ui5-unit` installed a release (without the lint's `@abaplint/cli`),
+  or after app-template moved its pin, the next `build_backend` ran an npm
+  install that `nextBuild` did not mention.
 - **A build killed half-way no longer leaves its output behind for good.**
   The npm backend's build, open-abap-core fetch and `abap2ui5-unit` run
   clean up in a `finally` that a killed process never reaches - and closing
