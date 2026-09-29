@@ -13,7 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   decideBackend, backendKind, sandbox, deployApp, removeApp, readAppSource, listDevApps, lintApp, buildBackend,
-  backendBuilt, runUnitTests, setupStatus, backendStatus, frameworkLintConfig, npmLintTarget, npmModeProblem,
+  backendBuilt, runUnitTests, setupStatus, backendStatus, frameworkLintConfig, npmLintTarget, npmModeProblem, planBuild,
 } from '../lib/runtime.mjs';
 import { resetNpmBackend, appsDir } from '../lib/npm-backend.mjs';
 import { fakeRelease, fakeTemplate, APP, TESTS, VERSION, CORE_SHA } from './helpers/npm-fixture.mjs';
@@ -60,6 +60,49 @@ test('which backend: a checkout wins, a broken A2UI5_HOME is reported, nothing a
   assert.equal(decideBackend({ preference: 'npm', envSet: true }), 'npm');
   assert.equal(decideBackend({ preference: 'clone' }), 'clone', 'the old default, chosen explicitly');
   assert.equal(decideBackend({ preference: 'clone', checkout: true }), 'checkout', 'once cloned, the clone is a checkout');
+});
+
+/* Which build a mode asks for, per backend - the resolution order of
+ * build_backend in one table. What is there: `npm` - nothing (the npm
+ * backend is in use); `checkout` - a framework checkout, built or not;
+ * `missing` - A2UI5_HOME pointing nowhere; `clone` - A2UI5_MCP_BACKEND=clone
+ * and nothing cloned yet. */
+test('build_backend\'s modes resolve per backend: npm by default, the clone only when asked, the checkout as before', () => {
+  const at = {
+    npm: { kind: 'npm', canClone: true },
+    checkout: { kind: 'checkout', a2: '/co/abap2UI5' },
+    built: { kind: 'checkout', a2: '/co/abap2UI5', canIncrement: true },
+    missing: { kind: 'missing', envName: 'A2UI5_HOME' },
+    clone: { kind: 'clone', canClone: true },
+  };
+  const plan = (mode, where, extra = {}) => planBuild({ mode, ...at[where], ...extra });
+  // auto
+  assert.deepEqual(plan('auto', 'npm'), { effective: 'npm' }, 'nothing there: the package, not a clone');
+  assert.deepEqual(plan('auto', 'checkout'), { effective: 'prebuilt' });
+  assert.deepEqual(plan('auto', 'built'), { effective: 'incremental' });
+  assert.deepEqual(plan('auto', 'clone'), { effective: 'prebuilt' }, 'A2UI5_MCP_BACKEND=clone: the old default, which clones');
+  assert.equal(plan('auto', 'missing').effective, 'full', 'A2UI5_HOME pointing nowhere is never built around');
+  assert.match(plan('auto', 'missing').problem, /a full build runs samples-controls/);
+  assert.deepEqual(plan('auto', 'missing', { corpus: '/co/samples-controls' }), { effective: 'full' });
+  // npm
+  assert.deepEqual(plan('npm', 'npm'), { effective: 'npm' });
+  assert.match(plan('npm', 'checkout').problem, /\/co\/abap2UI5 is the backend in use.*A2UI5_MCP_BACKEND=npm/);
+  assert.match(plan('npm', 'missing').problem, /A2UI5_HOME is set and points at no abap2UI5 checkout/);
+  assert.match(plan('npm', 'clone').problem, /A2UI5_MCP_BACKEND=clone chooses the framework clone/);
+  // incremental
+  assert.deepEqual(plan('incremental', 'npm'), { effective: 'npm' }, 'the npm build is incremental by nature');
+  assert.deepEqual(plan('incremental', 'built'), { effective: 'incremental' });
+  assert.match(plan('incremental', 'checkout').problem, /needs a prior build/);
+  assert.match(plan('incremental', 'missing').problem, /abap2UI5 checkout not found \(A2UI5_HOME is set/);
+  // prebuilt and transpile: the explicit ways to the clone
+  assert.deepEqual(plan('prebuilt', 'npm'), { effective: 'prebuilt' }, 'clones, then downloads the asset');
+  assert.deepEqual(plan('transpile', 'npm'), { effective: 'transpile' }, 'clones, then builds the framework');
+  assert.deepEqual(plan('transpile', 'checkout'), { effective: 'transpile' });
+  assert.match(plan('prebuilt', 'missing').problem, /checkout not found/);
+  assert.match(plan('transpile', 'missing').problem, /checkout not found/);
+  // full is the corpus' script, whatever else is there
+  assert.match(plan('full', 'npm').problem, /a full build runs samples-controls/);
+  assert.deepEqual(plan('full', 'built', { corpus: '/co/samples-controls' }), { effective: 'full' });
 });
 
 test('the npm sandbox is the workspace\'s, and deploy, list, read and remove work in it', withNpm(async (t, { workspace, dir }) => {
