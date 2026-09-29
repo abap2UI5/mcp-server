@@ -8,8 +8,9 @@ run_app` loop exposed to MCP clients, no SAP system required.
 the point.** `validate_view` and `screenshot_view` both work from SOURCE
 through the linter's render harness: seconds, no backend, no transpile, and
 blind to everything that only exists at runtime. `build_backend`/`run_app`
-boot the real transpiled app: tens of minutes for the first build, and the
-only place the ABAP actually runs. A tool that moves work from the second half
+boot the real transpiled app: seconds per build on the npm backend after a
+first install (tens of minutes for a full corpus build), and the only place
+the ABAP actually runs. A tool that moves work from the second half
 to the first is worth more here than almost anything else — the expensive half
 is what an agent's feedback loop is made of.
 
@@ -37,10 +38,17 @@ authoritative**: when it points at a directory without the expected checkout,
 the repo resolves to null and the tool reports the misconfiguration — there
 is no silent fallback to the sibling guess.
 
+The one thing that is not read from a checkout is the BACKEND when there is
+no framework checkout: the npm package `@abap2ui5/node-runtime`, installed
+per release into the workspace (see "The expensive half with one checkout —
+or none"). It is still not bundled - the server installs the release the
+registry (or `A2UI5_MCP_RUNTIME_VERSION`) names, at exact versions, and
+reads it live like a checkout.
+
 | Env var | Default sibling | Used for |
 | --- | --- | --- |
 | `SAMPLES_CONTROLS_HOME` (was `AI_DEMOKIT_HOME`, still read) | `../samples-controls`, `../abap2UI5-api`, `../ai-demokit` | CAPABILITIES.md (re-parsed on every query), `catalogue.json` + `SAMPLES.md` (the control catalogue `examples` searches), `scripts/generation-prompt.txt`, `scripts/scope-of.mjs`, `scripts/e2e-build.mjs`, `abaplint.jsonc`, `src/zz_dev/` (deploy target), `node_modules/@openui5/*` (UI5 runtime for screenshots) |
-| `A2UI5_HOME` | `../abap2UI5` | `node/srv/express.mjs` (backend server), `node/downport/` + `node/setup/abap_transpile.json` (incremental build), `node/output/`, `.claude/skills/{abap-check,ui5-check}/SKILL.md` (`pitfalls`), `docs/agents/building-apps.md` (`app_guide`) |
+| `A2UI5_HOME` | `../abap2UI5` | `.claude/skills/{abap-check,ui5-check}/SKILL.md` (`pitfalls`), `docs/agents/building-apps.md` (`app_guide`), `src/02/z2ui5_if_client.intf.abap` (`api_reference`) - and, WHEN a checkout is there, the backend: `node/srv/express.mjs` (backend server), `node/downport/` + `node/setup/abap_transpile.json` (incremental build), `node/output/`. Without one the backend is the npm package `@abap2ui5/node-runtime` (below), and nothing needs this checkout |
 | `SAMPLES_HOME` | `../samples`, `../abap2UI5-samples` | `catalogue.json` (preferred) + `SAMPLES.md` (fallback, and the src/00 area) — one of the three catalogues `examples` searches |
 | `SAMPLES_STACK_HOME` | `../samples-stack`, `../abap2UI5-samples-stack` | `catalogue.json` (preferred) + `SAMPLES.md` (fallback) — the stack-dependent catalogue (OData, RAP, APC, launchpad) |
 | `APP_TEMPLATE_HOME` | `../app-template`, `../abap2UI5-app-template` | `template.json` and the files it lists — what `scaffold_app` serves and renames (the tool is dead without this checkout) |
@@ -67,10 +75,17 @@ from; default the framework release asset, see below), the mirror knobs
 (below), `GITHUB_TOKEN`/`GH_TOKEN` (sent to `api.github.com` only — it raises
 the docs tree listing's rate limit; never to `raw.githubusercontent.com`, which
 answers a token it rejects with 404, and a token the API refuses is dropped
-with a warning), `A2UI5_MCP_WORKSPACE` (where a framework clone lands, below), and the child-process timeouts `A2UI5_MCP_LINT_TIMEOUT_MS` /
+with a warning), `A2UI5_MCP_WORKSPACE` (where the npm backend installs, its
+sandbox lives and a framework clone lands, below), `A2UI5_MCP_BACKEND`
+(`npm`: the npm backend even beside a framework checkout; `clone`: the
+framework clone as the answer to "no checkout", the default before the npm
+backend), `A2UI5_MCP_RUNTIME_VERSION` (the `@abap2ui5/node-runtime` release,
+X.Y.Z; default the registry's latest - `A2UI5_MCP_OFFLINE` also stops that
+question), `A2UI5_MCP_SKIP_NETWORK_TESTS` (the one `npm test` file that
+reaches the registry skips itself), and the child-process timeouts `A2UI5_MCP_LINT_TIMEOUT_MS` /
 `A2UI5_MCP_SCOPE_TIMEOUT_MS` (default 5 min), `A2UI5_MCP_BUILD_TIMEOUT_MS`
-(default 30 min, also the prebuilt download) and `A2UI5_MCP_UNIT_TIMEOUT_MS`
-(default 10 min, the test runner).
+(default 30 min, also the prebuilt download and the npm install) and
+`A2UI5_MCP_UNIT_TIMEOUT_MS` (default 10 min, the test runner).
 
 ### The read-only GitHub mirror — the cheap half without any checkout
 
@@ -104,9 +119,11 @@ Three rules, each pinned by `test/remote.test.mjs` and
   `deploy_app`, `read_app`, `remove_app`, `scope_of`, `build_backend`,
   `run_app`, `interact_app`, `run_unit_tests` and `backend start` resolve
   with `{ local: true }` (`missingLocalSiblingMessage` in `lib/siblings.mjs`)
-  and answer a mirror with the clone command. `corpus()` and `a2Local()` in
-  `lib/runtime.mjs` are the two doors to the sandbox and the backend, and
-  both are local-only.
+  and never write into or build out of a mirror. `corpus()` and `a2Local()`
+  in `lib/runtime.mjs` are the two doors to the sandbox and the backend, and
+  both are local-only - a mirror of the framework is simply no checkout, so
+  with nothing else there the npm backend runs the apps and the mirror goes
+  on serving the guide.
 - **A failed download degrades to what was there before.** With a cached
   mirror the stale copy stands in (`stale: true`); without one the tool
   degrades with its usual message plus the reason (`remoteStatus`). A
@@ -120,51 +137,168 @@ path whitelist `safeRelPath`), from the checkout when there is one.
 
 ### The expensive half with one checkout — or none
 
-The corpus used to be a precondition of every tool past `validate_view`: the
-deploy sandbox was its `src/zz_dev`, the lint its `abaplint.jsonc`, the build
-its `e2e-build.mjs`, the UI5 runtime its `node_modules/@openui5`. Three of the
-four are optional now, and the fourth is a download:
+The corpus used to be a precondition of every tool past `validate_view`, and
+then the framework checkout was; neither is any more. **Which backend runs
+the apps is decided per call** (`backendKind` in `lib/runtime.mjs`, the pure
+half `decideBackend`), from what is there - nothing is remembered but the
+checkouts themselves:
 
-- **The dev sandbox has two homes** (`sandbox()` in `lib/runtime.mjs`): the
+- **checkout** - a framework checkout resolves (`A2UI5_HOME`, a sibling, the
+  corpus' `.abap2UI5`, or a clone `build_backend` made in the workspace).
+  Everything under "With a framework checkout" below applies, unchanged.
+- **npm** - no checkout, nothing configured: `@abap2ui5/node-runtime`
+  (`lib/npm-backend.mjs`, the next section). The default on a bare machine;
+  `A2UI5_MCP_BACKEND=npm` chooses it beside a checkout (which keeps serving
+  the guide, the interface and the pitfalls).
+- **missing** - `A2UI5_HOME` is set and is not a checkout: reported, never
+  built around (the rule every repository follows here; the missing-siblings
+  suite pins it).
+- **clone** - `A2UI5_MCP_BACKEND=clone` and no checkout yet: the old
+  default, `build_backend` clones the release first.
+
+Once a clone exists it IS a checkout: the choice persists as the directory,
+and deleting `~/.abap2ui5-mcp/abap2UI5` goes back to the npm default
+(`setup_status` says so beside it). `build_backend` mode `prebuilt` and
+`transpile` clone when there is no checkout - they genuinely need one - and
+are therefore the explicit way to the clone; mode `npm` is refused while a
+checkout is the backend in use (it would build a backend nothing serves),
+before the running backend is stopped.
+
+#### The npm backend - `lib/npm-backend.mjs`, `lib/npm-host.mjs`
+
+WHY: without a checkout, `build_backend` used to shallow-clone the framework
+and run `npm ci` there - its whole development toolchain (186 MB of
+node_modules for 1.145.0: Playwright, @ui5/cli, eslint, c8, terser) only to
+get a transpiler and abaplint - then download the release's backend asset.
+Every CI run of every app repository paid that through `abap2ui5-unit`. The
+package carries what the loop needs from ONE release commit: `output/` (the
+framework transpiled; `init.mjs` boots it), `downport/` (the same commit's
+ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
+`createHandler`, `createApp`, `serve`) and in its package.json
+`abap2ui5.transpiler` (from the release after 1.145.0 also
+`abap2ui5.openAbapCore`). The workspace (`A2UI5_MCP_WORKSPACE`, default
+`~/.abap2ui5-mcp`):
+
+    runtime/<version>/   package.json + package-lock.json (exact versions),
+                         node_modules (--ignore-scripts), apps/, and the
+                         install marker .abap2ui5-mcp-runtime.json
+    runtime/current.json the release the last build used
+    runtime/registry.json the registry's latest, as last asked
+    open-abap-core/<sha>/ the standard library, by commit
+    sandbox/             the dev apps' sources - outside runtime/, so a new
+                         release keeps every deployed app
+
+- **The release**: `A2UI5_MCP_RUNTIME_VERSION`, else the registry's latest -
+  asked through `npm view`, so the registry, proxy and CA npm is configured
+  with are the ones asked, the same the install then uses; cached for the
+  mirror's TTL - else (offline, or the registry unreachable) the newest
+  installed release. `currentRuntimeVersion` is the synchronous answer the
+  boot, test and status paths use: the pin, the last build's, the newest
+  installed. Versions and shas from the registry are validated before they
+  become a path or an argument.
+- **The install**: the package, express within its peer range (recorded
+  exact by `--save-exact`), `@abaplint/transpiler-cli` at
+  `abap2ui5.transpiler` (else the package's `@abaplint/runtime` pin - the two
+  are released in lockstep) and, for the lint, `@abaplint/cli` at
+  app-template's pin (its lockfile, its package.json, then
+  `ABAPLINT_CLI_FALLBACK`, said in `setup_status`). Queued per directory, so
+  a lint and a build never run two npm processes over one node_modules; a
+  complete directory costs two file reads. `abap2ui5-unit`, which does not
+  lint, leaves abaplint out.
+- **open-abap-core** at the release's commit: `abap2ui5.openAbapCore`, else
+  `KNOWN_OPEN_ABAP_CORE` (1.145.0: b2d219df, abap2UI5's `fetch-deps.mjs` at
+  tag 1.145.0 = the package's `abap2ui5.commit`), else HEAD resolved to a sha
+  and said so. `git init` / `fetch --depth 1 <sha>` / `checkout` into a
+  temp dir, `rev-parse` verified, renamed into place: shared by sha, never
+  half there.
+- **The build** (`buildApps`): the transpiler has no option to leave its
+  libraries out of the output - it transpiles and writes every dependency
+  object too (737 objects, 1148 files for one app class) - so it writes into
+  a staging directory, and `apps/` receives only the files of the sandbox's
+  own objects. Their imports of anything else (`const {cx_root} = await
+  import("./cx_root.clas.mjs")`) are pointed at the package's `./output/*`
+  export (`rewriteImports`): **a second copy of a framework module is the
+  bug to avoid** - cx_root's copy would register itself over the package's
+  in `abap.Classes`, and every `e instanceof abap.Classes['CX_ROOT']` the
+  framework's CATCH compiles to would then miss the exceptions of the first.
+  (The package README's own recipe, `import("./output/zcl_my_app.clas.mjs")`
+  beside a full transpiler output, has exactly that second copy.) An import
+  shape the rewrite does not know fails the build (`strayImports`) instead
+  of the boot. `apps/index.mjs` is the transpiler's runner, which lists no
+  dependency's tests - the dev apps' alone; `apps/init.mjs` is the ONE boot
+  (`initialize()`, `accelerate()` when the release exports it, the dev
+  modules in the transpiler's own order) that the runner and the host both
+  import. apps/ is swapped in whole, which is what prunes a removed app, and
+  a failed build leaves the last good one served.
+- **The host** (`lib/npm-host.mjs`, spawned by `startBackend` in place of
+  `node/srv/express.mjs`): resolves the package from the runtime directory,
+  imports `apps/init.mjs`, puts a `compress` export in front of the handler
+  when the release has one (an express middleware, or a factory returning
+  one), serves on 127.0.0.1, prints a banner (release, dev modules,
+  accelerate, compression - `backend status` shows it) and the "Listening
+  on" the start waits for. Start, stop, port and orphan handling are the
+  checkout's, unchanged.
+- **Unit tests**: `apps/index.mjs`, filtered like the checkout's runner.
+  NEVER the package's `output/index.mjs` - that is the framework's own suite.
+- **Lint**: app-template's `abaplint.jsonc` retargeted
+  (`frameworkLintConfig(text, npmLintTarget(...))`): the sandbox as the
+  files, the release's `downport/` as the framework dependency; the config
+  at the workspace root, abaplint from the runtime directory. The first lint
+  on a bare machine installs the runtime.
+- **Measured** (this container, cold npm cache): install 10 s, open-abap-core
+  1 s, a build 7-8 s (the transpile of the dependency graph - see above - is
+  all of it), unit tests 1 s, backend start 1 s.
+  `test/npm-integration.test.mjs` runs that whole loop against the registry.
+
+#### With a framework checkout - and what both backends share
+
+- **The dev sandbox has three homes** (`sandbox()` in `lib/runtime.mjs`): the
   corpus' `src/zz_dev` when a corpus checkout is there, the framework
-  checkout's `node/zz_dev` otherwise (the framework gitignores it). Both
-  answer `{ kind, root, dir }`, and `deployApp`, `readAppSource`, `removeApp`,
-  `listDevApps`, the lint and the incremental build's copy step ask
-  `sandbox()` and nothing else. The lint differs per home on purpose: the
-  corpus' relaxed config for the corpus (`corpusLintConfig`), and for the
-  framework sandbox **app-template's `abaplint.jsonc`** retargeted at it
+  checkout's `node/zz_dev` otherwise (the framework gitignores it), the npm
+  workspace's `sandbox/` when the npm backend is in use. All answer
+  `{ kind, root, dir }`, and `deployApp`, `readAppSource`, `removeApp`,
+  `listDevApps`, the lint and the builds ask `sandbox()` and nothing else.
+  The lint differs per home on purpose: the corpus' relaxed config for the
+  corpus (`corpusLintConfig`), and for the framework and npm sandboxes
+  **app-template's `abaplint.jsonc`** retargeted at them
   (`frameworkLintConfig`: `global.files` on the sandbox, the framework's
-  `src/` as the local `dependencies[].folder` instead of the clone the
-  template asks abaplint for, the customer namespace as the naming rule) —
+  sources as the local `dependencies[].folder` instead of the clone the
+  template asks abaplint for, the customer namespace as the naming rule) -
   the lint a real project runs, read from the template checkout or its
   mirror (`REMOTE_TOOLS.deploy_app` hydrates the template for that one
-  read). Measured here: 2.6 s for a lint, 9 s for the incremental transpile,
-  1.4 s for the class's unit tests. Deploying into that sandbox is also what
-  found that `deploy_app`'s sidecar had no BOM: the template config enables
-  `xml_bom`, the corpus config never asked.
-- **`build_backend` mode `prebuilt` clones the framework when nothing is
-  there** (`cloneFramework`): a shallow clone of the latest release (the
-  highest plain `X.Y.Z` in the GitHub release list — `latestPlainRelease`; not
-  `releases/latest`, which names the `X.Y.Z-702` downport the framework
-  publishes seconds after each release; the default branch when the list
-  cannot be read)
-  into `A2UI5_MCP_WORKSPACE`, default `~/.abap2ui5-mcp/abap2UI5`, which
-  `resolveA2UI5` lists as its last LOCAL candidate — a real checkout, not a
-  mirror. Only when no `A2UI5_HOME` is set: a set env var that points nowhere
-  is reported, never cloned around. `auto` takes that path too when there is
-  no prior build.
+  read). Measured with a checkout: 2.6 s for a lint, 9 s for the
+  incremental transpile, 1.4 s for the class's unit tests. Deploying into
+  the framework sandbox is also what found that `deploy_app`'s sidecar had
+  no BOM: the template config enables `xml_bom`, the corpus config never
+  asked.
+- **`build_backend` mode `prebuilt` (and `transpile`) clone the framework
+  when nothing is there** (`cloneFramework`): a shallow clone of the latest
+  release (the highest plain `X.Y.Z` in the GitHub release list -
+  `latestPlainRelease`; not `releases/latest`, which names the `X.Y.Z-702`
+  downport the framework publishes seconds after each release; the default
+  branch when the list cannot be read) into `A2UI5_MCP_WORKSPACE`, default
+  `~/.abap2ui5-mcp/abap2UI5`, which `resolveA2UI5` lists as its last LOCAL
+  candidate - a real checkout, not a mirror. Only when no `A2UI5_HOME` is
+  set: a set env var that points nowhere is reported, never cloned around.
+  `auto` clones only under `A2UI5_MCP_BACKEND=clone`; otherwise no checkout
+  means the npm backend.
 - **`run_app` serves UI5 from the CDN** when no corpus is there to serve the
   local `@openui5` packages (`libRoots` answers an empty list; `A2UI5_MCP_OFFLINE`
-  keeps the hermetic 404).
+  keeps the hermetic 404) - on either backend.
 - **`setup_status`** is the read that says which of the above applies right
   now: per repository local / mirror / missing (with the env var or clone
-  that fixes it), the sandbox and what is deployed there, the backend
-  (built, prebuilt manifest, running, unit-test runner), the clone target,
-  and whether git, tar, npx and a Chromium are on the machine. Reads only.
-  `test/sandbox.test.mjs` pins the sandbox rules against a fake framework
-  checkout under `A2UI5_HOME`; `test/missing-siblings.test.mjs` pins that the
-  sandbox message names both env vars and that `setup_status` answers with
-  every checkout absent.
+  that fixes it), the sandbox and what is deployed there, the backend kind
+  and why (for npm: the release and where the choice came from, the
+  workspace, the transpiler, express and abaplint versions, the
+  open-abap-core commit, what apps/ holds and `nextBuild` - what the next
+  build_backend would do), built, running, the unit-test runner, the clone
+  target, and whether git, tar, npm, npx and a Chromium are on the machine.
+  Reads only - no registry, no npm, no git. `test/sandbox.test.mjs` pins the
+  sandbox rules against a fake framework checkout under `A2UI5_HOME`,
+  `test/npm-runtime.test.mjs` the npm backend's wiring against a fake
+  workspace; `test/missing-siblings.test.mjs` pins that the sandbox message
+  names both env vars and that `setup_status` answers with every checkout
+  absent.
 
 What still needs the corpus: `scope_of` (its script and the OpenUI5 checkout),
 `generation_rules` and `capabilities` (mirrored when absent), and
@@ -172,7 +306,7 @@ What still needs the corpus: `scope_of` (its script and the OpenUI5 checkout),
 
 **`build_backend` mode `transpile`** is the framework's own build
 (`transpileFramework`: `npm ci` when the checkout has no node_modules, then
-`npm run downport` and `npm run auto_transpile` in it) — what the release
+`npm run downport` and `npm run auto_transpile` in it) - what the release
 workflow runs to make the asset, run here for a checkout no asset exists for.
 Measured: 2 min 16 s on this machine. `auto` takes it when the prebuilt
 download answers 404, announced in the log; an explicit `prebuilt` does not.
@@ -188,32 +322,61 @@ the validate stage rather than failing it.
 
 The same code as the tools, for a repository's CI and for a terminal: the
 framework at the release the PROJECT pins (the `branch` of the abap2UI5
-dependency in its `abaplint.jsonc` — the framework its lint already assumes),
-cloned into the workspace when no checkout is there; the backend by
-`buildBackend` mode `auto`; every `*.clas.abap` under the paths deployed into
-the framework sandbox with its `*.clas.testclasses.abap`; one incremental
-transpile; `runUnitTests({ classNames })` over the classes that carry tests
-(the generated runner is filtered to the SET — `filteredRunner`); a markdown
+dependency in its `abaplint.jsonc` — the framework its lint already assumes;
+`--framework` or, on the npm backend, `A2UI5_MCP_RUNTIME_VERSION` override
+it), **on the npm backend by default**: `@abap2ui5/node-runtime` at that
+release, installed once into the workspace without `@abaplint/cli` (the
+runner does not lint); every `*.clas.abap` under the paths deployed into the
+sandbox with its `*.clas.testclasses.abap`; ONE build after the deploy
+(`buildBackend` mode `npm`: open-abap-core at the release's commit, the
+classes transpiled against the package - the framework never);
+`runUnitTests({ classNames })` over the classes that carry tests (the
+generated runner is filtered to the SET — `filteredRunner`); a markdown
 summary, also into `GITHUB_STEP_SUMMARY`. Exit 1 on a failing test, 2 on a
-build or transpile failure. `action.yml` at the repository root wraps it as a
-composite GitHub Action (`abap2UI5/mcp-server@v0` — a floating tag the
-release workflow's `move-major-tag` job moves to each release; it did not exist
-for 0.2.0, so the README pins `@v0.2.0` until one has) with the framework clone
-and its backend cached per pin under `~/.abap2ui5-mcp`; `package.json` ships
-the script as a bin of its own, so `npx -p @abap2ui5/mcp-server abap2ui5-unit
-src` is the local form. **The bins are a contract too**: `mcp-server` (the
-package's unscoped name — what `npx --yes @abap2ui5/mcp-server` runs; without
-it npx cannot pick between the others and refuses), `abap2ui5-mcp` (the
-explicit form, `npx -p @abap2ui5/mcp-server abap2ui5-mcp`, which every version
-answers) and `abap2ui5-unit`. `test/unit.test.mjs` pins the first, and
+build or transpile failure. Which backend is `chooseBackend` (pure, pinned in
+`test/sandbox.test.mjs`): a checkout somebody NAMED (`--home`, `A2UI5_HOME`,
+a sibling) is used as before, with the incremental build; the clone this
+script makes in the workspace only with `--backend clone`
+(`A2UI5_MCP_BACKEND=clone`) - a CI cache or a developer's machine that still
+carries one from 0.2.0 must not fall back to the slow path by accident. The
+clone path is also what a pin gets by itself when the registry has no
+package for it (anything before 1.145.0) and what a `--framework` that is a
+branch gets, both said in the log.
+
+It imports NONE of this package's dependencies (no playwright, no MCP SDK on
+this path), which is what lets `action.yml` - a composite GitHub Action at
+the repository root (`abap2UI5/mcp-server@v0`, a floating tag the release
+workflow's `move-major-tag` job moves to each release; it did not exist for
+0.2.0, so the README pins `@v0.2.0` until one has) - run it without an
+`npm ci`. The action caches `~/.abap2ui5-mcp` per backend and pin (weekly
+for an unpinned project, so a new release is picked up) and deliberately
+without restore-keys: a restored cache of another pin carries that
+release's install into the new key and grows with every bump, while
+everything in the workspace heals itself (an install checks its versions,
+open-abap-core is stored by commit, the sandbox is emptied after each run).
+Measured against app-template's starter app (three tests), one machine:
+
+|  | clone path (0.2.0) | npm package |
+| --- | --- | --- |
+| cold (empty workspace, empty npm cache) | 26.9 s + 3.2 s `npm ci` of this package | 16.3 s, no `npm ci` |
+| warm (cached workspace) | 23.2 s - the whole framework transpiled twice | 8.2 s |
+| workspace | 231 MB | 67 MB |
+
+`package.json` ships the script as a bin of its own, so `npx -p
+@abap2ui5/mcp-server abap2ui5-unit src` is the local form. **The bins are a
+contract too**: `mcp-server` (the package's unscoped name — what `npx --yes
+@abap2ui5/mcp-server` runs; without it npx cannot pick between the others
+and refuses), `abap2ui5-mcp` (the explicit form, `npx -p
+@abap2ui5/mcp-server abap2ui5-mcp`, which every version answers) and
+`abap2ui5-unit`. `test/unit.test.mjs` pins the first, and
 `scripts/pack-smoke.mjs` — a release workflow step — runs all three through
 npx against the packed tarball. app-template's `check.yml` runs the action and its
 `npm run test:unit` the bin — that job and that script are consumers of this
-contract: the action's inputs (`paths`, `framework`, `node-version`), the
-bin's name and its exit codes. `test/sandbox.test.mjs` pins the pure half
-(the pin reader, the class collector, the argument parser, the summary,
-`filteredRunner`); the whole run was measured against app-template's starter
-app: 17 s with a built framework next door, its three tests green.
+contract: the action's inputs (`paths`, `framework`, `backend`,
+`node-version`), the bin's name, its options and its exit codes.
+`test/sandbox.test.mjs` pins the pure half (the pin reader, the class
+collector, the argument parser, the backend choice, the summary,
+`filteredRunner`).
 
 `interact_app`'s hands are proven without UI5: `test/interact-browser.test.mjs`
 serves a static page with a wrapper-plus-inner input, two buttons and a
@@ -230,9 +393,12 @@ error — which repo, how to clone it, which env var; the repo-and-hint table is
 `lib/siblings.mjs`, wrapped by `missingSibling` in `server.mjs` and thrown
 as the read error by `lib/resources.mjs`, so tools and resources degrade
 with the same words) — `validate_view`/`screenshot_view` need the linter,
-`run_app`/`backend` need the core repo (and so do `pitfalls`, `app_guide` and
-`api_reference`, whose documents and interface are maintained beside the
-framework sources), almost everything else needs samples-controls. The README used to call the linter
+`run_app`/`backend`/`run_unit_tests` need a build - on the npm backend no
+checkout at all, and the core repo only when `A2UI5_HOME` names one
+(`missingBackend` in `server.mjs`) - `pitfalls`, `app_guide` and
+`api_reference` need the core repo (their documents and interface are
+maintained beside the framework sources; mirrored when absent), almost
+everything else needs samples-controls. The README used to call the linter
 "optional" — true for every tool but the two that ARE the fast loop, and
 therefore the wrong word; its tool table now carries a **Needs** column naming
 the sibling each tool is dead without, and that column must keep saying what
@@ -308,6 +474,24 @@ changes upstream, this repo must change in the same breath:
   methods, `cs_*` constants, types, the ABAP-Doc and inline notes), relying on
   the abaplint-pinned formatting; a move of the file is reported by path, and
   a formatting change upstream is a parser change here.
+- **@abap2ui5/node-runtime** (npm; packed by abap2UI5's
+  `node/setup/pack-npm.mjs`): the `.` export's `initialize` and `serve` (and
+  `createApp`, for the compress path); the OPTIONAL `accelerate` and
+  `compress`, feature-detected - a release without them boots and serves as
+  before; the **`./output/*` export**, which every rewritten import of a dev
+  module goes through (a narrowed exports map is every dev app failing to
+  load, reported by the host as a module not found); `./package.json` - the
+  version, `abap2ui5.transpiler`, `abap2ui5.openAbapCore` (from the release
+  after 1.145.0; `KNOWN_OPEN_ABAP_CORE` covers the one before), the express
+  peer range; `downport/` (the transpile's library and the lint's
+  dependency - a move is a failed build and lint); `output/init.mjs` (the
+  install check). And the TRANSPILER's output shape, which the build now
+  reads rather than merely runs: the `await import("./x.mjs")` lines at the
+  start of a line (`rewriteImports`; a shape it does not know fails the
+  build through `strayImports`), a runner `index.mjs` that imports
+  `"./init.mjs"` (without it the build fails - the runner would boot nothing)
+  and lists only non-dependency tests, `init.mjs`'s import order (the boot
+  order; sorted when unreadable), and `RUNNER_LOOP`.
 - docs: the `docs/` markdown tree (everything but `.vitepress`, `public` and
   `node_modules` is a page) and the **published URL scheme** its
   `scripts/generate-llms.mjs` derives — `https://abap2ui5.github.io/docs/<path>`
@@ -367,8 +551,18 @@ agent) find these artifacts in a dirty sibling worktree, mcp-server caused them:
   for several classes) — the filtered copy of the unit-test runner
   `run_unit_tests` writes, removed in a `finally`.
 - `~/.abap2ui5-mcp/abap2UI5` (`A2UI5_MCP_WORKSPACE`) — the framework clone
-  `build_backend` mode `prebuilt` makes when no checkout is there at all: a
-  real checkout with its npm install and its unpacked backend.
+  `build_backend` mode `prebuilt` or `transpile` (or `A2UI5_MCP_BACKEND=clone`)
+  makes when no checkout is there at all: a real checkout with its npm
+  install and its unpacked backend - and from then on the backend in use.
+- `~/.abap2ui5-mcp/` (`A2UI5_MCP_WORKSPACE`) — the npm backend, not a
+  sibling either but written by nobody else: `runtime/<version>/` (an npm
+  project of its own - package.json, package-lock.json, node_modules, the
+  install marker - and `apps/`, the transpiled dev apps), `runtime/current.json`
+  and `runtime/registry.json`, `open-abap-core/<sha>/`, `sandbox/` (the dev
+  apps when no checkout is there; `remove_app` deletes them again) and
+  `.abaplint-mcp-dev.jsonc` at its root while a lint of that sandbox runs.
+  `runtime/<version>/.staging-*` and `.apps-*` exist only during a build.
+  Deleting any of it is safe: it is installed, fetched or built again.
 - `<tmp>/abap2ui5-mcp-remote/<repo>/` — the read-only GitHub mirrors (not a
   sibling worktree, but the same question "where did this come from": a
   directory that carries `.abap2ui5-mirror.json` is one, and deleting it is
@@ -409,7 +603,20 @@ tool surface,
 a capabilities query, the resource list and a resource read, the prompt list
 and a rendered prompt) and **skips itself when the samples-controls sibling is
 absent**, so `npm test` is green in a bare checkout and exercises the full
-path in a sibling workspace. CI (`.github/workflows/ci.yml`) runs `npm test`
+path in a sibling workspace. The npm backend has four files:
+`test/npm-backend.test.mjs` (the release choice, the pin and the offline
+fallback, the install's flags and specs, open-abap-core by sha, the import
+rewrite, the build keeping only the dev apps and pruning - against an
+injected registry and npm/git/transpiler stand-ins), `test/npm-runtime.test.mjs`
+(the wiring - backend choice, the sandbox, the lint's retargeted config,
+build/unit/status - against the fake workspace of `test/helpers/npm-fixture.mjs`),
+`test/npm-host.test.mjs` (the host through `startBackend`, accelerate and
+compress detected, and the server's gates over stdio; ports 4431-4432) and
+`test/npm-integration.test.mjs` - the ONE test that reaches the network: the
+whole loop against the published package (install, open-abap-core, lint,
+build, unit tests, boot, GET and a POST roundtrip), about 30 s cold, skipped
+by itself when the registry or GitHub cannot be reached and with
+`A2UI5_MCP_SKIP_NETWORK_TESTS=1`. CI (`.github/workflows/ci.yml`) runs `npm test`
 on every push/PR. Manual stdio driving, when a test is not enough:
 
 ```bash
@@ -434,9 +641,13 @@ validation in `deployApp`, the `BENIGN` console-noise filter.
 ## Timing expectations
 
 `build_backend` full build is **tens of minutes** (transpiles the whole
-framework); the incremental path is ~1–2 minutes. Set tool/agent timeouts
+framework); the incremental path is ~1–2 minutes. On the npm backend the
+first build installs the release (about 10 s here with a cold npm cache) and
+fetches open-abap-core (about 1 s), and every build is 7-8 s - the transpile
+of the dependency graph the transpiler cannot be told to skip; its output is
+thrown away, but the parse and the type check of the dev apps need it. Set tool/agent timeouts
 accordingly — a "hung" build is usually just a slow transpile. Every spawned
-child carries its own hard timeout (`spawnWithTimeout` in `lib/runtime.mjs`
+child carries its own hard timeout (`spawnWithTimeout` in `lib/spawn.mjs`
 kills the whole process tree on expiry): lint and scope default to 5 minutes
 (`A2UI5_MCP_LINT_TIMEOUT_MS`, `A2UI5_MCP_SCOPE_TIMEOUT_MS`), the build to 30
 minutes (`A2UI5_MCP_BUILD_TIMEOUT_MS`) — raise the env var when a machine is
@@ -521,6 +732,28 @@ legitimately slower.
   checkout's own `node_modules/<pkg>` bin and spawns it with node; a missing
   install is a sentence (`missingBinMessage`), pinned by
   `test/runtime.test.mjs` with an `npx` on PATH that must stay uncalled.
+- **Never let a second copy of a framework module into the npm backend's
+  runtime.** Transpiled modules register themselves in `abap.Classes` when
+  they load, and the framework's CATCH compiles to `e instanceof
+  abap.Classes['CX_ROOT']` - a dev module importing its own `cx_root` from a
+  full transpiler output replaces the package's class, and every framework
+  exception after that is uncatchable. The build keeps only the dev
+  objects' files and points every other import at the package's
+  `./output/*` (`rewriteImports`); keep it that way when the build changes,
+  and keep the failing-build answer to an import shape it does not know.
+  The package README's "Your own apps" recipe (`import("./output/...")`
+  beside a full output) has exactly this flaw - which is why this server
+  does not follow it literally.
+- **`KNOWN_OPEN_ABAP_CORE` is for releases that predate
+  `abap2ui5.openAbapCore`** - 1.145.0 only. From the release after it the
+  package records the commit itself; add an entry here only for a release
+  without the field, verified against abap2UI5's `node/setup/fetch-deps.mjs`
+  at that release's tag, never from memory.
+- **`abap2ui5-unit` must stay dependency-free** - the action runs it without
+  an `npm ci` (that is a third of its old cold time). An import of
+  `@modelcontextprotocol/sdk`, of `playwright` or of anything under
+  `node_modules` on its path breaks every app repository's CI; the lazy
+  `import('playwright')` in `lib/runtime.mjs` is only reached by `run_app`.
 - The README's setup section and the sibling-layout table above must stay in
   sync — the README is the user-facing copy, this file is the contract.
 
