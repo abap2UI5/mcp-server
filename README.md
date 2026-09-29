@@ -33,7 +33,21 @@ cheaper ones matter first.
 ## Quick start
 
 Level 1 — `validate_view` and `screenshot_view`, the two tools most work
-happens at (~3 MB, a minute):
+happens at. They need the [linter](https://github.com/abap2UI5/linter), and
+its render gate needs the UI5 libraries and Playwright: plan on **~150–200 MB**
+and a few minutes for the first install (the property gate alone is small; the
+`@openui5` packages and the browser driver behind the picture are not). The
+server looks for the linter, in this order: `AI_VIEW_CHECK_HOME`; a `linter`
+checkout next to the server; the project it is started in
+(`node_modules/@abap2ui5/linter` — app-template has it as a devDependency, so
+`npm install` there is all it takes); the server's own `node_modules`. Without
+a project, install both together:
+
+```sh
+claude mcp add abap2ui5 -- npx --yes -p @abap2ui5/mcp-server -p @abap2ui5/linter -p @abap2ui5/linter-render abap2ui5-mcp
+```
+
+or from a checkout:
 
 ```sh
 git clone https://github.com/abap2UI5/linter        # AI_VIEW_CHECK_HOME

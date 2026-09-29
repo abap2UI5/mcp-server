@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **The project's own linter is found.** app-template ships
+  `@abap2ui5/linter` as a devDependency, yet the server started in such a
+  project said "linter checkout not found - clone it as a sibling". After the
+  sibling checkouts, `<cwd>/node_modules/@abap2ui5/linter` and the server's
+  own `node_modules` are candidates now; the missing-linter message and the
+  README's Level 1 name all the ways in, including
+  `npx -p @abap2ui5/mcp-server -p @abap2ui5/linter -p @abap2ui5/linter-render
+  abap2ui5-mcp`. The README's "~3 MB" for Level 1 was the linter without its
+  render runtime; with it (the `@openui5` libraries and Playwright) the
+  install is ~150-200 MB, and it now says so.
 - **The framework clone is the release, not its 7.02 downport.** Without a
   checkout, `build_backend` and an unpinned `abap2ui5-unit` cloned the tag
   GitHub's `releases/latest` names - and the framework publishes every

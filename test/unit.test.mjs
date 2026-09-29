@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { stripJsonc, LOCAL_BENIGN, benignRules, deployApp, removeApp } from '../lib/runtime.mjs';
 import { parseCapabilities, searchCapabilities } from '../lib/capabilities.mjs';
 import { parseExamples, searchExamples, catalogueEntries, CATALOGUES } from '../lib/examples.mjs';
-import { CORPUS_DIRS, resolveLintConfig } from '../lib/repos.mjs';
+import { CORPUS_DIRS, resolveLintConfig, viewCheckCandidates, SERVER_ROOT } from '../lib/repos.mjs';
 import { sliceCatalogue } from '../lib/pitfalls.mjs';
 import { sliceGuide, guideChapters } from '../lib/guide.mjs';
 import { parseApi, searchApi, apiSummary } from '../lib/api.mjs';
@@ -1787,4 +1787,22 @@ test('the app context bypasses CSP only while UI5 is served from local sources',
     }
     fs.rmSync(base, { recursive: true, force: true });
   }
+});
+
+// ----------------------------------------------------------- linter lookup ----
+
+/* app-template ships @abap2ui5/linter as a devDependency, and the server
+ * started in such a project said "linter checkout not found - clone it as a
+ * sibling". The project's install and the server's own node_modules are
+ * candidates now, after the checkout siblings (and after a set env var, which
+ * still decides alone). */
+test('an installed @abap2ui5/linter is a linter candidate: the project\'s, then the server\'s own', () => {
+  const project = path.join(os.tmpdir(), 'some-project');
+  const c = viewCheckCandidates({ cwd: project });
+  const inProject = path.join(project, 'node_modules', '@abap2ui5', 'linter');
+  const inServer = path.join(SERVER_ROOT, 'node_modules', '@abap2ui5', 'linter');
+  assert.ok(c.includes(inProject), 'the project the server runs in');
+  assert.ok(c.includes(inServer), 'installed beside the server');
+  assert.ok(c.indexOf(path.join(SERVER_ROOT, '..', 'linter')) < c.indexOf(inProject), 'a sibling checkout still comes first');
+  assert.ok(c.indexOf(inProject) < c.indexOf(inServer));
 });

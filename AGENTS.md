@@ -45,7 +45,7 @@ is no silent fallback to the sibling guess.
 | `SAMPLES_STACK_HOME` | `../samples-stack`, `../abap2UI5-samples-stack` | `catalogue.json` (preferred) + `SAMPLES.md` (fallback) — the stack-dependent catalogue (OData, RAP, APC, launchpad) |
 | `APP_TEMPLATE_HOME` | `../app-template`, `../abap2UI5-app-template` | `template.json` and the files it lists — what `scaffold_app` serves and renames (the tool is dead without this checkout) |
 | `DOCS_HOME` | `../docs` | `docs/**/*.md` — the documentation site's sources, searched live by `docs_search` |
-| `AI_VIEW_CHECK_HOME` | `../linter` (legacy aliases: `../abap2UI5-linter`, `../ai-view-check`) | `validate_view` + `screenshot_view`: dynamic import of the linter's package `exports` entries `.`, `./findings`, `./config`, `./rule-docs` (via `importViewCheck`) |
+| `AI_VIEW_CHECK_HOME` | `../linter` (legacy aliases: `../abap2UI5-linter`, `../ai-view-check`), then an INSTALLED `@abap2ui5/linter` — `<cwd>/node_modules/…` (app-template's devDependency), then the server's own `node_modules/…` (`viewCheckCandidates`) | `validate_view` + `screenshot_view`: dynamic import of the linter's package `exports` entries `.`, `./findings`, `./config`, `./rule-docs` (via `importViewCheck`) |
 
 One more checkout is read but not by this server: **`OPENUI5_SRC`** (default
 `../fork-openui5`, relative to the SAMPLES-CONTROLS checkout, not to this one)
