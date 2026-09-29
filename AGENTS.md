@@ -345,6 +345,12 @@ agent) find these artifacts in a dirty sibling worktree, mcp-server caused them:
   `node/downport`, `node/output`, `node/deps` plus `backend-manifest.json`
   at the checkout root (the framework gitignores all four — its
   `backend-prebuilt.yaml` workflow is what packs them).
+- `<abap2UI5>/node/downport/<class>.clas.*` — the incremental build's copies
+  of the deployed dev apps, listed in `node/downport/.abap2ui5-mcp-dev-copies.json`
+  (`syncDevCopies` in `lib/runtime.mjs`). Only files that manifest lists are
+  ever removed — once their sandbox source is gone, by the next incremental
+  build or by `remove_app` — because the framework keeps its own sources in
+  that directory too.
 - `<abap2UI5>/node/zz_dev/*.clas.abap` + `.clas.xml` (+ `.clas.testclasses.abap`)
   — the dev sandbox when there is no corpus checkout (gitignored there;
   `remove_app` deletes them again), and `<abap2UI5>/.abaplint-mcp-dev.jsonc`

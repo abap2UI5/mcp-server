@@ -32,8 +32,10 @@
  * unit tests need none). A class without a test include is deployed - a
  * class under test may call it - and not run.
  *
- * The deployed classes are removed again unless --keep is given, so a
- * developer's framework checkout is left as it was found.
+ * The deployed classes are removed again unless --keep is given - from the
+ * framework sandbox AND from the node/downport copies the transpile read
+ * (remove_app's own path), so a developer's framework checkout builds what it
+ * built before. node/output keeps this run's transpile until the next build.
  */
 import fs from 'fs';
 import path from 'path';

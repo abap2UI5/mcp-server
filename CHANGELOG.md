@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Removed apps leave the build.** The incremental build copied the sandbox
+  into the framework's `node/downport` and never took anything out: after
+  `remove_app` the class was still transpiled (a broken one kept failing
+  every `build_backend`), a redeploy without `testclasses` kept the old test
+  include running, and `abap2ui5-unit` left every class it tested in a
+  developer's checkout. The copies are now tracked in a manifest inside
+  `node/downport` (`.abap2ui5-mcp-dev-copies.json`) and removed once their
+  sandbox source is gone - by the build and by `remove_app` itself; the
+  framework's own files there are never touched. The sandbox's
+  `package.devc.xml` is no longer copied over the framework's.
 - **Security: no registry fallback for abaplint and the transpiler.** The
   lint ran `npx abaplint` and the incremental build `npx abap_transpile`;
   in a checkout without its own install npx did not fail but, with no TTY

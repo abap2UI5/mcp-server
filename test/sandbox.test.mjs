@@ -11,7 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   sandbox, deployApp, removeApp, readAppSource, listDevApps, frameworkLintConfig, corpusLintConfig,
-  FRAMEWORK_SANDBOX, frameworkCloneDir, setupStatus,
+  FRAMEWORK_SANDBOX, frameworkCloneDir, setupStatus, syncDevCopies, buildBackend, DEV_COPIES,
 } from '../lib/runtime.mjs';
 import { workspaceRoot, resolveA2UI5 } from '../lib/repos.mjs';
 
@@ -234,3 +234,82 @@ test('filteredRunner narrows the generated runner to the named objects, or refus
   assert.match(out, /getData\(\)\.filter\(\(st\) => \["ZCL_A","ZCL_B"\]\.includes\(st\.objectName\)\)/);
   assert.equal(filteredRunner('for (const x of getData()) {', ['zcl_a']), null);
 });
+
+/* The incremental build copied the sandbox into node/downport and never took
+ * anything back out: a removed app stayed there (build_backend kept
+ * transpiling it, or kept failing on it), a redeploy without testclasses left
+ * the old include running, and abap2ui5-unit left every class it tested in a
+ * developer's checkout. node/downport also holds the framework's OWN files
+ * at its root, so only what the manifest says this server copied is ever
+ * removed. */
+const appNamed = (cls) => APP.replace(/zcl_probe/g, cls);
+
+test('dev-app copies in node/downport follow the sandbox, and nothing else there is touched', withFakeFramework(async (t, { a2 }) => {
+  const down = path.join(a2, 'node', 'downport');
+  fs.mkdirSync(down, { recursive: true });
+  fs.writeFileSync(path.join(down, 'zcl_sicf.clas.abap'), '* the framework\'s own');
+  fs.writeFileSync(path.join(down, 'package.devc.xml'), '<framework/>');
+  // a copy an older server left behind, identical to what is deployed: adopted
+  deployApp({ className: 'zcl_old', source: appNamed('zcl_old') });
+  fs.copyFileSync(path.join(sandbox().dir, 'zcl_old.clas.abap'), path.join(down, 'zcl_old.clas.abap'));
+
+  deployApp({ className: 'zcl_a', source: appNamed('zcl_a'), testclasses: TESTS });
+  deployApp({ className: 'zcl_b', source: appNamed('zcl_b') });
+  fs.writeFileSync(path.join(sandbox().dir, 'package.devc.xml'), '<sandbox/>');
+  const first = syncDevCopies(a2);
+  assert.ok(first.copied.includes('zcl_a.clas.testclasses.abap'));
+  assert.ok(!first.copied.includes('package.devc.xml'), 'the sandbox package is not an app');
+  assert.equal(fs.readFileSync(path.join(down, 'package.devc.xml'), 'utf8'), '<framework/>');
+  const owned = JSON.parse(fs.readFileSync(path.join(down, DEV_COPIES), 'utf8')).files;
+  assert.ok(owned.includes('zcl_old.clas.abap'), 'the identical leftover is adopted');
+  assert.ok(!owned.includes('zcl_sicf.clas.abap'));
+
+  // redeploy without tests: the include goes from downport too
+  deployApp({ className: 'zcl_a', source: appNamed('zcl_a') });
+  const second = syncDevCopies(a2);
+  assert.deepEqual(second.removed, ['zcl_a.clas.testclasses.abap']);
+  assert.ok(!fs.existsSync(path.join(down, 'zcl_a.clas.testclasses.abap')));
+  assert.ok(fs.existsSync(path.join(down, 'zcl_a.clas.abap')));
+
+  // remove_app takes the copies out at once, no build needed
+  removeApp('zcl_b');
+  removeApp('zcl_old');
+  for (const f of ['zcl_b.clas.abap', 'zcl_b.clas.xml', 'zcl_old.clas.abap']) assert.ok(!fs.existsSync(path.join(down, f)), f);
+
+  // a framework file a dev app overwrote is not the server's to delete
+  deployApp({ className: 'zcl_sicf', source: appNamed('zcl_sicf') });
+  syncDevCopies(a2);
+  removeApp('zcl_sicf');
+  assert.ok(fs.existsSync(path.join(down, 'zcl_sicf.clas.abap')), 'not in the manifest: left alone');
+  assert.ok(!fs.existsSync(path.join(down, 'zcl_sicf.clas.xml')), 'the sidecar it brought along is removed');
+
+  removeApp('zcl_a');
+  assert.ok(!fs.existsSync(path.join(down, DEV_COPIES)), 'nothing left to track: no manifest');
+  assert.deepEqual(fs.readdirSync(down).sort(), ['package.devc.xml', 'zcl_sicf.clas.abap']);
+}));
+
+test('an incremental build after remove_app no longer transpiles the removed class', withFakeFramework(async (t, { a2 }) => {
+  // a prior build, the framework's own libs present, and a transpiler that
+  // records what node/downport held when it ran
+  for (const d of ['node/downport', 'node/output', 'node/setup', 'node/deps/open-abap-core']) fs.mkdirSync(path.join(a2, d), { recursive: true });
+  fs.writeFileSync(path.join(a2, 'node/output/init.mjs'), '');
+  fs.writeFileSync(path.join(a2, 'node/setup/abap_transpile.json'), JSON.stringify({
+    input_folder: 'node/downport', output_folder: 'node/output', libs: [{ url: 'https://github.com/open-abap/open-abap-core', folder: '/node/deps/open-abap-core' }],
+  }));
+  const cli = path.join(a2, 'node_modules/@abaplint/transpiler-cli');
+  fs.mkdirSync(cli, { recursive: true });
+  fs.writeFileSync(path.join(cli, 'package.json'), JSON.stringify({ bin: { abap_transpile: './abap_transpile' } }));
+  fs.writeFileSync(path.join(cli, 'abap_transpile'), "console.log('INPUT ' + require('fs').readdirSync('node/downport').filter((f) => !f.startsWith('.')).sort().join(','));");
+
+  deployApp({ className: 'zcl_keep', source: appNamed('zcl_keep') });
+  deployApp({ className: 'zcl_gone', source: appNamed('zcl_gone'), testclasses: TESTS });
+  const one = await buildBackend({ mode: 'incremental' });
+  assert.equal(one.ok, true, one.tail);
+  assert.match(one.tail, /INPUT .*zcl_gone\.clas\.testclasses\.abap/);
+
+  removeApp('zcl_gone');
+  const two = await buildBackend({ mode: 'incremental' });
+  assert.equal(two.ok, true, two.tail);
+  assert.match(two.tail, /INPUT zcl_keep\.clas\.abap,zcl_keep\.clas\.xml$/m);
+  assert.ok(!fs.existsSync(path.join(a2, 'e2e-transpile.json')), 'the temporary config is gone');
+}));
