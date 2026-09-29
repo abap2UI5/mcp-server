@@ -13,7 +13,7 @@ import path from 'node:path';
 import {
   readRuntimePin, compareVersions, openAbapCoreOf, transpilerOf, expressRangeOf, cliVersionOf, desiredDeps,
   installSpecs, devObjects, devOutputFiles, rewriteImports, strayImports, bootOrder, appsInitSource, transpileConfig,
-  selectRuntimeVersion, installedRuntimes, currentRuntimeVersion, ensureRuntime, ensureOpenAbapCore, buildApps,
+  selectRuntimeVersion, installedRuntimes, currentRuntimeVersion, ensureRuntime, ensureOpenAbapCore, buildApps, npmView,
   runtimeDir, runtimeBase, npmSandboxDir, openAbapCoreDir, appsDir, downportDir, npmCommand, resetNpmBackend,
   RUNTIME_PKG, RUNTIME_MARKER, BUILD_RECORD, KNOWN_OPEN_ABAP_CORE, ABAPLINT_CLI_FALLBACK, EXPRESS_FALLBACK_RANGE,
 } from '../lib/npm-backend.mjs';
@@ -350,6 +350,29 @@ test('the install: exact versions, --ignore-scripts, a lockfile, and nothing twi
   const both = await Promise.all([ensureRuntime({ version: '1.145.0', meta: META_145 }), ensureRuntime({ version: '1.145.0', meta: META_145, withLint: false })]);
   assert.ok(both.every((r) => r.ok));
   assert.equal(fs.readFileSync(log, 'utf8').trim().split('\n').length, 3, 'the second caller found the directory complete');
+}));
+
+/* npm reads a PROJECT .npmrc from the directory it runs in (the nearest
+ * one with a package.json). The install runs in the release's directory,
+ * which has its own; the registry lookup ran wherever this server was
+ * started - so a project .npmrc there decided which registry was ASKED but
+ * never which one was INSTALLED from (reproduced: a project .npmrc naming
+ * another registry failed the lookup, the install beside it worked). Both
+ * run in the workspace now: the user's npm config and npm_config_* decide
+ * both. */
+test('the registry lookup reads the npm config the install reads, not the start directory\'s', { skip: !POSIX && 'a POSIX npm stand-in' }, withWorkspace(async (t, { ws }) => {
+  const bin = path.join(ws, 'bin');
+  const log = path.join(ws, 'npm.log');
+  fakeNpm(bin, log);
+  process.env.PATH = `${bin}${path.delimiter}${process.env.PATH}`;
+  await npmView(`${RUNTIME_PKG}@latest`);
+  await ensureRuntime({ version: '1.145.0', meta: META_145, withLint: false });
+  const calls = fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const view = calls.find((c) => c.args[0] === 'view');
+  const install = calls.find((c) => c.args[0] === 'install');
+  assert.notEqual(view.cwd, fs.realpathSync(process.cwd()), 'not the directory the server was started in');
+  assert.equal(view.cwd, fs.realpathSync(runtimeBase()), 'the workspace\'s runtime directory');
+  assert.equal(path.dirname(install.cwd), view.cwd, 'beside the release directories the install runs in');
 }));
 
 test('a release the registry does not have is reported as missing', withWorkspace(async () => {

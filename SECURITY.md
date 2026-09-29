@@ -48,7 +48,10 @@ Worth knowing before assessing a report:
   four direct dependencies, about 76 packages in all, where the framework
   clone's `npm ci` installed about 205. They go into a directory of their
   own under `~/.abap2ui5-mcp/runtime/<version>`, through the user's own npm
-  and its registry configuration, with `--ignore-scripts` (no install
+  and its registry configuration (the user-level config and `npm_config_*`;
+  the registry lookup and the install both run in that workspace, so a
+  project `.npmrc` where the server was started is read by neither), with
+  `--ignore-scripts` (no install
   script of any dependency runs), the exact versions recorded
   (`--save-exact`) and a `package-lock.json` whose integrity hashes npm
   checks on every reinstall. Versions and commits read from the registry

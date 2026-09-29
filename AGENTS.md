@@ -190,7 +190,11 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
 
 - **The release**: `A2UI5_MCP_RUNTIME_VERSION`, else the registry's latest -
   asked through `npm view`, so the registry, proxy and CA npm is configured
-  with are the ones asked, the same the install then uses; cached for the
+  with are the ones asked, the same the install then uses: both run in the
+  workspace (`npm view` in `runtime/`, the install in `runtime/<version>`),
+  so both read the user's npm config and `npm_config_*` - and neither a
+  project `.npmrc` of the directory the server was started in (the lookup
+  used to, the install never did); cached for the
   mirror's TTL - else (offline, or the registry unreachable) the newest
   installed release. `currentRuntimeVersion` is the synchronous answer the
   boot, test and status paths use: the pin, the last build's, the newest

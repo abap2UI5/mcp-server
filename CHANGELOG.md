@@ -66,6 +66,11 @@
   fixture (`failed.fixture`, with the method that threw), and the runner
   keeps 100 stack frames instead of 10, so a failure deep in the code under
   test keeps the test class's frame.
+- **The registry lookup and the install read the same npm config.** `npm
+  view` ran in the directory the server was started in, the install in the
+  workspace: a project `.npmrc` there decided which registry was asked for
+  the latest release, never which one it was installed from. Both run in
+  the workspace now and follow the user's npm config and `npm_config_*`.
 - **The GitHub Action no longer runs its `paths` input as shell code.** The
   test step read `set -- ${{ inputs.paths }}`, and the runner pastes an
   expression into the script before bash parses it: a `paths` of
