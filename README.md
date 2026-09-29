@@ -237,8 +237,13 @@ action.
 npx -p @abap2ui5/mcp-server abap2ui5-unit src     # the same, locally
 ```
 
-The result is the job's verdict plus a step summary naming every test method
-and the first failure. [app-template](https://github.com/abap2UI5/app-template)
+Every class and interface under `paths` is deployed with all of its files
+(an app or not; test and local-class includes too), and every test include
+runs. On the package the run uses a sandbox and a build of its own, so an
+MCP session's apps on the same machine are neither part of it nor touched by
+it. The result is the job's verdict plus a step summary naming every test
+method and the first failure; an object that cannot be deployed (a
+namespaced name) fails the run rather than leaving its tests out. [app-template](https://github.com/abap2UI5/app-template)
 ships the job in its `check.yml` and the command as `npm run test:unit`. What
 the runner cannot see is what the open-abap runtime cannot model (see
 `pitfalls`, area `abap`); a test that passes here passes on the system short of

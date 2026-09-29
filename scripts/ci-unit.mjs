@@ -28,39 +28,50 @@
  *                           package existed, and the one taken by itself when
  *                           the registry has no package for the pinned
  *                           release (older than 1.145.0);
- *   2. every *.clas.abap under the paths (default src) is deployed into the
- *      dev sandbox with its *.clas.testclasses.abap and transpiled - on the
- *      npm backend against the package, the classes alone, seconds;
- *   3. the classes that carry tests are run through the generated runner,
- *      filtered to exactly them;
+ *   2. every class and interface under the paths (default src) - each with
+ *      all of its files as the repository carries them: the source, the XML,
+ *      the test include, the local-class includes - is deployed and
+ *      transpiled. On the npm backend into a sandbox and a build of this
+ *      run's own (the workspace's unit-* and the runtime's apps-unit-*), the
+ *      classes alone against the package, seconds; on a checkout into its
+ *      dev sandbox, incrementally;
+ *   3. the classes that carry tests (all of them, or the --class ones) are
+ *      run through the generated runner, filtered to exactly them;
  *   4. the report: one line per test method, the first failure with its
  *      error, a GitHub step summary when GITHUB_STEP_SUMMARY is set, --json
  *      for the whole structure on stdout. Exit 1 on a failing test, 2 on a
- *      failed build or a class that would not transpile, 0 otherwise.
+ *      failed build, a class that would not transpile or an object that
+ *      could not be deployed (a namespaced name), 0 otherwise.
  *
  * What it deliberately does not do: lint (the project's own abaplint job
  * does that, against the same pin) and boot (run_app needs a browser; the
  * unit tests need none). A class without a test include is deployed - a
- * class under test may call it - and not run.
+ * class under test may call it - and not run. A class is a class here, app
+ * or not: deploy_app's "implements z2ui5_if_app" gate is for an agent's app,
+ * and it used to refuse every helper class - whose tests then never ran,
+ * with the run still exiting 0.
  *
  * It needs nothing installed beside Node: no dependency of this package is
  * imported on this path (the GitHub Action runs it without an npm ci).
  *
- * The deployed classes are removed again unless --keep is given - from the
- * sandbox AND, on a checkout, from the node/downport copies the transpile
- * read (remove_app's own path), so a developer's framework checkout builds
- * what it built before. The last build's output keeps this run's classes
- * until the next build.
+ * The deployed objects are removed again unless --keep is given. On the npm
+ * backend that is this run's own sandbox and build, which is also why an MCP
+ * session's sandbox on the same machine is neither built with the project
+ * (an unfinished app there used to fail `npm run test:unit`) nor emptied of
+ * the classes the run tested. On a checkout they go from its sandbox AND
+ * from the node/downport copies the transpile read (remove_app's own path),
+ * so a developer's framework checkout builds what it built before; its last
+ * build's output keeps this run's classes until the next build.
  */
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import {
-  buildBackend, deployApp, removeApp, runUnitTests, cloneFramework, frameworkCloneDir, readVersion,
-  stripJsonc, backendBuilt, backendPreference,
+  buildBackend, runUnitTests, cloneFramework, frameworkCloneDir, readVersion, stripJsonc, backendBuilt,
+  backendPreference, backendKind, classNameOf, sandbox, syncDevCopies,
 } from '../lib/runtime.mjs';
-import { resolveA2UI5, explicitEnv } from '../lib/repos.mjs';
-import { prepareRuntime, readRuntimePin } from '../lib/npm-backend.mjs';
+import { resolveA2UI5, explicitEnv, workspaceRoot } from '../lib/repos.mjs';
+import { prepareRuntime, readRuntimePin, buildNpm } from '../lib/npm-backend.mjs';
 
 const TOOL = 'abap2ui5-unit';
 
@@ -81,31 +92,63 @@ export function frameworkPinOf(abaplintJsonc) {
   return typeof branch === 'string' && /^\d+\.\d+\.\d+$/.test(branch) ? branch : null;
 }
 
-/** Every class under the paths: { cls, source, testclasses|null, file }. */
-export function collectClasses(paths) {
-  const out = [];
+/* A file of an ABAP object the way abapGit names it:
+ * `<name>.<clas|intf>[.<include>].<abap|xml>` - the source, the XML sidecar
+ * and a class's includes (testclasses, locals_imp, locals_def, macros). */
+const OBJECT_FILE = /^([^.\s]+)\.(clas|intf)(?:\.([a-z_]+))?\.(abap|xml)$/i;
+
+/** Every class and interface under the paths, each with all of its files:
+ *  `{ name, type, files: [{ path, name }], testclasses, conflict? }`. An
+ *  object is there when its source (`<name>.<type>.abap`) is; `conflict`
+ *  says it is there twice. */
+export function collectObjects(paths) {
+  const objects = new Map();
   const walk = (p) => {
     if (!fs.existsSync(p)) return;
     const st = fs.statSync(p);
     if (st.isDirectory()) {
-      for (const e of fs.readdirSync(p)) {
+      for (const e of fs.readdirSync(p).sort()) {
         if (e === 'node_modules' || e.startsWith('.')) continue;
         walk(path.join(p, e));
       }
       return;
     }
-    if (!/\.clas\.abap$/.test(p) || /\.clas\.testclasses\.abap$/.test(p)) return;
-    const cls = path.basename(p).replace(/\.clas\.abap$/, '').toLowerCase();
-    const testFile = p.replace(/\.clas\.abap$/, '.clas.testclasses.abap');
-    out.push({
-      cls,
-      file: p,
-      source: fs.readFileSync(p, 'utf8'),
-      testclasses: fs.existsSync(testFile) ? fs.readFileSync(testFile, 'utf8') : null,
-    });
+    const m = OBJECT_FILE.exec(path.basename(p));
+    if (!m) return;
+    const [name, type, include, ext] = [m[1].toLowerCase(), m[2].toLowerCase(), m[3] && m[3].toLowerCase(), m[4].toLowerCase()];
+    const key = `${name}.${type}`;
+    if (!objects.has(key)) objects.set(key, { name, type, files: [], testclasses: false });
+    const o = objects.get(key);
+    const file = [name, type, include, ext].filter(Boolean).join('.');
+    if (o.files.some((f) => f.name === file)) o.conflict = `${file} is there twice (${o.files.find((f) => f.name === file).path} and ${p})`;
+    else o.files.push({ path: p, name: file });
+    if (type === 'clas' && include === 'testclasses' && ext === 'abap') o.testclasses = true;
   };
   for (const p of paths) walk(path.resolve(p));
-  return out;
+  return [...objects.values()].filter((o) => o.files.some((f) => f.name === `${o.name}.${o.type}.abap`));
+}
+
+/** Copy the objects' files into `dir`, each object under the sandbox's name
+ *  gate (a name that is a path, or a namespaced one, is refused): the paths
+ *  written, and per object the reason it was not. */
+export function writeObjects(objects, dir) {
+  fs.mkdirSync(dir, { recursive: true });
+  const written = [];
+  const errors = {};
+  for (const o of objects) {
+    try {
+      if (o.conflict) throw new Error(o.conflict);
+      classNameOf(o.name);
+      for (const f of o.files) {
+        const dst = path.join(dir, f.name);
+        fs.copyFileSync(f.path, dst);
+        written.push(dst);
+      }
+    } catch (e) {
+      errors[o.name] = String(e.message);
+    }
+  }
+  return { written, errors };
 }
 
 /** The parsed arguments; throws on a bad one. */
@@ -289,55 +332,85 @@ async function main(argv) {
   }
 
   // 3. deploy, transpile, run
-  const classes = collectClasses(opts.paths).filter((c) => !opts.classes.length || opts.classes.includes(c.cls));
+  const objects = collectObjects(opts.paths);
+  const classes = objects.filter((o) => o.type === 'clas');
   if (!classes.length) {
     log(`no *.clas.abap under ${opts.paths.join(', ')}`);
     return 2;
   }
-  const results = classes.map((c) => ({ cls: c.cls, testclasses: Boolean(c.testclasses) }));
-  const deployed = [];
-  for (const [i, c] of classes.entries()) {
-    try {
-      deployApp({ className: c.cls, source: c.source, testclasses: c.testclasses || undefined, description: `${TOOL}: ${path.basename(c.file)}` });
-      deployed.push(c.cls);
-    } catch (e) {
-      results[i].deployError = String(e.message);
-    }
+  const unknown = opts.classes.filter((n) => !classes.some((c) => c.name === n));
+  if (unknown.length) {
+    log(`--class ${unknown.join(', ')}: no such class under ${opts.paths.join(', ')}`);
+    return 2;
   }
-  let exit = 0;
+  /* Every object is deployed - a class under test may use any of them;
+   * --class narrows the tests that RUN. On the npm backend into a sandbox
+   * and a build of this run's own; on a checkout into its dev sandbox. */
+  let box;
+  let appsName = null;
+  let appsPath = null;
+  if (backend === 'npm') {
+    fs.mkdirSync(workspaceRoot(), { recursive: true });
+    box = fs.mkdtempSync(path.join(workspaceRoot(), 'unit-'));
+    appsName = `apps-${path.basename(box)}`;
+  } else {
+    box = sandbox().dir;
+  }
+  const { written, errors } = writeObjects(objects, box);
+  const results = classes.map((c) => ({ cls: c.name, testclasses: c.testclasses, ...(errors[c.name] ? { deployError: errors[c.name] } : {}) }));
+  for (const o of objects) if (o.type !== 'clas' && errors[o.name]) results.push({ cls: o.name, deployError: errors[o.name] });
+  // an object that cannot be deployed is a class whose tests cannot run: never a green run
+  let exit = Object.keys(errors).length ? 2 : 0;
+  for (const [name, why] of Object.entries(errors)) log(`${name} not deployed: ${why}`);
+  const narrate = (l) => { if (/^(open-abap-core|transpile|npm build):|error|Error|exited/.test(l)) log(l); };
   try {
-    /* On the npm backend this is the one build of the run: open-abap-core at
-     * the release's commit (fetched once), the classes transpiled against
-     * the package - the framework itself is never transpiled here. */
-    const inc = await buildBackend({
-      mode: backend === 'npm' ? 'npm' : 'incremental',
-      withLint: false,
-      onLine: (l) => { if (/^(open-abap-core|transpile|npm build):|error|Error|exited/.test(l)) log(l); },
-    });
-    if (backend === 'npm') built = inc;
-    if (!inc.ok) {
-      log(`the deployed classes did not transpile:\n${inc.tail}`);
-      return 2;
+    if (backend === 'npm') {
+      /* The one build of the run: open-abap-core at the release's commit
+       * (fetched once), the classes transpiled against the package - the
+       * framework itself is never transpiled here. */
+      const res = await buildNpm({ inputDir: box, appsName, withLint: false, onLine: narrate });
+      built = { ok: res.ok, mode: 'npm', runtime: res.version };
+      if (res.dir) appsPath = path.join(res.dir, appsName);
+      if (!res.ok) {
+        log(`the project's classes did not transpile:\n${res.reason}`);
+        return 2;
+      }
+    } else {
+      const inc = await buildBackend({ mode: 'incremental', withLint: false, onLine: narrate });
+      if (!inc.ok) {
+        log(`the deployed classes did not transpile:\n${inc.tail}`);
+        return 2;
+      }
     }
-    const withTests = classes.filter((c, i) => c.testclasses && !results[i].deployError).map((c) => c.cls);
+    const withTests = classes
+      .filter((c) => c.testclasses && !errors[c.name] && (!opts.classes.length || opts.classes.includes(c.name)))
+      .map((c) => c.name);
     if (withTests.length) {
-      const run = await runUnitTests({ classNames: withTests });
+      const run = await runUnitTests({ classNames: withTests, ...(appsPath ? { appsDir: appsPath } : {}) });
       if (run.aborted || run.timedOut) {
         log(run.error);
         return 2;
       }
       for (const r of results) {
-        if (!r.testclasses || r.deployError) continue;
+        if (!withTests.includes(r.cls)) continue;
         r.tests = run.tests.filter((t) => t.object === r.cls.toUpperCase());
         r.failed = run.failed && run.failed.object === r.cls.toUpperCase() ? run.failed : null;
       }
-      if (!run.ok) exit = 1;
+      if (!run.ok) exit = Math.max(exit, 1);
       if (!run.ok && !run.failed && run.error) log(`the runner failed outside a test:\n${run.error}`);
     } else {
       log('no class carries a *.clas.testclasses.abap - nothing to run');
     }
   } finally {
-    if (!opts.keep) for (const cls of deployed) removeApp(cls);
+    if (opts.keep) {
+      log(`--keep: the deployed objects stay in ${box}${appsPath ? `, their build in ${appsPath}` : ''}`);
+    } else if (backend === 'npm') {
+      fs.rmSync(box, { recursive: true, force: true });
+      if (appsPath) fs.rmSync(appsPath, { recursive: true, force: true });
+    } else {
+      for (const f of written) fs.rmSync(f, { force: true });
+      if (a2 && backendKind() === 'checkout') syncDevCopies(a2, { copy: false });
+    }
   }
 
   // 4. the report

@@ -144,10 +144,10 @@ test('setupStatus reports the framework sandbox and the fake checkout', withFake
 
 import { execFileSync as run } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { frameworkPinOf, collectClasses, parseArgs, renderSummary, staleWorkspaceClone, chooseBackend } from '../scripts/ci-unit.mjs';
+import { frameworkPinOf, collectObjects, writeObjects, parseArgs, renderSummary, staleWorkspaceClone, chooseBackend } from '../scripts/ci-unit.mjs';
 import { filteredRunner, RUNNER_LOOP } from '../lib/runtime.mjs';
 
-test('the CI runner reads the project\'s framework pin, collects classes with their test includes, and renders', () => {
+test('the CI runner reads the project\'s framework pin, collects classes and interfaces with all their files, and renders', () => {
   assert.equal(frameworkPinOf('{ "dependencies": [ { "url": "https://github.com/abap2UI5/abap2UI5", "branch": "1.144.0", "files": "/src/**/*.*" } ] }'), '1.144.0');
   assert.equal(frameworkPinOf('{ "dependencies": [ { "url": "https://github.com/abap2UI5/abap2UI5.git", "branch": "main" } ] }'), null, 'a branch name is not a release pin');
   assert.equal(frameworkPinOf('{ "dependencies": [ { "url": "https://github.com/other/repo", "branch": "1.0.0" } ] }'), null);
@@ -161,9 +161,29 @@ test('the CI runner reads the project\'s framework pin, collects classes with th
     fs.writeFileSync(path.join(root, 'src', 'zcl_a.clas.xml'), '<x/>');
     fs.writeFileSync(path.join(root, 'src', 'sub', 'zcl_b.clas.abap'), 'CLASS zcl_b');
     fs.writeFileSync(path.join(root, 'src', 'zif_x.intf.abap'), 'INTERFACE');
-    const classes = collectClasses([path.join(root, 'src')]).sort((a, b) => a.cls.localeCompare(b.cls));
-    assert.deepEqual(classes.map((c) => [c.cls, Boolean(c.testclasses)]), [['zcl_a', true], ['zcl_b', false]]);
-    assert.equal(classes[0].testclasses, 'CLASS ltcl FOR TESTING');
+    fs.writeFileSync(path.join(root, 'src', 'zif_x.intf.xml'), '<x/>');
+    fs.writeFileSync(path.join(root, 'src', 'sub', 'zcl_b.clas.locals_imp.abap'), 'CLASS lcl_b');
+    fs.writeFileSync(path.join(root, 'src', 'zcl_orphan.clas.xml'), '<x/>'); // a sidecar without its source is no object
+    fs.writeFileSync(path.join(root, 'src', 'package.devc.xml'), '<x/>');
+    const objects = collectObjects([path.join(root, 'src')]).sort((a, b) => a.name.localeCompare(b.name));
+    assert.deepEqual(objects.map((o) => [o.name, o.type, o.testclasses, o.files.map((f) => f.name).sort()]), [
+      ['zcl_a', 'clas', true, ['zcl_a.clas.abap', 'zcl_a.clas.testclasses.abap', 'zcl_a.clas.xml']],
+      ['zcl_b', 'clas', false, ['zcl_b.clas.abap', 'zcl_b.clas.locals_imp.abap']],
+      ['zif_x', 'intf', false, ['zif_x.intf.abap', 'zif_x.intf.xml']],
+    ]);
+
+    // written under the sandbox's name gate: a namespaced object or one that is there twice is refused, the rest copied as it is
+    fs.writeFileSync(path.join(root, 'src', '#ns#cl_y.clas.abap'), 'CLASS /ns/cl_y');
+    fs.mkdirSync(path.join(root, 'src', 'again'));
+    fs.writeFileSync(path.join(root, 'src', 'again', 'zif_x.intf.abap'), 'INTERFACE again');
+    const box = path.join(root, 'box');
+    const { written, errors } = writeObjects(collectObjects([path.join(root, 'src')]), box);
+    assert.deepEqual(Object.keys(errors).sort(), ['#ns#cl_y', 'zif_x']);
+    assert.match(errors['#ns#cl_y'], /invalid class name/);
+    assert.match(errors.zif_x, /zif_x\.intf\.abap is there twice/);
+    assert.deepEqual(fs.readdirSync(box).sort(), ['zcl_a.clas.abap', 'zcl_a.clas.testclasses.abap', 'zcl_a.clas.xml', 'zcl_b.clas.abap', 'zcl_b.clas.locals_imp.abap']);
+    assert.equal(written.length, 5);
+    assert.equal(fs.readFileSync(path.join(box, 'zcl_a.clas.xml'), 'utf8'), '<x/>', 'the project\'s own sidecar, not a generated one');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

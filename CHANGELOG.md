@@ -44,6 +44,18 @@
   without a package (before 1.145.0) and a branch take by themselves. A
   workspace clone an earlier version left behind is no longer picked up
   unless the clone is asked for.
+- **`abap2ui5-unit` tests every class, and a class it cannot test fails the
+  run.** It deployed each class through `deploy_app`'s gate, which asks for
+  `z2ui5_if_app`: a helper or model class was reported "not deployed", its
+  tests never ran - and the run exited 0, a green CI over a failing test.
+  Interfaces and local-class includes were never deployed at all, so a class
+  using one did not transpile. Every class and interface under the paths is
+  now deployed with all of its files as the repository carries them, `--class`
+  narrows the tests that run (not what is deployed), and an object that
+  cannot be deployed (a namespaced name) exits 2. On the package the run
+  builds in a sandbox of its own: it used to share the MCP server's, so an
+  unfinished app an agent had deployed failed `npm run test:unit`, and the
+  run deleted the session's copy of every class it had tested.
 
 - **Answers fit the client.** Claude Code refuses a tool result over 25,000
   tokens, and three defaults went far over: `scaffold_app` (~280 KB, the

@@ -326,14 +326,25 @@ dependency in its `abaplint.jsonc` — the framework its lint already assumes;
 `--framework` or, on the npm backend, `A2UI5_MCP_RUNTIME_VERSION` override
 it), **on the npm backend by default**: `@abap2ui5/node-runtime` at that
 release, installed once into the workspace without `@abaplint/cli` (the
-runner does not lint); every `*.clas.abap` under the paths deployed into the
-sandbox with its `*.clas.testclasses.abap`; ONE build after the deploy
-(`buildBackend` mode `npm`: open-abap-core at the release's commit, the
-classes transpiled against the package - the framework never);
-`runUnitTests({ classNames })` over the classes that carry tests (the
-generated runner is filtered to the SET — `filteredRunner`); a markdown
-summary, also into `GITHUB_STEP_SUMMARY`. Exit 1 on a failing test, 2 on a
-build or transpile failure. Which backend is `chooseBackend` (pure, pinned in
+runner does not lint); every class AND interface under the paths
+(`collectObjects`) deployed with all of its files as the repository carries
+them - source, XML, test include, local-class includes (`writeObjects`,
+under the sandbox's name gate). NOT through `deploy_app`'s gate: that one
+asks for `z2ui5_if_app`, which refused every helper class - its tests never
+ran and the run still exited 0 - and it never deployed an interface or a
+locals include. On the npm backend into a sandbox and a build of the run's
+OWN (`<workspace>/unit-*`, `runtime/<v>/apps-unit-*`: `buildNpm` with an
+`appsName`, which records no `current.json`; `runUnitTests({ appsDir })`),
+removed afterwards - an MCP session's sandbox on the same machine used to
+be built with the project (its unfinished app failed `npm run test:unit`)
+and lost every class the run had tested. ONE build after the deploy
+(open-abap-core at the release's commit, the classes transpiled against the
+package - the framework never); `runUnitTests({ classNames })` over the
+classes that carry tests (all, or the `--class` ones; the generated runner
+is filtered to the SET — `filteredRunner`); a markdown summary, also into
+`GITHUB_STEP_SUMMARY`. Exit 1 on a failing test, 2 on a build or transpile
+failure or an object that could not be deployed (a namespaced name) - never
+0 with a class left untested. Which backend is `chooseBackend` (pure, pinned in
 `test/sandbox.test.mjs`): a checkout somebody NAMED (`--home`, `A2UI5_HOME`,
 a sibling) is used as before, with the incremental build; the clone this
 script makes in the workspace only with `--backend clone`
@@ -353,7 +364,8 @@ for an unpinned project, so a new release is picked up) and deliberately
 without restore-keys: a restored cache of another pin carries that
 release's install into the new key and grows with every bump, while
 everything in the workspace heals itself (an install checks its versions,
-open-abap-core is stored by commit, the sandbox is emptied after each run).
+open-abap-core is stored by commit, the run's own sandbox and build are
+removed after it).
 Measured against app-template's starter app (three tests), one machine:
 
 |  | clone path (0.2.0) | npm package |
@@ -561,7 +573,9 @@ agent) find these artifacts in a dirty sibling worktree, mcp-server caused them:
   and `runtime/registry.json`, `open-abap-core/<sha>/`, `sandbox/` (the dev
   apps when no checkout is there; `remove_app` deletes them again) and
   `.abaplint-mcp-dev.jsonc` at its root while a lint of that sandbox runs.
-  `runtime/<version>/.staging-*` and `.apps-*` exist only during a build.
+  `runtime/<version>/.staging-*` and `.apps-*` exist only during a build,
+  `unit-*` and `runtime/<version>/apps-unit-*` only during an
+  `abap2ui5-unit` run (with `--keep`, until deleted).
   Deleting any of it is safe: it is installed, fetched or built again.
 - `<tmp>/abap2ui5-mcp-remote/<repo>/` — the read-only GitHub mirrors (not a
   sibling worktree, but the same question "where did this come from": a

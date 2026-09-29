@@ -274,3 +274,50 @@ test('setup_status before anything is installed says what the first build will d
   assert.match(npm.nextBuild[0], /ask the registry for @abap2ui5\/node-runtime's latest release.*--ignore-scripts, exact versions, a lockfile/);
   assert.match(npm.nextBuild[1], /fetch open-abap-core at the commit the release records/);
 }, { install: false }));
+
+/* abap2ui5-unit on the npm backend, as the CLI a project's CI runs. It used
+ * to deploy each class through deploy_app's gate: a class that is not an app
+ * (a helper, a model) was refused as "does not implement z2ui5_if_app", its
+ * tests never ran - and the run exited 0; an interface or a local-class
+ * include was never deployed at all, so a class using one failed the
+ * transpile. And it shared the MCP server's sandbox: a half-written app an
+ * agent had deployed there failed a developer's `npm run test:unit`, and the
+ * run deleted the session's copy of every class it had tested. */
+test('abap2ui5-unit tests every class and interface of the project, in a sandbox of its own', withNpm(async (t, { root, workspace }) => {
+  const { spawnSync } = await import('node:child_process');
+  const repo = path.join(root, 'project');
+  const src = path.join(repo, 'src');
+  fs.mkdirSync(src, { recursive: true });
+  // an app with a passing test, a helper that is no app with a failing one,
+  // an interface, a local-class include
+  fs.writeFileSync(path.join(src, 'zcl_proj_app.clas.abap'), APP('zcl_proj_app'));
+  fs.writeFileSync(path.join(src, 'zcl_proj_app.clas.testclasses.abap'), TESTS());
+  fs.writeFileSync(path.join(src, 'zcl_proj_app.clas.locals_imp.abap'), 'CLASS lcl_local DEFINITION. ENDCLASS. CLASS lcl_local IMPLEMENTATION. ENDCLASS.');
+  fs.writeFileSync(path.join(src, 'zcl_proj_app.clas.xml'), '<?xml version="1.0"?><abapGit/>');
+  fs.writeFileSync(path.join(src, 'zcl_proj_helper.clas.abap'), 'CLASS zcl_proj_helper DEFINITION PUBLIC. ENDCLASS. CLASS zcl_proj_helper IMPLEMENTATION. ENDCLASS.');
+  fs.writeFileSync(path.join(src, 'zcl_proj_helper.clas.testclasses.abap'), TESTS(true));
+  fs.writeFileSync(path.join(src, 'zif_proj_thing.intf.abap'), 'INTERFACE zif_proj_thing PUBLIC. ENDINTERFACE.');
+  // what an MCP session has in the shared sandbox: an unfinished app, and its own copy of the project's app
+  deployApp({ className: 'zcl_wip', source: `${APP('zcl_wip')}\n* BROKEN` });
+  deployApp({ className: 'zcl_proj_app', source: APP('zcl_proj_app') });
+  const box = path.join(workspace, 'sandbox');
+  const before = Object.fromEntries(fs.readdirSync(box).map((f) => [f, fs.readFileSync(path.join(box, f), 'utf8')]));
+
+  const res = spawnSync(process.execPath, [path.join(import.meta.dirname, '..', 'scripts', 'ci-unit.mjs'), 'src', '--json'], {
+    cwd: repo, encoding: 'utf8', env: { ...process.env },
+  });
+  const report = JSON.parse(res.stdout || 'null');
+  assert.ok(report, `no report:\n${res.stderr}`);
+  const byClass = Object.fromEntries(report.results.map((r) => [r.cls, r]));
+  assert.equal(byClass.zcl_proj_helper.deployError, undefined, 'a class that is no app is deployed like any other');
+  assert.equal(byClass.zcl_proj_helper.tests.length, 1, 'and its tests run');
+  assert.equal(byClass.zcl_proj_helper.failed.object, 'ZCL_PROJ_HELPER');
+  assert.equal(byClass.zcl_proj_app.tests.length, 1);
+  assert.equal(byClass.zcl_proj_app.failed, null);
+  assert.equal(res.status, 1, `a failing test fails the run\n${res.stderr}`);
+  assert.doesNotMatch(res.stderr, /zcl_wip/, 'the MCP session\'s unfinished app is not the project\'s');
+  // the MCP sandbox is exactly as it was, and nothing of the run is left behind
+  assert.deepEqual(Object.fromEntries(fs.readdirSync(box).map((f) => [f, fs.readFileSync(path.join(box, f), 'utf8')])), before);
+  assert.deepEqual(fs.readdirSync(workspace).filter((f) => /^unit-/.test(f)), [], 'the run\'s own sandbox is removed');
+  assert.deepEqual(fs.readdirSync(path.join(workspace, 'runtime', VERSION)).filter((f) => /^(apps-unit-|\.apps-|\.staging-)/.test(f)), []);
+}));

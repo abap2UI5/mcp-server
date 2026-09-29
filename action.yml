@@ -1,7 +1,8 @@
 # abap2UI5 unit tests, without a SAP system.
 #
-# Runs an app repository's ABAP Unit tests (every *.clas.testclasses.abap next
-# to a *.clas.abap under `paths`) in the transpiled Node backend, the way the
+# Runs an app repository's ABAP Unit tests (every *.clas.testclasses.abap of
+# a class under `paths` - each class and interface there is deployed, app or
+# not, with its includes) in the transpiled Node backend, the way the
 # MCP server's run_unit_tests does: the framework at the release the project
 # pins (the `branch` of the abap2UI5 dependency in its abaplint.jsonc) comes
 # from the npm package @abap2ui5/node-runtime - installed once with the
@@ -77,7 +78,7 @@ runs:
     # No restore-keys: a cache of another pin would carry that release's
     # install along into this key and grow with every bump. What is in the
     # workspace heals itself - an install checks its versions, open-abap-core
-    # is stored by commit, the sandbox is emptied after each run.
+    # is stored by commit, a run's own sandbox and build are removed after it.
     - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.abap2ui5-mcp
