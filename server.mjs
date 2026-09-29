@@ -846,7 +846,13 @@ async function handle(name, args = {}, ctx = {}) {
         stages[label] = { ok: !r.isError, ...(parsed && typeof parsed === 'object' ? parsed : { text: parsed }) };
         return !r.isError;
       };
-      const done = (stoppedAt, extra) => text({ ok: !stoppedAt, ...(stoppedAt ? { stoppedAt } : {}), stages, ...(extra || {}) });
+      /* A stage that failed makes the CALL an error: the report used to come
+       * back with isError false and `ok: false` inside, so a client (or an
+       * agent) that goes by the protocol's flag saw a green verify_app. */
+      const done = (stoppedAt, extra) => ({
+        ...text({ ok: !stoppedAt, ...(stoppedAt ? { stoppedAt } : {}), stages, ...(extra || {}) }),
+        ...(stoppedAt ? { isError: true } : {}),
+      });
       // 1. validate - skipped, not failed, without a linter checkout
       if (missingSiblingMessage('linter')) {
         stages.validate = { skipped: missingSiblingMessage('linter') };

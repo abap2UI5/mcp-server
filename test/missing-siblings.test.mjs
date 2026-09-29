@@ -117,6 +117,7 @@ test('every sibling-dependent tool degrades with an actionable error when the ch
      * sandbox message, and everything before it in the report. */
     const verify = await call('verify_app', { class_name: 'zcl_demo', abap_source: 'CLASS zcl_demo DEFINITION. INTERFACES z2ui5_if_app.' });
     const vr = JSON.parse(verify.content[0].text);
+    assert.equal(verify.isError, true, 'a stopped verify_app is a failed call, not a green one with ok:false inside');
     assert.equal(vr.ok, false);
     assert.equal(vr.stoppedAt, 'deploy');
     assert.match(vr.stages.validate.skipped, /linter checkout not found/);

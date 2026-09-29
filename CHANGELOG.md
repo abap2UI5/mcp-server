@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **A failed `verify_app` is a failed call.** It answered `isError: false`
+  with `ok: false` inside when a stage stopped it; a client going by the
+  protocol's flag saw it green. `isError` is now set whenever `stoppedAt` is.
 - **String arguments are checked against the schema.** `capabilities` with
   `{ query: 42 }` answered "query.toLowerCase is not a function"; every
   argument a tool's schema declares a string is now refused by name when it
