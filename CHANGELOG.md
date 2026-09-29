@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **`validate_view` keeps the property findings when the render gate cannot
+  start.** Without `@abap2ui5/linter-render`, or with a Chromium that will not
+  launch, the linter throws, and the tool returned that throw - an error or
+  5 KB of Playwright's ANSI launch log - instead of the findings the property
+  gate had already computed. It now repeats the check with `render: false`,
+  says why in `notes` and `renderSkipped`, and answers.
 - **The project's own linter is found.** app-template ships
   `@abap2ui5/linter` as a devDependency, yet the server started in such a
   project said "linter checkout not found - clone it as a sibling". After the

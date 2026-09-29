@@ -52,6 +52,7 @@ import { searchDocs, docsRoot } from './lib/docs.mjs';
 import { scaffold, readSpec, validClassName, classNameRule, templateFiles, SPEC_FILE } from './lib/scaffold.mjs';
 import { fixSource } from './lib/fixview.mjs';
 import { lintOptionsFor } from './lib/lintopts.mjs';
+import { withRenderFallback, renderSkippedNote } from './lib/validate.mjs';
 import { getRenderer, dropRenderer, closeRenderers, rendererLooksDead } from './lib/renderer.mjs';
 import { TOOLS } from './lib/tools.mjs';
 import { RESOURCES, RESOURCE_TEMPLATES, GUIDE_CHAPTER_TEMPLATE, readResource } from './lib/resources.mjs';
@@ -616,22 +617,33 @@ async function handle(name, args = {}, ctx = {}) {
        * An older linter gets exactly the cold path it always had; a warm
        * browser that died mid-call is dropped and the call retried cold. */
       const GATE_POOL = { pages: 1 };
-      let result;
-      const renderer = opt.render === false ? null : await getRenderer(GATE_POOL);
-      if (renderer) {
+      const checkWithRender = async () => {
+        const renderer = opt.render === false ? null : await getRenderer(GATE_POOL);
+        if (!renderer) return check(opt);
+        let r;
         try {
-          result = await check({ ...opt, renderer });
+          r = await check({ ...opt, renderer });
         } catch (e) {
           await dropRenderer(GATE_POOL); // whatever threw, a fresh one next call
           throw e;
         }
-        if (rendererLooksDead(result.renderErrors)) {
+        if (rendererLooksDead(r.renderErrors)) {
           await dropRenderer(GATE_POOL);
-          result = await check(opt);
+          r = await check(opt);
         }
-      } else {
-        result = await check(opt);
-      }
+        return r;
+      };
+      /* A render gate that cannot START (no @abap2ui5/linter-render, a
+       * Chromium that will not launch) throws out of the linter; that throw
+       * used to be the whole answer and cost the property findings with it.
+       * Now the property gate's answer comes back with the reason in the
+       * notes (lib/validate.mjs). */
+      const { result, renderSkipped } = await withRenderFallback({
+        render: opt.render,
+        withRender: checkWithRender,
+        withoutRender: () => check({ ...opt, render: false }),
+      });
+      if (renderSkipped) result.notes = [...(result.notes || []), renderSkippedNote(renderSkipped)];
 
       /* Every finding carries its severity, a ready-made message and (where
        * the gate could place it) line/column. ok follows the linter's failOn
@@ -658,6 +670,7 @@ async function handle(name, args = {}, ctx = {}) {
         reconstructedDocs: result.docs.length,
         skippedRender: result.skippedRender ? `view parts in helper methods (${result.helperTokens} calls) — not statically reconstructable` : undefined,
         notes: result.notes,
+        ...(renderSkipped ? { renderSkipped } : {}),
         config: configFile || undefined,
         hint: counts.error === 0 && counts.warning > 0
           ? 'what is left is about the UI5 version you target: fix it, raise min_ui5 if the system is newer, or accept it via allow'

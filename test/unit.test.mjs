@@ -1806,3 +1806,32 @@ test('an installed @abap2ui5/linter is a linter candidate: the project\'s, then 
   assert.ok(c.indexOf(path.join(SERVER_ROOT, '..', 'linter')) < c.indexOf(inProject), 'a sibling checkout still comes first');
   assert.ok(c.indexOf(inProject) < c.indexOf(inServer));
 });
+
+// ---------------------------------------------------------- validate_view ----
+
+/* A render gate that cannot START (no @abap2ui5/linter-render, a Chromium
+ * that will not launch) throws out of the linter. validate_view used to
+ * return that throw - an error, or 5 KB of Playwright's ANSI launch log - and
+ * lose the property findings that had already been computed. */
+test('validate_view falls back to the property gate when the render gate cannot start', async () => {
+  const { withRenderFallback, renderFailureReason, renderSkippedNote } = await import('../lib/validate.mjs');
+  const launchLog = '\u001b[31mbrowserType.launch: Target page, context or browser has been closed\u001b[39m\nBrowser logs:\n\n<launching> /opt/x --no-sandbox ' + 'x'.repeat(5000);
+  const calls = [];
+  const res = await withRenderFallback({
+    render: true,
+    withRender: async () => { calls.push('render'); throw new Error(launchLog); },
+    withoutRender: async () => { calls.push('properties'); return { findings: [{ type: 'unknown-icon' }], notes: [] }; },
+  });
+  assert.deepEqual(calls, ['render', 'properties']);
+  assert.deepEqual(res.result.findings, [{ type: 'unknown-icon' }], 'the property findings survive');
+  assert.equal(res.renderSkipped, 'browserType.launch: Target page, context or browser has been closed');
+  assert.ok(!/\u001b/.test(res.renderSkipped), 'no terminal colour codes');
+  assert.match(renderSkippedNote(res.renderSkipped), /property findings only/);
+  assert.ok(renderFailureReason(new Error('y'.repeat(1000))).length <= 300);
+
+  // a clean render: nothing skipped, no second run
+  const ok = await withRenderFallback({ render: true, withRender: async () => ({ findings: [] }), withoutRender: async () => { throw new Error('not called'); } });
+  assert.equal(ok.renderSkipped, null);
+  // render: false asked for, so the throw is about something else - it stands
+  await assert.rejects(withRenderFallback({ render: false, withRender: async () => { throw new Error('parse'); }, withoutRender: async () => ({}) }), /parse/);
+});
