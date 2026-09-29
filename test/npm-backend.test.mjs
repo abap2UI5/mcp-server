@@ -14,6 +14,7 @@ import {
   readRuntimePin, compareVersions, openAbapCoreOf, transpilerOf, expressRangeOf, cliVersionOf, desiredDeps,
   installSpecs, devObjects, devOutputFiles, rewriteImports, strayImports, bootOrder, appsInitSource, transpileConfig,
   selectRuntimeVersion, installedRuntimes, currentRuntimeVersion, ensureRuntime, ensureOpenAbapCore, buildApps, npmView,
+  prepareRuntime,
   runtimeDir, runtimeBase, npmSandboxDir, openAbapCoreDir, appsDir, downportDir, npmCommand, resetNpmBackend,
   RUNTIME_PKG, RUNTIME_MARKER, BUILD_RECORD, KNOWN_OPEN_ABAP_CORE, ABAPLINT_CLI_FALLBACK, EXPRESS_FALLBACK_RANGE,
 } from '../lib/npm-backend.mjs';
@@ -283,6 +284,12 @@ const fs = require('fs'); const path = require('path');
 const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ cwd: process.cwd(), args }) + '\\n');
 if (args[0] !== 'install') process.exit(0);
+// a release the registry does not have (FAKE_NPM_MISSING): what npm says about it
+if (process.env.FAKE_NPM_MISSING && args.includes(process.env.FAKE_NPM_MISSING)) {
+  console.error('npm error code ETARGET');
+  console.error('npm error notarget No matching version found for ' + process.env.FAKE_NPM_MISSING + '.');
+  process.exit(1);
+}
 const pkgFile = path.join(process.cwd(), 'package.json');
 const pkg = JSON.parse(fs.readFileSync(pkgFile, 'utf8'));
 for (const spec of args.filter((a) => !a.startsWith('-') && a !== 'install')) {
@@ -373,6 +380,41 @@ test('the registry lookup reads the npm config the install reads, not the start 
   assert.notEqual(view.cwd, fs.realpathSync(process.cwd()), 'not the directory the server was started in');
   assert.equal(view.cwd, fs.realpathSync(runtimeBase()), 'the workspace\'s runtime directory');
   assert.equal(path.dirname(install.cwd), view.cwd, 'beside the release directories the install runs in');
+}));
+
+/* The registry's latest is cached for a day. A release it named and no
+ * longer has - unpublished, or npm pointed at another registry since - failed
+ * every lint and build until the cache expired ("npm error notarget"), with
+ * the registry's actual latest one question away. */
+test('a cached latest the registry no longer has is asked again, once', { skip: !POSIX && 'a POSIX npm stand-in' }, withWorkspace(async (t, { ws }) => {
+  const bin = path.join(ws, 'bin');
+  const log = path.join(ws, 'npm.log');
+  fakeNpm(bin, log);
+  process.env.PATH = `${bin}${path.delimiter}${process.env.PATH}`;
+  process.env.FAKE_NPM_MISSING = `${RUNTIME_PKG}@1.146.0`;
+  t.after(() => { delete process.env.FAKE_NPM_MISSING; });
+  fs.mkdirSync(runtimeBase(), { recursive: true });
+  fs.writeFileSync(path.join(runtimeBase(), 'registry.json'), JSON.stringify({
+    version: '1.146.0', fetchedAt: new Date(Date.now() - 3600_000).toISOString(), meta: { ...META_145, version: '1.146.0' },
+  }));
+  const calls = [];
+  const view = viewOf({
+    [`${RUNTIME_PKG}@latest`]: { ok: true, meta: META_145 },
+    [`${RUNTIME_PKG}@1.146.0`]: { ok: false, missing: true, error: 'E404' },
+  }, calls);
+  const lines = [];
+  const rt = await prepareRuntime({ withLint: false, view, onLine: (l) => lines.push(l) });
+  assert.equal(rt.ok, true, rt.reason);
+  assert.equal(rt.version, '1.145.0', 'what the registry says now');
+  assert.deepEqual(calls, [`${RUNTIME_PKG}@latest`], 'asked once, after the cached release failed');
+  assert.ok(lines.some((l) => /1\.146\.0.*cannot be installed.*asking the registry again/.test(l)), lines.join('\n'));
+  assert.equal(JSON.parse(fs.readFileSync(path.join(runtimeBase(), 'registry.json'), 'utf8')).version, '1.145.0', 'the cache holds the new answer');
+  // a pin is a pin: never replaced by another release
+  process.env.A2UI5_MCP_RUNTIME_VERSION = '1.146.0';
+  const pinned = await prepareRuntime({ withLint: false, view });
+  assert.equal(pinned.ok, false);
+  assert.equal(pinned.version, '1.146.0');
+  assert.equal(pinned.missing, true);
 }));
 
 test('a release the registry does not have is reported as missing', withWorkspace(async () => {

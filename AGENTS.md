@@ -199,7 +199,10 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
   so both read the user's npm config and `npm_config_*` - and neither a
   project `.npmrc` of the directory the server was started in (the lookup
   used to, the install never did); cached for the
-  mirror's TTL - else (offline, or the registry unreachable) the newest
+  mirror's TTL (a cached release the install then cannot find - unpublished,
+  or npm pointed at another registry since - is asked again once instead of
+  failing every build until the cache expires) - else (offline, or the
+  registry unreachable) the newest
   installed release. `currentRuntimeVersion` is the synchronous answer the
   boot, test and status paths use: the pin, the last build's, the newest
   installed. Versions and shas from the registry are validated before they

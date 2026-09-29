@@ -74,6 +74,12 @@
   `run_app` and `run_unit_tests` kept running on the package and said
   "backend not built". They are refused now, before a running backend is
   stopped, and `setup_status`'s hint no longer suggests them there.
+- **A cached "latest" the registry no longer has is asked again.** The
+  registry's latest release is cached a day; when the release it named
+  could not be installed any more (unpublished, or npm pointed at another
+  registry since), every lint and build failed with npm's "notarget" until
+  the cache expired. The registry is now asked again, once, and the release
+  it names now is installed. A pinned release is never swapped for another.
 - **The registry lookup and the install read the same npm config.** `npm
   view` ran in the directory the server was started in, the install in the
   workspace: a project `.npmrc` there decided which registry was asked for
