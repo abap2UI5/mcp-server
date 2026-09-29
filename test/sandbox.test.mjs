@@ -144,7 +144,7 @@ test('setupStatus reports the framework sandbox and the fake checkout', withFake
 
 import { execFileSync as run } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { frameworkPinOf, collectClasses, parseArgs, renderSummary, staleWorkspaceClone } from '../scripts/ci-unit.mjs';
+import { frameworkPinOf, collectClasses, parseArgs, renderSummary, staleWorkspaceClone, chooseBackend } from '../scripts/ci-unit.mjs';
 import { filteredRunner, RUNNER_LOOP } from '../lib/runtime.mjs';
 
 test('the CI runner reads the project\'s framework pin, collects classes with their test includes, and renders', () => {
@@ -193,6 +193,28 @@ test('the CI runner reads the project\'s framework pin, collects classes with th
   assert.match(md, /ZCL_B: no test include/);
   assert.match(md, /ZCL_C\*\*: not deployed - source does not implement/);
   assert.match(md, /2 test method\(s\) ran, 2 class\(es\) failing/);
+});
+
+/* abap2ui5-unit runs on the npm package by default: a checkout somebody
+ * named is used as it is, the clone an earlier version made in the workspace
+ * only when the clone is asked for - so a CI cache or a developer's machine
+ * that still carries one does not fall back to the slow path by accident. */
+test('the CI runner takes the npm package unless a checkout is named or the clone is asked for', () => {
+  const cloneDir = path.join('/ws', 'abap2UI5');
+  assert.equal(chooseBackend({ cloneDir }), 'npm', 'nothing there: the package');
+  assert.equal(chooseBackend({ a2: cloneDir, cloneDir }), 'npm', 'the workspace clone of an earlier version is not a choice');
+  assert.equal(chooseBackend({ a2: cloneDir, cloneDir, requested: 'clone' }), 'checkout', '--backend clone uses it');
+  assert.equal(chooseBackend({ requested: 'clone', cloneDir }), 'clone', '--backend clone without one clones');
+  assert.equal(chooseBackend({ a2: '/home/me/abap2UI5', cloneDir }), 'checkout', 'a sibling is somebody\'s checkout');
+  assert.equal(chooseBackend({ a2: cloneDir, cloneDir, envSet: true }), 'checkout', 'A2UI5_HOME naming the clone is a choice');
+  assert.equal(chooseBackend({ envSet: true, cloneDir }), 'missing', 'A2UI5_HOME pointing nowhere');
+  assert.equal(chooseBackend({ a2: '/home/me/abap2UI5', cloneDir, requested: 'npm' }), 'npm', '--backend npm beside a checkout');
+
+  assert.equal(parseArgs(['--backend', 'npm']).backend, 'npm');
+  assert.equal(parseArgs(['--backend', 'clone', 'src']).backend, 'clone');
+  assert.throws(() => parseArgs(['--backend', 'docker']), /--backend is npm or clone/);
+  assert.equal(parseArgs(['--framework', 'main']).framework, 'main', 'a branch still reaches the clone path');
+  assert.match(renderSummary({ framework: '1.145.0', mode: 'npm', results: [] }), /framework 1\.145\.0, backend: @abap2ui5\/node-runtime/);
 });
 
 test('the abap2ui5-unit bin runs when invoked through npm\'s bin symlink', () => {
