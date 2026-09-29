@@ -132,15 +132,28 @@ not worth blocking the first release on.
 ## What is NOT covered by the release gate
 
 `npm test` on a bare checkout is the sibling-free half: the parsers, the
-config resolution, the process-tree timeouts, the degradation contract. It
-does **not** cover `run_app`, `build_backend` or the render half of
-`validate_view`, because those need the samples-controls checkout, its own
-`npm ci` and a Chromium — minutes of setup for a check that then takes tens
-of minutes to transpile.
+config resolution, the process-tree timeouts, the degradation contract - and,
+since the npm backend, the backend half of the expensive loop:
+`test/npm-integration.test.mjs` installs the published
+`@abap2ui5/node-runtime`, fetches open-abap-core, lints, builds, runs a test
+class, boots the backend and does a GET and a POST roundtrip (about 30 s;
+it skips itself when the registry or GitHub cannot be reached, so read the
+test count). It does **not** cover the BROWSER half of `run_app` and
+`interact_app`, nor the render half of `validate_view`: those need UI5 - the
+CDN, or the `@openui5` packages of a corpus or linter install - and a
+Chromium.
 
-So a release is verified for everything that can run without a corpus, and
+So a release is verified for everything up to a served backend, and
 verified by hand for the screenshot loop. If that loop breaks, it breaks
 after the tag. Worth remembering before cutting one.
+
+**`@abap2ui5/node-runtime` is a dependency of the loop without being one
+of `package.json`'s**: the server installs whatever release the registry
+names as latest (or `A2UI5_MCP_RUNTIME_VERSION` pins), at runtime. A new
+framework release reaches users of an unchanged server within a day. What
+has to hold across such a release is written down in AGENTS.md (the
+compatibility surface); the integration test is the check - run it after
+the framework publishes, not only before this server does.
 
 ## After a release
 
