@@ -121,8 +121,11 @@ function missingLocalSibling(...repos) {
 function missingBackend() {
   const kind = backendKind();
   if (kind === 'checkout' || kind === 'npm') return null;
-  return missingLocalSibling('abap2UI5')
-    || toolError(`no backend: ${kind === 'clone' ? 'A2UI5_MCP_BACKEND=clone and the framework is not cloned yet - run build_backend first' : 'A2UI5_HOME points at no checkout'}`);
+  const msg = missingLocalSiblingMessage('abap2UI5')
+    || `no backend: ${kind === 'clone' ? 'the framework is not cloned yet' : 'A2UI5_HOME points at no checkout'}`;
+  return toolError(msg + (kind === 'clone'
+    ? ' - A2UI5_MCP_BACKEND=clone: run build_backend first, it clones the release (or unset it to run on @abap2ui5/node-runtime)'
+    : ' - or unset it: without a checkout the backend runs on the npm package @abap2ui5/node-runtime'));
 }
 
 /* The dev sandbox - the corpus' src/zz_dev, the framework's node/zz_dev when
@@ -610,7 +613,11 @@ async function handle(name, args = {}, ctx = {}) {
          * the call is alive; whatever lines it does print stream throttled in
          * between. */
         const report = progressReporter(ctx);
-        if (report) report(`abaplint: linting ${res.class} against the corpus config`, true);
+        const home = sandbox().kind;
+        if (report) {
+          report(`abaplint: linting ${res.class} with ${home === 'corpus' ? 'the corpus config' : 'app-template\'s config'}`
+            + (home === 'npm' ? ' (the first lint on the npm backend installs @abap2ui5/node-runtime first)' : ''), true);
+        }
         reply.lint = await lintApp(res.class, { signal: ctx.signal, onLine: report });
         if (report) report(`abaplint: finished (${reply.lint.ok ? 'clean' : `${reply.lint.issues.length} finding(s)`})`, true);
         if (reply.lint.aborted) {
