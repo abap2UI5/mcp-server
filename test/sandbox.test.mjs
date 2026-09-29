@@ -213,6 +213,15 @@ test('the CI runner reads the project\'s framework pin, collects classes and int
   assert.match(md, /ZCL_B: no test include/);
   assert.match(md, /ZCL_C\*\*: not deployed - source does not implement/);
   assert.match(md, /2 test method\(s\) ran, 2 class\(es\) failing/);
+  // a setup that threw before its class's first test: the class fails, with the fixture named
+  const fixture = renderSummary({
+    framework: '1.145.0',
+    mode: 'npm',
+    results: [{ cls: 'zcl_d', testclasses: true, tests: [], failed: { object: 'ZCL_D', localClass: null, method: 'setup', fixture: true, error: 'cx_sy_zerodivide' } }],
+  });
+  assert.match(fixture, /- \*\*FAIL\*\*  ZCL_D setup \(the test class's setup, before its test method ran\)/);
+  assert.doesNotMatch(fixture, /found no test method/);
+  assert.match(fixture, /1 class\(es\) failing/);
 });
 
 /* abap2ui5-unit runs on the npm package by default: a checkout somebody

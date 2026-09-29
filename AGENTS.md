@@ -472,7 +472,12 @@ changes upstream, this repo must change in the same breath:
   generated unit-test runner — `run_unit_tests` filters it on the one loop
   line `for (const st of getData()) {`, `RUNNER_LOOP` in `lib/runtime.mjs`;
   a template change in `@abaplint/transpiler` costs the filter, reported, not
-  the run), the **release asset `backend-<version>.tar.gz`** with
+  the run. The runner prints a test's `running` line AFTER the test class's
+  class_setup, constructor and setup ran, so a failure there is read off the
+  stack - a frame in `<object>.clas.testclasses.mjs` naming the fixture,
+  `parseUnitOutput`, with the runner started under `--stack-trace-limit=100`
+  so a deep failure keeps that frame - and never pinned on the test printed
+  last), the **release asset `backend-<version>.tar.gz`** with
   `backend-manifest.json` at its root (packed by the framework's
   `node/setup/pack-backend.mjs`, attached by `backend-prebuilt.yaml`; the
   name, the three directories and the manifest are the contract

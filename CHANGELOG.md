@@ -56,6 +56,16 @@
   builds in a sandbox of its own: it used to share the MCP server's, so an
   unfinished app an agent had deployed failed `npm run test:unit`, and the
   run deleted the session's copy of every class it had tested.
+- **A failing `setup` or `class_setup` is reported as its own class's
+  failure.** The generated runner prints a test's line only after the test
+  class's constructor and `setup` ran (and `class_setup` before the class's
+  first line), and the failure was pinned on the test printed last: another
+  class's PASSING test showed as failed in `run_unit_tests` and in the
+  `abap2ui5-unit` summary, and the class whose fixture threw read "a test
+  include, but the runner found no test method". The stack now names the
+  fixture (`failed.fixture`, with the method that threw), and the runner
+  keeps 100 stack frames instead of 10, so a failure deep in the code under
+  test keeps the test class's frame.
 
 - **Answers fit the client.** Claude Code refuses a tool result over 25,000
   tokens, and three defaults went far over: `scaffold_app` (~280 KB, the

@@ -215,13 +215,17 @@ export function renderSummary({ framework, mode, results }) {
     }
     const tests = r.tests || [];
     ran += tests.filter((t) => !t.skipped).length;
-    if (!tests.length) {
+    if (!tests.length && !r.failed) {
       lines.push(`- **${r.cls.toUpperCase()}**: a test include, but the runner found no test method - is the local class FOR TESTING?`);
       continue;
     }
     for (const t of tests) {
-      const mark = r.failed && r.failed.method === t.method && r.failed.localClass === t.localClass ? 'FAIL' : (t.skipped ? 'skip' : 'ok');
+      const mark = r.failed && !r.failed.fixture && r.failed.method === t.method && r.failed.localClass === t.localClass ? 'FAIL' : (t.skipped ? 'skip' : 'ok');
       lines.push(`- ${mark === 'FAIL' ? '**FAIL**' : mark}  ${r.cls.toUpperCase()} ${t.localClass}->${t.method}${t.skipped ? ` (${t.skipped})` : ''}`);
+    }
+    // a class_setup, constructor or setup that threw: before the test it belongs to had begun
+    if (r.failed && r.failed.fixture) {
+      lines.push(`- **FAIL**  ${r.cls.toUpperCase()} ${r.failed.localClass ? `${r.failed.localClass}->` : ''}${r.failed.method} (the test class's ${r.failed.method}, before its test method ran)`);
     }
     if (r.failed) {
       failed++;

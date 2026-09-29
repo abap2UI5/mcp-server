@@ -1054,7 +1054,13 @@ async function handle(name, args = {}, ctx = {}) {
       }
       return text({
         ...res,
-        ...(res.ok ? {} : { hint: res.failed ? 'the first failing test stops the runner; fix it, deploy, build, run again' : 'the runner failed before or outside a test - the error is what it printed' }),
+        ...(res.ok ? {} : {
+          hint: res.failed
+            ? (res.failed.fixture
+              ? `${res.failed.object}'s test class failed in its ${res.failed.method}, before the test method it prepares ran - that stops the runner too; fix it, deploy, build, run again`
+              : 'the first failing test stops the runner; fix it, deploy, build, run again')
+            : 'the runner failed before or outside a test - the error is what it printed',
+        }),
       });
     }
     case 'backend': {

@@ -93,6 +93,112 @@ test('parseUnitOutput reads the runner: ran, skipped, and the failure that stopp
   assert.equal(dead.failed, null);
 });
 
+/* The generated runner prints "<OBJ>: running <class>-><method>" AFTER the
+ * test class's constructor and setup ran (and class_setup runs before any
+ * such line of its class), so a failing setup or class_setup used to be
+ * pinned on the test whose line came last: another class's PASSING test was
+ * reported failed, and the class whose fixture failed looked like one without
+ * test methods. The stack names the fixture that threw (these are the
+ * shapes the published runtime prints). */
+const APPS = 'file:///ws/runtime/1.145.0/apps';
+test('a failing setup or class_setup is the failure of its own class, not of the test before it', () => {
+  const setupNext = parseUnitOutput([
+    'ZCL_R3_UA: running ltcl_ok->passes',
+    '<ref *1> cx_sy_zerodivide [Error]',
+    '    at throwError (/ws/runtime/1.145.0/node_modules/@abaplint/runtime/build/src/throw_error.js:15:15)',
+    '    at Object.divide (/ws/runtime/1.145.0/node_modules/@abaplint/runtime/build/src/operators/divide.js:29:42)',
+    `    at #setup (${APPS}/zcl_r3_ub.clas.testclasses.mjs:36:31)`,
+    `    at run (${APPS}/index.mjs:38:84) {`,
+    '}',
+  ].join('\n'), 1);
+  assert.equal(setupNext.failed.object, 'ZCL_R3_UB', 'the class whose setup threw');
+  assert.equal(setupNext.failed.method, 'setup');
+  assert.equal(setupNext.failed.fixture, true);
+  assert.match(setupNext.failed.error, /cx_sy_zerodivide/);
+  assert.deepEqual(setupNext.tests.map((t) => t.method), ['passes'], 'the passing test stays a passing test');
+
+  const classSetup = parseUnitOutput([
+    '<ref *1> cx_sy_zerodivide [Error]',
+    `    at ltcl_x.class_setup (${APPS}/zcl_r3_ue.clas.testclasses.mjs:31:26)`,
+    `    at run (${APPS}/index-mcp-zcl_r3_ue.mjs:31:50) {`,
+  ].join('\n'), 1);
+  assert.deepEqual([classSetup.failed.object, classSetup.failed.localClass, classSetup.failed.method], ['ZCL_R3_UE', 'ltcl_x', 'class_setup']);
+
+  // a second method's setup, in the same class: not the first method's failure either
+  const sameClass = parseUnitOutput([
+    'ZCL_A: running ltcl_a->first',
+    'Error: boom',
+    `    at ltcl_a.setup (${APPS}/zcl_a.clas.testclasses.mjs:9:11)`,
+  ].join('\n'), 1);
+  assert.deepEqual([sameClass.failed.object, sameClass.failed.method, sameClass.failed.fixture], ['ZCL_A', 'setup', true]);
+
+  // a failure inside the test - an assertion, or a helper of the test class - stays the test's
+  const assertion = parseUnitOutput([
+    'ZCL_R3_UC: running ltcl_x->t1',
+    '<ref *1> kernel_cx_assert [Error]',
+    '    at cl_abap_unit_assert.assert_equals (file:///ws/runtime/1.145.0/node_modules/@abap2ui5/node-runtime/output/cl_abap_unit_assert.clas.mjs:412:32)',
+    `    at async #t1 (${APPS}/zcl_r3_uc.clas.testclasses.mjs:24:5)`,
+    `    at async run (${APPS}/index-mcp-zcl_r3_uc.mjs:46:9) {`,
+  ].join('\n'), 1);
+  assert.deepEqual([assertion.failed.object, assertion.failed.method, assertion.failed.fixture], ['ZCL_R3_UC', 't1', undefined]);
+  const helper = parseUnitOutput([
+    'ZCL_A: running ltcl_a->first',
+    'Error: boom',
+    `    at #build_client (${APPS}/zcl_a.clas.testclasses.mjs:40:11)`,
+    `    at async #first (${APPS}/zcl_a.clas.testclasses.mjs:12:5)`,
+  ].join('\n'), 1);
+  assert.equal(helper.failed.method, 'first');
+  // no stack at all: as before, the test that was running
+  assert.equal(parseUnitOutput('ZCL_A: running ltcl_a->first\nError: boom', 1).failed.method, 'first');
+});
+
+test('run_unit_tests names the class whose setup failed deep in the code under test', { skip: process.platform === 'win32' && 'POSIX paths in the fake runner' }, async () => {
+  /* A runner of the transpiler's shape: the running line after the setup.
+   * ZCL_B's setup calls 20 levels deep into its class under test - past V8's
+   * default of ten frames, which would cut the #setup frame off the stack
+   * and with it the attribution. */
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-runner-'));
+  const apps = path.join(dir, 'apps-unit-x');
+  fs.mkdirSync(apps);
+  try {
+    fs.writeFileSync(path.join(apps, 'init.mjs'), '');
+    fs.writeFileSync(path.join(apps, 'zcl_b.clas.mjs'), 'export async function deep(n) { if (!n) throw new Error("deep boom"); await deep(n - 1); }\n');
+    fs.writeFileSync(path.join(apps, 'zcl_a.clas.testclasses.mjs'), 'export class ltcl_a { async constructor_() { return this; } async passes() {} }\n');
+    fs.writeFileSync(path.join(apps, 'zcl_b.clas.testclasses.mjs'), 'import { deep } from "./zcl_b.clas.mjs";\nexport class ltcl_b { async constructor_() { return this; } async setup() { await deep(20); } async first() {} }\n');
+    fs.writeFileSync(path.join(apps, 'index.mjs'), [
+      'import "./init.mjs";',
+      'function getData() {',
+      '  const ret = [];',
+      '  ret.push({objectName: "ZCL_A", localClass: "ltcl_a", methods: [{"name":"passes","skip":false}], filename: "./zcl_a.clas.testclasses.mjs"});',
+      '  ret.push({objectName: "ZCL_B", localClass: "ltcl_b", methods: [{"name":"first","skip":false}], filename: "./zcl_b.clas.testclasses.mjs"});',
+      '  return ret;',
+      '}',
+      'async function run() {',
+      `  ${RUNNER_LOOP}`,
+      '    const imported = await import(st.filename);',
+      '    const localClass = imported[st.localClass];',
+      '    for (const m of st.methods) {',
+      '      const prefix = st.objectName + ": running " + st.localClass + "->" + m.name;',
+      '      const test = await (new localClass()).constructor_();',
+      '      if (test.setup) await test.setup();',
+      '      console.log(prefix);',
+      '      await test[m.name]();',
+      '    }',
+      '  }',
+      '}',
+      'run().then(() => process.exit(0)).catch((err) => { console.log(err); process.exit(1); });',
+    ].join('\n'));
+    const res = await runUnitTests({ classNames: ['zcl_a', 'zcl_b'], appsDir: apps });
+    assert.equal(res.ok, false);
+    assert.deepEqual(res.tests.map((t) => `${t.object} ${t.method}`), ['ZCL_A passes']);
+    assert.equal(res.failed && res.failed.object, 'ZCL_B', JSON.stringify(res.failed));
+    assert.equal(res.failed.method, 'setup');
+    assert.match(res.failed.error, /deep boom/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('the runner loop this server filters on is the one the transpiler writes', () => {
   /* The line is @abaplint/transpiler's unit_test.js template, quoted here so a
    * template change upstream fails this test rather than silently costing
