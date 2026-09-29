@@ -2,6 +2,49 @@
 
 ## Unreleased
 
+- **The expensive half runs on the npm package `@abap2ui5/node-runtime` -
+  no framework clone.** Without a framework checkout, `build_backend`
+  shallow-cloned abap2UI5 and ran `npm ci` of its devDependencies there
+  (205 packages, 186 MB of node_modules for 1.145.0: Playwright, @ui5/cli,
+  eslint, ...) just to get a transpiler and abaplint, then downloaded the
+  release's backend. The default backend without a checkout is now the
+  package: installed once per release into
+  `~/.abap2ui5-mcp/runtime/<version>` with the transpiler it records,
+  express within its peer range and app-template's abaplint for the lint -
+  exact versions, a lockfile, `npm --ignore-scripts`; open-abap-core fetched
+  with git at the commit the release was built with; and every build
+  transpiles ONLY the deployed apps against the package (7-8 s), whose
+  imports of framework modules are pointed at the package's own so the
+  runtime never holds a second copy. `deploy_app` (into
+  `~/.abap2ui5-mcp/sandbox`, linted with app-template's config against the
+  package's sources), `build_backend`, `run_app`, `interact_app`,
+  `run_unit_tests` (the apps' own tests, never the framework's suite) and
+  `verify_app` need no checkout at all. The release is the registry's
+  latest, asked through npm and cached a day, unless
+  `A2UI5_MCP_RUNTIME_VERSION` pins one; a release that exports `accelerate()`
+  or `compress` gets them used. A framework checkout (`A2UI5_HOME`, a
+  sibling, a workspace clone made earlier) keeps every behaviour it had;
+  `A2UI5_MCP_BACKEND=npm` runs on the package beside one, `=clone` restores
+  the clone as the default, `build_backend` mode `npm` builds on it
+  explicitly and modes `prebuilt`/`transpile` clone the framework when there
+  is no checkout. `setup_status` reports which backend is in use and why,
+  and for the package the release, workspace, tool versions, open-abap-core
+  commit and what the next build would do. Measured here, cold npm cache:
+  the install 10 s, the first build 8 s, a warm build 7 s, the unit tests
+  1 s.
+- **`abap2ui5-unit` and the GitHub Action run on the package too.** Against
+  app-template's starter app: 16.3 s cold and 8.2 s warm, where the clone
+  took 26.9 s plus 3.2 s for the action's `npm ci` and 23.2 s warm (the
+  whole framework was transpiled twice per run); the workspace is 67 MB
+  instead of 231 MB. The action no longer runs `npm ci` - the script
+  imports none of this package's dependencies - takes a `backend` input and
+  caches the workspace per backend and pin. The release is `--framework`,
+  else `A2UI5_MCP_RUNTIME_VERSION`, else the project's `abaplint.jsonc`
+  pin, else the latest; `--backend clone` keeps the old path, which a pin
+  without a package (before 1.145.0) and a branch take by themselves. A
+  workspace clone an earlier version left behind is no longer picked up
+  unless the clone is asked for.
+
 - **Answers fit the client.** Claude Code refuses a tool result over 25,000
   tokens, and three defaults went far over: `scaffold_app` (~280 KB, the
   whole template), `pitfalls` without a query (~120 KB) and `examples` with a

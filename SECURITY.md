@@ -40,6 +40,30 @@ Worth knowing before assessing a report:
   whatever the registry held under that name (`abap_transpile` is not a
   claimed package name there). A missing install is now reported with the
   `npm ci` that fixes it; nothing is downloaded to be executed.
+- **What the npm backend installs, and how.** Without a framework checkout
+  the expensive half installs `@abap2ui5/node-runtime` (the release the
+  registry names as latest, or `A2UI5_MCP_RUNTIME_VERSION`), `express`
+  within that package's peer range, `@abaplint/transpiler-cli` at the
+  version the package records and `@abaplint/cli` at app-template's pin -
+  four direct dependencies, about 76 packages in all, where the framework
+  clone's `npm ci` installed about 205. They go into a directory of their
+  own under `~/.abap2ui5-mcp/runtime/<version>`, through the user's own npm
+  and its registry configuration, with `--ignore-scripts` (no install
+  script of any dependency runs), the exact versions recorded
+  (`--save-exact`) and a `package-lock.json` whose integrity hashes npm
+  checks on every reinstall. Versions and commits read from the registry
+  are validated (a plain `X.Y.Z`, a 40-character sha) before they become a
+  path or an argument, and npm runs without a shell except on Windows,
+  where it is a `.cmd` script and its arguments are quoted.
+  **open-abap-core** is fetched with git at the exact commit the release
+  records (`git fetch --depth 1 <sha>`, the checkout's `rev-parse` verified
+  before it is used) - never a branch, except for a release that records
+  none, which gets the default branch's HEAD resolved to a sha and says
+  so. The backend it boots listens on 127.0.0.1 only. What runs is still
+  code from npm and GitHub: the package's transpiled framework in the
+  backend process, the transpiler and abaplint during a build and a lint.
+  Trusting them is trusting the abap2UI5 and abaplint publishers, as the
+  clone's `npm ci` did - over far fewer packages.
 - **The cheap half never executes what it reads.** `validate_view` and
   `screenshot_view` work from source through the linter's render harness:
   the ABAP is parsed and the reconstructed view is loaded in headless
