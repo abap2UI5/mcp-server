@@ -491,6 +491,14 @@ legitimately slower.
   (`npm run repo-dirs:check`, `bump-repo-dirs.yml`), so a rename lands in one
   place and propagates. Dropping an alias still un-finds somebody's working
   checkout — do that only deliberately.
+- **Never `npx <tool>` inside a checkout.** Under an MCP client stdin is no
+  TTY, so npx answers its own install prompt and runs whatever the registry
+  holds under that name when the checkout has no local bin — `abap_transpile`
+  is an unclaimed npm name, which made the incremental build a
+  dependency-confusion hole. `localBin` in `lib/runtime.mjs` resolves a
+  checkout's own `node_modules/<pkg>` bin and spawns it with node; a missing
+  install is a sentence (`missingBinMessage`), pinned by
+  `test/runtime.test.mjs` with an `npx` on PATH that must stay uncalled.
 - The README's setup section and the sibling-layout table above must stay in
   sync — the README is the user-facing copy, this file is the contract.
 

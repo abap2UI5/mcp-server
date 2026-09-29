@@ -33,6 +33,13 @@ Worth knowing before assessing a report:
 - **Every spawned child gets a hard timeout and is killed as a process group**
   (`lib/runtime.mjs`), so a hung or forking build cannot outlive the call that
   started it.
+- **It runs only tools the checkouts installed themselves.** The lint and
+  the incremental transpile start `<checkout>/node_modules/@abaplint/cli`
+  and `@abaplint/transpiler-cli` directly. They used to go through `npx`,
+  which — with no local bin and no TTY to answer its prompt — fetched
+  whatever the registry held under that name (`abap_transpile` is not a
+  claimed package name there). A missing install is now reported with the
+  `npm ci` that fixes it; nothing is downloaded to be executed.
 - **The cheap half never executes what it reads.** `validate_view` and
   `screenshot_view` work from source through the linter's render harness:
   the ABAP is parsed and the reconstructed view is loaded in headless

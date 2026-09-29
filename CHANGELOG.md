@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Security: no registry fallback for abaplint and the transpiler.** The
+  lint ran `npx abaplint` and the incremental build `npx abap_transpile`;
+  in a checkout without its own install npx did not fail but, with no TTY
+  to prompt on, installed whatever the registry has under that name - and
+  `abap_transpile` is an unclaimed name there (dependency confusion). Both
+  now run the checkout's own `node_modules/@abaplint/cli` /
+  `@abaplint/transpiler-cli` bin with node, and a missing install is a
+  message naming the checkout and `npm ci`.
 - **`npx --yes @abap2ui5/mcp-server` runs the server.** 0.2.0 shipped two
   bins, `abap2ui5-mcp` and `abap2ui5-unit`, and none named after the package,
   so npx stopped with "could not determine executable to run" - the command
