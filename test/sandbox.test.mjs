@@ -313,3 +313,17 @@ test('an incremental build after remove_app no longer transpiles the removed cla
   assert.match(two.tail, /INPUT zcl_keep\.clas\.abap,zcl_keep\.clas\.xml$/m);
   assert.ok(!fs.existsSync(path.join(a2, 'e2e-transpile.json')), 'the temporary config is gone');
 }));
+
+test('two dev apps deployed without a description do not share one', withFakeFramework(async () => {
+  // abaplint's identical_descriptions (on in app-template's config) failed
+  // every second app while the default was the constant 'MCP dev app'
+  deployApp({ className: 'zcl_one', source: appNamed('zcl_one') });
+  deployApp({ className: 'zcl_two', source: appNamed('zcl_two') });
+  const desc = (c) => /<DESCRIPT>([^<]*)<\/DESCRIPT>/.exec(fs.readFileSync(path.join(sandbox().dir, `${c}.clas.xml`), 'utf8'))[1];
+  assert.notEqual(desc('zcl_one'), desc('zcl_two'));
+  assert.match(desc('zcl_one'), /zcl_one/);
+  deployApp({ className: 'zcl_one', source: appNamed('zcl_one'), description: 'Sales <orders> & more' });
+  assert.equal(desc('zcl_one'), 'Sales  orders    more', 'a given description is kept, XML-safe');
+  removeApp('zcl_one');
+  removeApp('zcl_two');
+}));

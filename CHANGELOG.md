@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **The second dev app lints.** `deploy_app` without a `description` wrote
+  the constant `MCP dev app` into every sidecar, and abaplint's
+  `identical_descriptions` (on in app-template's config, which lints the
+  framework sandbox) failed every app after the first - `verify_app` stopped
+  at deploy. The default now names the class.
 - **Removed apps leave the build.** The incremental build copied the sandbox
   into the framework's `node/downport` and never took anything out: after
   `remove_app` the class was still transpiled (a broken one kept failing
