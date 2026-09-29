@@ -2,6 +2,256 @@
 
 ## Unreleased
 
+- **The expensive half runs on the npm package `@abap2ui5/node-runtime` -
+  no framework clone.** Without a framework checkout, `build_backend`
+  shallow-cloned abap2UI5 and ran `npm ci` of its devDependencies there
+  (205 packages, 186 MB of node_modules for 1.145.0: Playwright, @ui5/cli,
+  eslint, ...) just to get a transpiler and abaplint, then downloaded the
+  release's backend. The default backend without a checkout is now the
+  package: installed once per release into
+  `~/.abap2ui5-mcp/runtime/<version>` with the transpiler it records,
+  express within its peer range and app-template's abaplint for the lint -
+  exact versions, a lockfile, `npm --ignore-scripts`; open-abap-core fetched
+  with git at the commit the release was built with; and every build
+  transpiles ONLY the deployed apps against the package (7-8 s), whose
+  imports of framework modules are pointed at the package's own so the
+  runtime never holds a second copy. `deploy_app` (into
+  `~/.abap2ui5-mcp/sandbox`, linted with app-template's config against the
+  package's sources), `build_backend`, `run_app`, `interact_app`,
+  `run_unit_tests` (the apps' own tests, never the framework's suite) and
+  `verify_app` need no checkout at all. The release is the registry's
+  latest, asked through npm and cached a day, unless
+  `A2UI5_MCP_RUNTIME_VERSION` pins one; a release that exports `accelerate()`
+  or `compress` gets them used. A framework checkout (`A2UI5_HOME`, a
+  sibling, a workspace clone made earlier) keeps every behaviour it had;
+  `A2UI5_MCP_BACKEND=npm` runs on the package beside one, `=clone` restores
+  the clone as the default, `build_backend` mode `npm` builds on it
+  explicitly and modes `prebuilt`/`transpile` clone the framework when there
+  is no checkout. `setup_status` reports which backend is in use and why,
+  and for the package the release, workspace, tool versions, open-abap-core
+  commit and what the next build would do. Measured here, cold npm cache:
+  the install 10 s, the first build 8 s, a warm build 7 s, the unit tests
+  1 s.
+- **`abap2ui5-unit` and the GitHub Action run on the package too.** Against
+  app-template's starter app: 16.3 s cold and 8.2 s warm, where the clone
+  took 26.9 s plus 3.2 s for the action's `npm ci` and 23.2 s warm (the
+  whole framework was transpiled twice per run); the workspace is 67 MB
+  instead of 231 MB. The action no longer runs `npm ci` - the script
+  imports none of this package's dependencies - takes a `backend` input and
+  caches the workspace per backend and pin. The release is `--framework`,
+  else `A2UI5_MCP_RUNTIME_VERSION`, else the project's `abaplint.jsonc`
+  pin, else the latest; `--backend clone` keeps the old path, which a pin
+  without a package (before 1.145.0) and a branch take by themselves. A
+  workspace clone an earlier version left behind is no longer picked up
+  unless the clone is asked for.
+- **`abap2ui5-unit` tests every class, and a class it cannot test fails the
+  run.** It deployed each class through `deploy_app`'s gate, which asks for
+  `z2ui5_if_app`: a helper or model class was reported "not deployed", its
+  tests never ran - and the run exited 0, a green CI over a failing test.
+  Interfaces and local-class includes were never deployed at all, so a class
+  using one did not transpile. Every class and interface under the paths is
+  now deployed with all of its files as the repository carries them, `--class`
+  narrows the tests that run (not what is deployed), and an object that
+  cannot be deployed (a namespaced name) exits 2. On the package the run
+  builds in a sandbox of its own: it used to share the MCP server's, so an
+  unfinished app an agent had deployed failed `npm run test:unit`, and the
+  run deleted the session's copy of every class it had tested.
+- **A failing `setup` or `class_setup` is reported as its own class's
+  failure.** The generated runner prints a test's line only after the test
+  class's constructor and `setup` ran (and `class_setup` before the class's
+  first line), and the failure was pinned on the test printed last: another
+  class's PASSING test showed as failed in `run_unit_tests` and in the
+  `abap2ui5-unit` summary, and the class whose fixture threw read "a test
+  include, but the runner found no test method". The stack now names the
+  fixture (`failed.fixture`, with the method that threw), and the runner
+  keeps 100 stack frames instead of 10, so a failure deep in the code under
+  test keeps the test class's frame. `run_unit_tests` on a class whose
+  `class_setup` threw no longer answers "no test class of X in the built
+  backend - deploy_app with testclasses": that hint is for a run that passed.
+- **`build_backend` refuses a checkout build under
+  `A2UI5_MCP_BACKEND=npm`.** Mode `npm` was already refused beside a
+  checkout in use, but the mirror case went through: with the package
+  chosen as the backend, modes `prebuilt`, `transpile` and `full` built a
+  checkout (or cloned one first) and answered `built: true`, while
+  `run_app` and `run_unit_tests` kept running on the package and said
+  "backend not built". They are refused now, before a running backend is
+  stopped, and `setup_status`'s hint no longer suggests them there.
+- **A relative `A2UI5_MCP_WORKSPACE` works.** It was used as given, and the
+  npm backend hands workspace paths to children that run in another
+  directory: with `A2UI5_MCP_WORKSPACE=.abap2ui5-mcp` the lint and the
+  transpiler failed with "Cannot find module" on a doubled path. It is
+  resolved against the directory the server runs in now.
+- **`deploy_app` refuses a name the framework or the corpus already
+  defines.** The customer namespace a dev app may use holds the
+  framework's own `z2ui5_*` classes and interfaces too, and `zcl_sicf`, the
+  ICF handler every host boots. A dev app of such a name was written and
+  built beside the original: a second copy that failed the transpile, or -
+  on a checkout, whose incremental build copies the sandbox over the output
+  - replaced the framework's class in what the host served. The name is
+  checked against the release's `downport/` (npm backend), `src/` and
+  `node/srv/` of a checkout, and the corpus' own samples, and the refusal
+  says where the original is.
+- **On Windows a timeout or a cancel ends the whole child tree, and no
+  console window opens.** Windows has no process groups, so killing a child
+  ended that child alone - and npm runs through `cmd.exe` there, so a
+  timed-out or cancelled install ended the wrapper while npm and the git it
+  started kept running, holding the output open: the call returned only
+  when they had finished on their own. The tree is ended with `taskkill /T`
+  now. And a server a desktop client starts has no console, so every child
+  it spawned (npm, git, the transpiler, the backend) opened a console window
+  of its own; they are started hidden.
+- **`setup_status` names the abaplint install the next build makes.** After
+  `abap2ui5-unit` installed a release (without the lint's `@abaplint/cli`),
+  or after app-template moved its pin, the next `build_backend` ran an npm
+  install that `nextBuild` did not mention.
+- **A build killed half-way no longer leaves its output behind for good.**
+  The npm backend's build, open-abap-core fetch and `abap2ui5-unit` run
+  clean up in a `finally` that a killed process never reaches - and closing
+  the MCP session mid-build is such a kill: every one left a staging
+  directory of up to 22 MB in `~/.abap2ui5-mcp/runtime/<version>`. Their
+  names now carry the process id, and the next build removes those whose
+  process is gone.
+- **A cached "latest" the registry no longer has is asked again.** The
+  registry's latest release is cached a day; when the release it named
+  could not be installed any more (unpublished, or npm pointed at another
+  registry since), every lint and build failed with npm's "notarget" until
+  the cache expired. The registry is now asked again, once, and the release
+  it names now is installed. A pinned release is never swapped for another.
+- **The registry lookup and the install read the same npm config.** `npm
+  view` ran in the directory the server was started in, the install in the
+  workspace: a project `.npmrc` there decided which registry was asked for
+  the latest release, never which one it was installed from. Both run in
+  the workspace now and follow the user's npm config and `npm_config_*`.
+- **The GitHub Action no longer runs its `paths` input as shell code.** The
+  test step read `set -- ${{ inputs.paths }}`, and the runner pastes an
+  expression into the script before bash parses it: a `paths` of
+  `src; exit 0 #` passed the step without running a test, and any `$`, `;`
+  or backtick in a path was code. Every input now reaches the scripts
+  through `env:`, and the pin and backend the cache key is made of are
+  reduced to a name before they go to `$GITHUB_OUTPUT` (a newline in the
+  `framework` input was a second output line).
+
+- **Answers fit the client.** Claude Code refuses a tool result over 25,000
+  tokens, and three defaults went far over: `scaffold_app` (~280 KB, the
+  whole template), `pitfalls` without a query (~120 KB) and `examples` with a
+  large `limit` (~135 KB at 200). Each is now paged at about 60,000
+  characters (`lib/budget.mjs`) and names the arguments that fetch the rest:
+  `scaffold_app` returns every file that fits, smallest first (the class,
+  its sidecar and the configs always), lists the others under `remaining`
+  and takes them back through the new `files` argument; `pitfalls` pages by
+  whole section and `examples` by entry, both with a new `offset`. `examples`'
+  `matches` is now the total, with `returned` for the page.
+- **`setup_status` sees a Playwright-managed Chromium.** It only probed three
+  hard-coded paths (one of them the `/opt/pw-browsers` link of a sandbox
+  image) and reported a machine with `npx playwright install chromium` done
+  as having no browser. `resolveChromium` asks Playwright for its own
+  executable after `A2UI5_MCP_CHROMIUM` and `CHROMIUM_BIN` (the linter's
+  variable, now honoured by `run_app` too), keeps the system paths as the
+  fallback with the sandbox link last, and `setup_status` reports the source.
+- **A failed `verify_app` is a failed call.** It answered `isError: false`
+  with `ok: false` inside when a stage stopped it; a client going by the
+  protocol's flag saw it green. `isError` is now set whenever `stoppedAt` is.
+- **String arguments are checked against the schema.** `capabilities` with
+  `{ query: 42 }` answered "query.toLowerCase is not a function"; every
+  argument a tool's schema declares a string is now refused by name when it
+  is not one, once, before any handler runs.
+- **Three wrong pointers.** `generation_rules` linked
+  `docs/cookbook/overview`, a page the site never had (now the cookbook's
+  index; a test checks every docs link against a local docs checkout);
+  `scaffold_app`'s schema advertised `^[zy]c[lx]_` while the template enforces
+  `^z(cl|cx)_`; and `run_unit_tests`' `class_names` errors showed the example
+  `["sap.m.Wizard"]`, which is `scope_of`'s.
+- **`validate_view` keeps the property findings when the render gate cannot
+  start.** Without `@abap2ui5/linter-render`, or with a Chromium that will not
+  launch, the linter throws, and the tool returned that throw - an error or
+  5 KB of Playwright's ANSI launch log - instead of the findings the property
+  gate had already computed. It now repeats the check with `render: false`,
+  says why in `notes` and `renderSkipped`, and answers.
+- **The project's own linter is found.** app-template ships
+  `@abap2ui5/linter` as a devDependency, yet the server started in such a
+  project said "linter checkout not found - clone it as a sibling". After the
+  sibling checkouts, `<cwd>/node_modules/@abap2ui5/linter` and the server's
+  own `node_modules` are candidates now; the missing-linter message and the
+  README's Level 1 name all the ways in, including
+  `npx -p @abap2ui5/mcp-server -p @abap2ui5/linter -p @abap2ui5/linter-render
+  abap2ui5-mcp`. The README's "~3 MB" for Level 1 was the linter without its
+  render runtime; with it (the `@openui5` libraries and Playwright) the
+  install is ~150-200 MB, and it now says so.
+- **The framework clone is the release, not its 7.02 downport.** Without a
+  checkout, `build_backend` and an unpinned `abap2ui5-unit` cloned the tag
+  GitHub's `releases/latest` names - and the framework publishes every
+  version twice, `X.Y.Z` and seconds later `X.Y.Z-702`, so "latest" was the
+  downport (downported sources, no prebuilt backend). The release list is
+  read instead and the highest plain `X.Y.Z` taken.
+- **`scaffold_app` escapes what it writes.** The package text and the
+  repository name were spliced into the XML sidecars and `package.json` raw,
+  as a `String.replace` replacement string: `R&D <tools>` produced
+  unparseable XML, `my"repo` an unparseable `package.json`, and `$&` was
+  expanded into the matched text. Both are now escaped for the format they
+  land in and substituted through replacer functions.
+- **The mirror stays inside its directory.** The template mirror joined
+  every path `template.json` lists (and the docs mirror every path the tree
+  listing names) onto the cache directory unchecked, so an entry like
+  `../../x` was fetched and written outside it. Listed paths now pass the
+  same whitelist as an agent's path; one bad entry refuses the mirror.
+- **A stale `GITHUB_TOKEN` no longer breaks the GitHub mirror.** The token
+  was sent to `raw.githubusercontent.com` too, which answers a token it does
+  not accept with 404 - every knowledge tool then reported every file as
+  missing. It now goes to `api.github.com` only, and a token the API refuses
+  (401/403) is dropped with one warning on stderr and the request repeated
+  without it. A used-up unauthenticated API limit (the docs tree listing) is
+  reported as that, with the token as the remedy, instead of a bare
+  `HTTP 403`.
+- **`run_app` boots with the corpus' local UI5, and honours `timeout_ms`.**
+  The framework page's hash-only CSP blocks the inline scripts the SOURCE
+  `sap-ui-core.js` from the local `@openui5` packages `document.write()`s, so
+  with a samples-controls checkout beside it no app ever booted; the browser
+  context now bypasses CSP exactly when local sources are served (with the
+  CDN the page keeps its own policy). The boot wait passed `{ timeout }` as
+  `waitForFunction`'s page argument instead of its options, so `timeout_ms`
+  (run_app, interact_app, verify_app) was ignored and every boot waited
+  Playwright's default 30 s.
+- **The second dev app lints.** `deploy_app` without a `description` wrote
+  the constant `MCP dev app` into every sidecar, and abaplint's
+  `identical_descriptions` (on in app-template's config, which lints the
+  framework sandbox) failed every app after the first - `verify_app` stopped
+  at deploy. The default now names the class.
+- **Removed apps leave the build.** The incremental build copied the sandbox
+  into the framework's `node/downport` and never took anything out: after
+  `remove_app` the class was still transpiled (a broken one kept failing
+  every `build_backend`), a redeploy without `testclasses` kept the old test
+  include running, and `abap2ui5-unit` left every class it tested in a
+  developer's checkout. The copies are now tracked in a manifest inside
+  `node/downport` (`.abap2ui5-mcp-dev-copies.json`) and removed once their
+  sandbox source is gone - by the build and by `remove_app` itself; the
+  framework's own files there are never touched. The sandbox's
+  `package.devc.xml` is no longer copied over the framework's.
+- **Security: no registry fallback for abaplint and the transpiler.** The
+  lint ran `npx abaplint` and the incremental build `npx abap_transpile`;
+  in a checkout without its own install npx did not fail but, with no TTY
+  to prompt on, installed whatever the registry has under that name - and
+  `abap_transpile` is an unclaimed name there (dependency confusion). Both
+  now run the checkout's own `node_modules/@abaplint/cli` /
+  `@abaplint/transpiler-cli` bin with node, and a missing install is a
+  message naming the checkout and `npm ci`.
+- **`npx --yes @abap2ui5/mcp-server` runs the server.** 0.2.0 shipped two
+  bins, `abap2ui5-mcp` and `abap2ui5-unit`, and none named after the package,
+  so npx stopped with "could not determine executable to run" - the command
+  the README, the docs, the VS Code extension and app-template's `.mcp.json`
+  all give. The bin `mcp-server` fixes that from this version on; the README
+  now leads with `npx --yes -p @abap2ui5/mcp-server abap2ui5-mcp`, which 0.2.0
+  answers too. The release workflow runs the packed tarball through npx the
+  way users do (`scripts/pack-smoke.mjs`) and moves the floating major tag
+  `v0` - which `uses: abap2UI5/mcp-server@v0` names and which never existed -
+  to each release; until then the README pins `@v0.2.0`.
+- **The server exits with its client.** It stopped only on SIGINT/SIGTERM,
+  but a client ends a stdio session by closing the pipe, and under `npx` a
+  SIGTERM reaches npm rather than the server - so node, the warm Chromium and
+  the express backend outlived every session, and the next one's `backend
+  start` met the old backend on the port. An ended or closed stdin and SIGHUP
+  now shut down like the signals do: browsers closed, the backend stopped,
+  every running build/lint child's process tree killed, with a five-second
+  hard stop.
 - **Dependencies:** `@modelcontextprotocol/sdk` ^1.30.1 and `playwright`
   ^1.63.0 (lockfile refreshed within range). The linter's render runtime is
   now published as `@abap2ui5/linter-render` (formerly

@@ -11,7 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   sandbox, deployApp, removeApp, readAppSource, listDevApps, frameworkLintConfig, corpusLintConfig,
-  FRAMEWORK_SANDBOX, frameworkCloneDir, setupStatus,
+  FRAMEWORK_SANDBOX, frameworkCloneDir, setupStatus, syncDevCopies, buildBackend, DEV_COPIES,
 } from '../lib/runtime.mjs';
 import { workspaceRoot, resolveA2UI5 } from '../lib/repos.mjs';
 
@@ -144,10 +144,10 @@ test('setupStatus reports the framework sandbox and the fake checkout', withFake
 
 import { execFileSync as run } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { frameworkPinOf, collectClasses, parseArgs, renderSummary, staleWorkspaceClone } from '../scripts/ci-unit.mjs';
+import { frameworkPinOf, collectObjects, writeObjects, parseArgs, renderSummary, staleWorkspaceClone, chooseBackend } from '../scripts/ci-unit.mjs';
 import { filteredRunner, RUNNER_LOOP } from '../lib/runtime.mjs';
 
-test('the CI runner reads the project\'s framework pin, collects classes with their test includes, and renders', () => {
+test('the CI runner reads the project\'s framework pin, collects classes and interfaces with all their files, and renders', () => {
   assert.equal(frameworkPinOf('{ "dependencies": [ { "url": "https://github.com/abap2UI5/abap2UI5", "branch": "1.144.0", "files": "/src/**/*.*" } ] }'), '1.144.0');
   assert.equal(frameworkPinOf('{ "dependencies": [ { "url": "https://github.com/abap2UI5/abap2UI5.git", "branch": "main" } ] }'), null, 'a branch name is not a release pin');
   assert.equal(frameworkPinOf('{ "dependencies": [ { "url": "https://github.com/other/repo", "branch": "1.0.0" } ] }'), null);
@@ -161,9 +161,29 @@ test('the CI runner reads the project\'s framework pin, collects classes with th
     fs.writeFileSync(path.join(root, 'src', 'zcl_a.clas.xml'), '<x/>');
     fs.writeFileSync(path.join(root, 'src', 'sub', 'zcl_b.clas.abap'), 'CLASS zcl_b');
     fs.writeFileSync(path.join(root, 'src', 'zif_x.intf.abap'), 'INTERFACE');
-    const classes = collectClasses([path.join(root, 'src')]).sort((a, b) => a.cls.localeCompare(b.cls));
-    assert.deepEqual(classes.map((c) => [c.cls, Boolean(c.testclasses)]), [['zcl_a', true], ['zcl_b', false]]);
-    assert.equal(classes[0].testclasses, 'CLASS ltcl FOR TESTING');
+    fs.writeFileSync(path.join(root, 'src', 'zif_x.intf.xml'), '<x/>');
+    fs.writeFileSync(path.join(root, 'src', 'sub', 'zcl_b.clas.locals_imp.abap'), 'CLASS lcl_b');
+    fs.writeFileSync(path.join(root, 'src', 'zcl_orphan.clas.xml'), '<x/>'); // a sidecar without its source is no object
+    fs.writeFileSync(path.join(root, 'src', 'package.devc.xml'), '<x/>');
+    const objects = collectObjects([path.join(root, 'src')]).sort((a, b) => a.name.localeCompare(b.name));
+    assert.deepEqual(objects.map((o) => [o.name, o.type, o.testclasses, o.files.map((f) => f.name).sort()]), [
+      ['zcl_a', 'clas', true, ['zcl_a.clas.abap', 'zcl_a.clas.testclasses.abap', 'zcl_a.clas.xml']],
+      ['zcl_b', 'clas', false, ['zcl_b.clas.abap', 'zcl_b.clas.locals_imp.abap']],
+      ['zif_x', 'intf', false, ['zif_x.intf.abap', 'zif_x.intf.xml']],
+    ]);
+
+    // written under the sandbox's name gate: a namespaced object or one that is there twice is refused, the rest copied as it is
+    fs.writeFileSync(path.join(root, 'src', '#ns#cl_y.clas.abap'), 'CLASS /ns/cl_y');
+    fs.mkdirSync(path.join(root, 'src', 'again'));
+    fs.writeFileSync(path.join(root, 'src', 'again', 'zif_x.intf.abap'), 'INTERFACE again');
+    const box = path.join(root, 'box');
+    const { written, errors } = writeObjects(collectObjects([path.join(root, 'src')]), box);
+    assert.deepEqual(Object.keys(errors).sort(), ['#ns#cl_y', 'zif_x']);
+    assert.match(errors['#ns#cl_y'], /invalid class name/);
+    assert.match(errors.zif_x, /zif_x\.intf\.abap is there twice/);
+    assert.deepEqual(fs.readdirSync(box).sort(), ['zcl_a.clas.abap', 'zcl_a.clas.testclasses.abap', 'zcl_a.clas.xml', 'zcl_b.clas.abap', 'zcl_b.clas.locals_imp.abap']);
+    assert.equal(written.length, 5);
+    assert.equal(fs.readFileSync(path.join(box, 'zcl_a.clas.xml'), 'utf8'), '<x/>', 'the project\'s own sidecar, not a generated one');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -193,6 +213,37 @@ test('the CI runner reads the project\'s framework pin, collects classes with th
   assert.match(md, /ZCL_B: no test include/);
   assert.match(md, /ZCL_C\*\*: not deployed - source does not implement/);
   assert.match(md, /2 test method\(s\) ran, 2 class\(es\) failing/);
+  // a setup that threw before its class's first test: the class fails, with the fixture named
+  const fixture = renderSummary({
+    framework: '1.145.0',
+    mode: 'npm',
+    results: [{ cls: 'zcl_d', testclasses: true, tests: [], failed: { object: 'ZCL_D', localClass: null, method: 'setup', fixture: true, error: 'cx_sy_zerodivide' } }],
+  });
+  assert.match(fixture, /- \*\*FAIL\*\*  ZCL_D setup \(the test class's setup, before its test method ran\)/);
+  assert.doesNotMatch(fixture, /found no test method/);
+  assert.match(fixture, /1 class\(es\) failing/);
+});
+
+/* abap2ui5-unit runs on the npm package by default: a checkout somebody
+ * named is used as it is, the clone an earlier version made in the workspace
+ * only when the clone is asked for - so a CI cache or a developer's machine
+ * that still carries one does not fall back to the slow path by accident. */
+test('the CI runner takes the npm package unless a checkout is named or the clone is asked for', () => {
+  const cloneDir = path.join('/ws', 'abap2UI5');
+  assert.equal(chooseBackend({ cloneDir }), 'npm', 'nothing there: the package');
+  assert.equal(chooseBackend({ a2: cloneDir, cloneDir }), 'npm', 'the workspace clone of an earlier version is not a choice');
+  assert.equal(chooseBackend({ a2: cloneDir, cloneDir, requested: 'clone' }), 'checkout', '--backend clone uses it');
+  assert.equal(chooseBackend({ requested: 'clone', cloneDir }), 'clone', '--backend clone without one clones');
+  assert.equal(chooseBackend({ a2: '/home/me/abap2UI5', cloneDir }), 'checkout', 'a sibling is somebody\'s checkout');
+  assert.equal(chooseBackend({ a2: cloneDir, cloneDir, envSet: true }), 'checkout', 'A2UI5_HOME naming the clone is a choice');
+  assert.equal(chooseBackend({ envSet: true, cloneDir }), 'missing', 'A2UI5_HOME pointing nowhere');
+  assert.equal(chooseBackend({ a2: '/home/me/abap2UI5', cloneDir, requested: 'npm' }), 'npm', '--backend npm beside a checkout');
+
+  assert.equal(parseArgs(['--backend', 'npm']).backend, 'npm');
+  assert.equal(parseArgs(['--backend', 'clone', 'src']).backend, 'clone');
+  assert.throws(() => parseArgs(['--backend', 'docker']), /--backend is npm or clone/);
+  assert.equal(parseArgs(['--framework', 'main']).framework, 'main', 'a branch still reaches the clone path');
+  assert.match(renderSummary({ framework: '1.145.0', mode: 'npm', results: [] }), /framework 1\.145\.0, backend: @abap2ui5\/node-runtime/);
 });
 
 test('the abap2ui5-unit bin runs when invoked through npm\'s bin symlink', () => {
@@ -234,3 +285,296 @@ test('filteredRunner narrows the generated runner to the named objects, or refus
   assert.match(out, /getData\(\)\.filter\(\(st\) => \["ZCL_A","ZCL_B"\]\.includes\(st\.objectName\)\)/);
   assert.equal(filteredRunner('for (const x of getData()) {', ['zcl_a']), null);
 });
+
+/* The incremental build copied the sandbox into node/downport and never took
+ * anything back out: a removed app stayed there (build_backend kept
+ * transpiling it, or kept failing on it), a redeploy without testclasses left
+ * the old include running, and abap2ui5-unit left every class it tested in a
+ * developer's checkout. node/downport also holds the framework's OWN files
+ * at its root, so only what the manifest says this server copied is ever
+ * removed. */
+const appNamed = (cls) => APP.replace(/zcl_probe/g, cls);
+
+test('dev-app copies in node/downport follow the sandbox, and nothing else there is touched', withFakeFramework(async (t, { a2 }) => {
+  const down = path.join(a2, 'node', 'downport');
+  fs.mkdirSync(down, { recursive: true });
+  fs.writeFileSync(path.join(down, 'zcl_sicf.clas.abap'), '* the framework\'s own');
+  fs.writeFileSync(path.join(down, 'package.devc.xml'), '<framework/>');
+  // a copy an older server left behind, identical to what is deployed: adopted
+  deployApp({ className: 'zcl_old', source: appNamed('zcl_old') });
+  fs.copyFileSync(path.join(sandbox().dir, 'zcl_old.clas.abap'), path.join(down, 'zcl_old.clas.abap'));
+
+  deployApp({ className: 'zcl_a', source: appNamed('zcl_a'), testclasses: TESTS });
+  deployApp({ className: 'zcl_b', source: appNamed('zcl_b') });
+  fs.writeFileSync(path.join(sandbox().dir, 'package.devc.xml'), '<sandbox/>');
+  const first = syncDevCopies(a2);
+  assert.ok(first.copied.includes('zcl_a.clas.testclasses.abap'));
+  assert.ok(!first.copied.includes('package.devc.xml'), 'the sandbox package is not an app');
+  assert.equal(fs.readFileSync(path.join(down, 'package.devc.xml'), 'utf8'), '<framework/>');
+  const owned = JSON.parse(fs.readFileSync(path.join(down, DEV_COPIES), 'utf8')).files;
+  assert.ok(owned.includes('zcl_old.clas.abap'), 'the identical leftover is adopted');
+  assert.ok(!owned.includes('zcl_sicf.clas.abap'));
+
+  // redeploy without tests: the include goes from downport too
+  deployApp({ className: 'zcl_a', source: appNamed('zcl_a') });
+  const second = syncDevCopies(a2);
+  assert.deepEqual(second.removed, ['zcl_a.clas.testclasses.abap']);
+  assert.ok(!fs.existsSync(path.join(down, 'zcl_a.clas.testclasses.abap')));
+  assert.ok(fs.existsSync(path.join(down, 'zcl_a.clas.abap')));
+
+  // remove_app takes the copies out at once, no build needed
+  removeApp('zcl_b');
+  removeApp('zcl_old');
+  for (const f of ['zcl_b.clas.abap', 'zcl_b.clas.xml', 'zcl_old.clas.abap']) assert.ok(!fs.existsSync(path.join(down, f)), f);
+
+  // a framework file a dev app overwrote is not the server's to delete
+  deployApp({ className: 'zcl_sicf', source: appNamed('zcl_sicf') });
+  syncDevCopies(a2);
+  removeApp('zcl_sicf');
+  assert.ok(fs.existsSync(path.join(down, 'zcl_sicf.clas.abap')), 'not in the manifest: left alone');
+  assert.ok(!fs.existsSync(path.join(down, 'zcl_sicf.clas.xml')), 'the sidecar it brought along is removed');
+
+  removeApp('zcl_a');
+  assert.ok(!fs.existsSync(path.join(down, DEV_COPIES)), 'nothing left to track: no manifest');
+  assert.deepEqual(fs.readdirSync(down).sort(), ['package.devc.xml', 'zcl_sicf.clas.abap']);
+}));
+
+test('an incremental build after remove_app no longer transpiles the removed class', withFakeFramework(async (t, { a2 }) => {
+  // a prior build, the framework's own libs present, and a transpiler that
+  // records what node/downport held when it ran
+  for (const d of ['node/downport', 'node/output', 'node/setup', 'node/deps/open-abap-core']) fs.mkdirSync(path.join(a2, d), { recursive: true });
+  fs.writeFileSync(path.join(a2, 'node/output/init.mjs'), '');
+  fs.writeFileSync(path.join(a2, 'node/setup/abap_transpile.json'), JSON.stringify({
+    input_folder: 'node/downport', output_folder: 'node/output', libs: [{ url: 'https://github.com/open-abap/open-abap-core', folder: '/node/deps/open-abap-core' }],
+  }));
+  const cli = path.join(a2, 'node_modules/@abaplint/transpiler-cli');
+  fs.mkdirSync(cli, { recursive: true });
+  fs.writeFileSync(path.join(cli, 'package.json'), JSON.stringify({ bin: { abap_transpile: './abap_transpile' } }));
+  fs.writeFileSync(path.join(cli, 'abap_transpile'), "console.log('INPUT ' + require('fs').readdirSync('node/downport').filter((f) => !f.startsWith('.')).sort().join(','));");
+
+  deployApp({ className: 'zcl_keep', source: appNamed('zcl_keep') });
+  deployApp({ className: 'zcl_gone', source: appNamed('zcl_gone'), testclasses: TESTS });
+  const one = await buildBackend({ mode: 'incremental' });
+  assert.equal(one.ok, true, one.tail);
+  assert.match(one.tail, /INPUT .*zcl_gone\.clas\.testclasses\.abap/);
+
+  removeApp('zcl_gone');
+  const two = await buildBackend({ mode: 'incremental' });
+  assert.equal(two.ok, true, two.tail);
+  assert.match(two.tail, /INPUT zcl_keep\.clas\.abap,zcl_keep\.clas\.xml$/m);
+  assert.ok(!fs.existsSync(path.join(a2, 'e2e-transpile.json')), 'the temporary config is gone');
+}));
+
+test('two dev apps deployed without a description do not share one', withFakeFramework(async () => {
+  // abaplint's identical_descriptions (on in app-template's config) failed
+  // every second app while the default was the constant 'MCP dev app'
+  deployApp({ className: 'zcl_one', source: appNamed('zcl_one') });
+  deployApp({ className: 'zcl_two', source: appNamed('zcl_two') });
+  const desc = (c) => /<DESCRIPT>([^<]*)<\/DESCRIPT>/.exec(fs.readFileSync(path.join(sandbox().dir, `${c}.clas.xml`), 'utf8'))[1];
+  assert.notEqual(desc('zcl_one'), desc('zcl_two'));
+  assert.match(desc('zcl_one'), /zcl_one/);
+  deployApp({ className: 'zcl_one', source: appNamed('zcl_one'), description: 'Sales <orders> & more' });
+  assert.equal(desc('zcl_one'), 'Sales  orders    more', 'a given description is kept, XML-safe');
+  removeApp('zcl_one');
+  removeApp('zcl_two');
+}));
+
+/* The customer namespace is not the dev apps' alone: the framework's z2ui5_*
+ * classes are in it, and so is zcl_sicf, the ICF handler in node/srv every
+ * host boots - the incremental build would copy a dev app of that name over
+ * the framework's own output. */
+test('a dev app is never named like the framework\'s or the corpus\' own objects, and is no clash with itself', withFakeFramework(async (t, { root, a2 }) => {
+  fs.mkdirSync(path.join(a2, 'src', '02'), { recursive: true });
+  fs.writeFileSync(path.join(a2, 'src', '02', 'z2ui5_cl_app_hello_world.clas.abap'), '');
+  fs.writeFileSync(path.join(a2, 'node', 'srv', 'zcl_sicf.clas.abap'), '');
+  assert.throws(() => deployApp({ className: 'zcl_sicf', source: appNamed('zcl_sicf') }),
+    /zcl_sicf is the framework's own class \(.*node[\\/]srv[\\/]zcl_sicf\.clas\.abap\).*second copy/s);
+  assert.throws(() => deployApp({ className: 'Z2UI5_CL_APP_HELLO_WORLD', source: appNamed('z2ui5_cl_app_hello_world') }),
+    /z2ui5_cl_app_hello_world is the framework's own class/);
+  assert.deepEqual(listDevApps(), [], 'nothing written for a refused name');
+  deployApp({ className: 'zcl_probe', source: APP });
+  deployApp({ className: 'zcl_probe', source: APP });
+
+  // the corpus: its own samples count, and so does the framework beside it -
+  // its src/zz_dev, the sandbox itself, does not
+  const corpus = path.join(root, 'samples-controls');
+  fs.mkdirSync(path.join(corpus, 'scripts'), { recursive: true });
+  fs.writeFileSync(path.join(corpus, 'scripts', 'e2e-build.mjs'), '// probe');
+  fs.mkdirSync(path.join(corpus, 'src', '01'), { recursive: true });
+  fs.writeFileSync(path.join(corpus, 'src', '01', 'z2ui5_cl_demo_app_001.clas.abap'), '');
+  process.env.SAMPLES_CONTROLS_HOME = corpus;
+  assert.equal(sandbox().kind, 'corpus');
+  assert.throws(() => deployApp({ className: 'z2ui5_cl_demo_app_001', source: appNamed('z2ui5_cl_demo_app_001') }),
+    /z2ui5_cl_demo_app_001 is samples-controls' own class/);
+  assert.throws(() => deployApp({ className: 'zcl_sicf', source: appNamed('zcl_sicf') }), /the framework's own class/);
+  deployApp({ className: 'zcl_probe', source: APP });
+  deployApp({ className: 'zcl_probe', source: APP });
+  assert.deepEqual(listDevApps(), ['zcl_probe']);
+}));
+
+/* GitHub's releases/latest is the NEWEST release, and the framework publishes
+ * each version twice: X.Y.Z (with the prebuilt backend asset) and, seconds
+ * later, its 7.02 downport X.Y.Z-702. "latest" was the downport, so the clone
+ * got downported sources no backend asset exists for. */
+test('the framework clone takes the highest plain X.Y.Z release, never the -702 downport', async () => {
+  const { latestPlainRelease, cloneFramework } = await import('../lib/runtime.mjs');
+  const releases = [
+    { tag_name: '1.145.0-702' }, { tag_name: '1.145.0' }, { tag_name: '1.144.1-702' }, { tag_name: '1.144.1' },
+    { tag_name: '1.146.0', draft: true }, { tag_name: '1.147.0', prerelease: true }, { tag_name: '1.99.9' }, { tag_name: 'v1.100.0' },
+  ];
+  assert.equal(latestPlainRelease(releases), '1.145.0');
+  assert.equal(latestPlainRelease([{ tag_name: '1.9.0' }, { tag_name: '1.10.0' }]), '1.10.0', 'numeric, not lexical');
+  assert.equal(latestPlainRelease([{ tag_name: '1.145.0-702' }]), null);
+  assert.equal(latestPlainRelease(null), null);
+
+  // and cloneFramework asks the LIST, then clones exactly that tag - git is a
+  // recording stand-in on PATH, so nothing reaches the network
+  if (process.platform === 'win32') return;
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-clone-'));
+  const bin = path.join(ws, 'bin');
+  fs.mkdirSync(bin);
+  const record = path.join(ws, 'git-args.txt');
+  fs.writeFileSync(path.join(bin, 'git'), `#!/bin/sh\necho "$@" > ${JSON.stringify(record)}\nexit 1\n`);
+  fs.chmodSync(path.join(bin, 'git'), 0o755);
+  const saved = { A2UI5_MCP_WORKSPACE: process.env.A2UI5_MCP_WORKSPACE, PATH: process.env.PATH };
+  process.env.A2UI5_MCP_WORKSPACE = path.join(ws, 'workspace');
+  process.env.PATH = `${bin}${path.delimiter}${process.env.PATH}`;
+  try {
+    const asked = [];
+    const fetchImpl = async (url) => {
+      asked.push(url);
+      return { ok: true, status: 200, json: async () => releases };
+    };
+    const res = await cloneFramework({ fetchImpl, onLine: () => {} });
+    assert.equal(res.ok, false, 'the stand-in git clones nothing');
+    assert.ok(asked[0].includes('/releases?'), `the release list is asked, not releases/latest: ${asked[0]}`);
+    assert.match(fs.readFileSync(record, 'utf8'), /--branch 1\.145\.0 /);
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+/* action.yml's run: blocks are shell scripts the runner builds by PASTING
+ * every `${{ ... }}` expression into the text before bash parses it:
+ * `set -- ${{ inputs.paths }}` ran a `paths` of `src; exit 0 #` as code -
+ * the step passed without running a test. Inputs reach a script through
+ * `env:` only, and what the scripts write to $GITHUB_OUTPUT (a cache key)
+ * is reduced to a name. */
+const ACTION = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'action.yml');
+function runBlocks(yml) {
+  const blocks = [];
+  const lines = yml.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^(\s*)(?:- )?run:\s*(.*)$/.exec(lines[i]);
+    if (!m) continue;
+    if (m[2] && m[2] !== '|' && m[2] !== '>') {
+      blocks.push(m[2]);
+      continue;
+    }
+    const body = [];
+    for (let j = i + 1; j < lines.length && (lines[j].trim() === '' || lines[j].search(/\S/) > m[1].length); j++) body.push(lines[j]);
+    blocks.push(body.join('\n'));
+  }
+  return blocks;
+}
+
+test('action.yml never pastes an expression into a shell script', () => {
+  const blocks = runBlocks(fs.readFileSync(ACTION, 'utf8'));
+  assert.ok(blocks.length >= 2, 'the pin step and the test step');
+  for (const b of blocks) assert.doesNotMatch(b, /\$\{\{/, `a run: block with an expression in it:\n${b}`);
+});
+
+test('action.yml\'s pin step writes one sane pin and backend, whatever the inputs hold', { skip: process.platform === 'win32' && 'bash' }, () => {
+  const pinStep = runBlocks(fs.readFileSync(ACTION, 'utf8'))[0];
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-action-'));
+  try {
+    const out = path.join(dir, 'output');
+    fs.writeFileSync(out, '');
+    run('bash', ['-c', pinStep], {
+      cwd: dir,
+      env: {
+        ...process.env,
+        GITHUB_OUTPUT: out,
+        GITHUB_ACTION_PATH: path.dirname(ACTION),
+        A2UI5_UNIT_FRAMEWORK: '1.145.0\nbackend=evil',
+        A2UI5_UNIT_BACKEND: 'npm x',
+      },
+    });
+    const lines = fs.readFileSync(out, 'utf8').trim().split('\n');
+    assert.deepEqual(lines, ['pin=1.145.0_backend_evil', 'backend=npm_x']);
+    // no input and no pin in the project: the week's latest
+    fs.writeFileSync(out, '');
+    run('bash', ['-c', pinStep], { cwd: dir, env: { ...process.env, GITHUB_OUTPUT: out, GITHUB_ACTION_PATH: path.dirname(ACTION), A2UI5_UNIT_FRAMEWORK: '', A2UI5_UNIT_BACKEND: '' } });
+    const [pin, backend] = fs.readFileSync(out, 'utf8').trim().split('\n');
+    assert.match(pin, /^pin=latest-\d{4}-\d{2}$/);
+    assert.equal(backend, 'backend=npm');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/* abap2ui5-unit on a checkout somebody named (--home): every class and
+ * interface into its dev sandbox, the incremental build, the tests - and
+ * exactly the files it wrote taken out of the sandbox and node/downport
+ * again, an MCP session's app beside them left alone. The transpiler is a
+ * stand-in that writes a runner of the generated shape over node/downport. */
+test('abap2ui5-unit on a named checkout deploys every object and takes exactly those out again', { skip: process.platform === 'win32' && 'POSIX stand-ins' }, withFakeFramework(async (t, { root, a2 }) => {
+  const { spawnSync } = await import('node:child_process');
+  for (const d of ['node/downport', 'node/output', 'node/setup', 'node/deps/open-abap-core']) fs.mkdirSync(path.join(a2, d), { recursive: true });
+  fs.writeFileSync(path.join(a2, 'node/output/init.mjs'), '');
+  fs.writeFileSync(path.join(a2, 'node/downport/zcl_sicf.clas.abap'), '* the framework\'s own');
+  fs.writeFileSync(path.join(a2, 'node/setup/abap_transpile.json'), JSON.stringify({
+    input_folder: 'node/downport', output_folder: 'node/output', libs: [{ url: 'https://github.com/open-abap/open-abap-core', folder: '/node/deps/open-abap-core' }],
+  }));
+  const cli = path.join(a2, 'node_modules/@abaplint/transpiler-cli');
+  fs.mkdirSync(cli, { recursive: true });
+  fs.writeFileSync(path.join(cli, 'package.json'), JSON.stringify({ bin: { abap_transpile: './abap_transpile' } }));
+  fs.writeFileSync(path.join(cli, 'abap_transpile'), `
+const fs = require('fs'); const path = require('path');
+const down = 'node/downport'; const out = 'node/output';
+const tests = fs.readdirSync(down).filter((f) => f.endsWith('.clas.testclasses.abap'));
+let data = '';
+for (const f of tests) {
+  const o = f.replace('.testclasses.abap', '');
+  const fail = fs.readFileSync(path.join(down, f), 'utf8').includes('FAIL');
+  fs.writeFileSync(path.join(out, o + '.testclasses.mjs'), 'export class ltcl { async constructor_() { return this; } async check() { ' + (fail ? 'throw new Error("assert_equals failed");' : '') + ' } }\\n');
+  data += '  ret.push({objectName: "' + o.split('.')[0].toUpperCase() + '", localClass: "ltcl", methods: [{"name":"check"}], filename: "./' + o + '.testclasses.mjs"});\\n';
+}
+fs.writeFileSync(path.join(out, 'index.mjs'), 'import "./init.mjs";\\nfunction getData() {\\n  const ret = [];\\n' + data + '  return ret;\\n}\\nasync function run() {\\n  for (const st of getData()) {\\n    const localClass = (await import(st.filename))[st.localClass];\\n    for (const m of st.methods) {\\n      const test = await (new localClass()).constructor_();\\n      console.log(st.objectName + ": running " + st.localClass + "->" + m.name);\\n      await test[m.name]();\\n    }\\n  }\\n}\\nrun().then(() => process.exit(0)).catch((err) => { console.log(err); process.exit(1); });\\n');
+fs.writeFileSync(path.join(out, 'init.mjs'), '');
+fs.appendFileSync('inputs.log', fs.readdirSync(down).filter((f) => !f.startsWith('.')).sort().join(',') + '\\n');
+`);
+  // an MCP session's app in the checkout's sandbox
+  deployApp({ className: 'zcl_session', source: appNamed('zcl_session') });
+  const repo = path.join(root, 'project');
+  const src = path.join(repo, 'src');
+  fs.mkdirSync(src, { recursive: true });
+  fs.writeFileSync(path.join(src, 'zcl_proj_app.clas.abap'), appNamed('zcl_proj_app'));
+  fs.writeFileSync(path.join(src, 'zcl_proj_app.clas.testclasses.abap'), TESTS);
+  fs.writeFileSync(path.join(src, 'zcl_proj_app.clas.locals_imp.abap'), 'CLASS lcl DEFINITION. ENDCLASS.');
+  fs.writeFileSync(path.join(src, 'zcl_proj_helper.clas.abap'), 'CLASS zcl_proj_helper DEFINITION PUBLIC. ENDCLASS.');
+  fs.writeFileSync(path.join(src, 'zcl_proj_helper.clas.testclasses.abap'), `${TESTS} " FAIL`);
+  fs.writeFileSync(path.join(src, 'zif_proj_thing.intf.abap'), 'INTERFACE zif_proj_thing PUBLIC. ENDINTERFACE.');
+  const box = sandbox().dir;
+  const before = fs.readdirSync(box).sort();
+
+  const res = spawnSync(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ci-unit.mjs'), 'src', '--home', a2, '--json'], {
+    cwd: repo, encoding: 'utf8', env: { ...process.env, A2UI5_MCP_BACKEND: '' },
+  });
+  const report = JSON.parse(res.stdout || 'null');
+  assert.ok(report, res.stderr);
+  assert.equal(report.backend, 'checkout');
+  const inputs = fs.readFileSync(path.join(a2, 'inputs.log'), 'utf8').trim().split('\n').pop();
+  assert.match(inputs, /zcl_proj_app\.clas\.locals_imp\.abap.*zcl_proj_helper\.clas\.testclasses\.abap.*zif_proj_thing\.intf\.abap/, 'every file of every object was transpiled');
+  const byClass = Object.fromEntries(report.results.map((r) => [r.cls, r]));
+  assert.equal(byClass.zcl_proj_helper.failed.object, 'ZCL_PROJ_HELPER');
+  assert.equal(byClass.zcl_proj_app.failed, null);
+  assert.equal(res.status, 1, res.stderr);
+  assert.deepEqual(fs.readdirSync(box).sort(), before, 'the session\'s app stays, the project\'s files are gone');
+  assert.ok(!fs.readdirSync(path.join(a2, 'node/downport')).some((f) => f.startsWith('zcl_proj_') || f.startsWith('zif_proj_')), 'no copy of the project left in node/downport');
+  assert.ok(fs.existsSync(path.join(a2, 'node/downport/zcl_sicf.clas.abap')), 'the framework\'s own file stays');
+}));

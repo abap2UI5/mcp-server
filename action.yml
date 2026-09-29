@@ -1,21 +1,33 @@
 # abap2UI5 unit tests, without a SAP system.
 #
-# Runs an app repository's ABAP Unit tests (every *.clas.testclasses.abap next
-# to a *.clas.abap under `paths`) in the transpiled Node backend, the way the
-# MCP server's run_unit_tests does: the framework is cloned at the release the
-# project pins (the `branch` of the abap2UI5 dependency in its abaplint.jsonc),
-# its backend is downloaded from that release's assets or built once (a few
-# minutes), the classes are transpiled into it and their tests run. The
-# result is the job's verdict and a step summary.
+# Runs an app repository's ABAP Unit tests (every *.clas.testclasses.abap of
+# a class under `paths` - each class and interface there is deployed, app or
+# not, with its includes) in the transpiled Node backend, the way the
+# MCP server's run_unit_tests does: the framework at the release the project
+# pins (the `branch` of the abap2UI5 dependency in its abaplint.jsonc) comes
+# from the npm package @abap2ui5/node-runtime - installed once with the
+# transpiler it names, no framework clone, none of the framework's
+# devDependencies - the classes are transpiled against it and their tests
+# run. The result is the job's verdict and a step summary.
 #
-#   - uses: abap2UI5/mcp-server@v0
+#   - uses: abap2UI5/mcp-server@v0.2.0
 #     with:
 #       paths: src
 #
-# The framework clone and its backend are cached per release, so the first
-# run pays the build and later runs pay seconds. scripts/ci-unit.mjs is the
-# whole implementation and the same command a developer runs locally
-# (`npx -p @abap2ui5/mcp-server abap2ui5-unit src`).
+# (`@v0`, the floating major tag, is moved to each release by release.yml -
+# it exists from the first release after 0.2.0 on; pin a release tag until
+# then.)
+#
+# `backend: clone` takes the path from before the package: the release cloned
+# and its backend downloaded or built. It is also what a pin older than the
+# package (1.145.0) gets by itself.
+#
+# The workspace (~/.abap2ui5-mcp: the release's install, open-abap-core at
+# its commit) is cached per backend and pin, so the first run pays the
+# install and later runs pay the transpile of the classes - seconds.
+# scripts/ci-unit.mjs is the whole implementation and the same command a
+# developer runs locally (`npx -p @abap2ui5/mcp-server abap2ui5-unit src`);
+# it imports none of this package's dependencies, so there is no npm ci.
 name: abap2UI5 unit tests
 description: Run an app repository's ABAP Unit tests in the transpiled abap2UI5 backend, no SAP system needed
 branding:
@@ -31,6 +43,10 @@ inputs:
     description: The abap2UI5 release to test against (X.Y.Z); default the project's abaplint.jsonc pin, else the latest release
     required: false
     default: ''
+  backend:
+    description: npm (the default - @abap2ui5/node-runtime) or clone (the framework cloned at the release)
+    required: false
+    default: ''
   node-version:
     description: The Node.js version to run with
     required: false
@@ -44,35 +60,47 @@ runs:
         node-version: ${{ inputs.node-version }}
 
     # The pin decides the cache key: a project that bumps its framework gets
-    # a fresh clone and backend, one that does not reuses last week's.
+    # a fresh install, one that does not reuses last week's. Unpinned, the
+    # key rolls over weekly so a new release of the package is picked up.
+    #
+    # Inputs reach every script through env: only - the runner pastes a
+    # `${{ }}` expression into the script text before bash parses it, so an
+    # input written into a run: block is code (a `paths` of `src; exit 0 #`
+    # passed the step without a test). And what goes to $GITHUB_OUTPUT (the
+    # cache key) is reduced to a name: a newline would be a second output.
     - id: pin
       shell: bash
+      env:
+        A2UI5_UNIT_FRAMEWORK: ${{ inputs.framework }}
+        A2UI5_UNIT_BACKEND: ${{ inputs.backend }}
       run: |
-        pin="${{ inputs.framework }}"
+        pin="$A2UI5_UNIT_FRAMEWORK"
         if [ -z "$pin" ]; then
-          pin=$(node "${{ github.action_path }}/scripts/ci-unit.mjs" --print-pin 2>/dev/null || true)
+          pin=$(node "$GITHUB_ACTION_PATH/scripts/ci-unit.mjs" --print-pin 2>/dev/null || true)
         fi
-        echo "pin=${pin:-latest}" >> "$GITHUB_OUTPUT"
+        pin=$(printf '%s' "$pin" | tr -c 'A-Za-z0-9._-' '_')
+        backend=$(printf '%s' "${A2UI5_UNIT_BACKEND:-npm}" | tr -c 'A-Za-z0-9._-' '_')
+        echo "pin=${pin:-latest-$(date -u +%G-%V)}" >> "$GITHUB_OUTPUT"
+        echo "backend=$backend" >> "$GITHUB_OUTPUT"
 
+    # No restore-keys: a cache of another pin would carry that release's
+    # install along into this key and grow with every bump. What is in the
+    # workspace heals itself - an install checks its versions, open-abap-core
+    # is stored by commit, a run's own sandbox and build are removed after it.
     - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.abap2ui5-mcp
-        key: abap2ui5-backend-${{ runner.os }}-${{ steps.pin.outputs.pin }}-${{ hashFiles(format('{0}/package-lock.json', github.action_path)) }}
-
-    - shell: bash
-      run: npm ci --no-audit --no-fund
-      working-directory: ${{ github.action_path }}
-      env:
-        PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+        key: abap2ui5-unit-${{ runner.os }}-${{ steps.pin.outputs.backend }}-${{ steps.pin.outputs.pin }}
 
     - shell: bash
       env:
         PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+        A2UI5_UNIT_PATHS: ${{ inputs.paths }}
         A2UI5_UNIT_FRAMEWORK: ${{ inputs.framework }}
+        A2UI5_UNIT_BACKEND: ${{ inputs.backend }}
       run: |
-        set -- ${{ inputs.paths }}
-        if [ -n "$A2UI5_UNIT_FRAMEWORK" ]; then
-          node "${{ github.action_path }}/scripts/ci-unit.mjs" "$@" --framework "$A2UI5_UNIT_FRAMEWORK"
-        else
-          node "${{ github.action_path }}/scripts/ci-unit.mjs" "$@"
-        fi
+        # space-separated, and a wildcard still expands - but as data, never as code
+        set -- $A2UI5_UNIT_PATHS
+        if [ -n "$A2UI5_UNIT_FRAMEWORK" ]; then set -- "$@" --framework "$A2UI5_UNIT_FRAMEWORK"; fi
+        if [ -n "$A2UI5_UNIT_BACKEND" ]; then set -- "$@" --backend "$A2UI5_UNIT_BACKEND"; fi
+        node "$GITHUB_ACTION_PATH/scripts/ci-unit.mjs" "$@"

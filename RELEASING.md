@@ -85,8 +85,9 @@ Done once, by hand, before there was anything on npm — repeat it if
 `package.json`'s `files`, `bin` or `dependencies` ever change:
 
 - **The manifest carries everything a published package needs**: `name`,
-  `version`, `description`, `bin` (`abap2ui5-mcp` → `server.mjs`, which has
-  its shebang), `files`, `engines` (node >= 22), `repository`, `homepage`,
+  `version`, `description`, `bin` (`mcp-server` and `abap2ui5-mcp` →
+  `server.mjs`, which has its shebang; `abap2ui5-unit` → the CI runner),
+  `files`, `engines` (node >= 22), `repository`, `homepage`,
   `bugs`, `license`, `keywords`, `publishConfig.access: public`. No `main` and
   no `exports`, deliberately: this is a program, not a library.
 - **The tarball is `server.mjs`, `lib/`, `README.md`, `LICENSE` and
@@ -104,6 +105,17 @@ Done once, by hand, before there was anything on npm — repeat it if
   (`The packed tarball starts and answers`) instead of a thing to remember —
   `npm test` runs against the working tree, where a `lib/` module missing from
   `files` still exists, so nothing else in the suite can see that defect.
+- **npx runs the tarball the way users do.** 0.2.0 had no bin named after
+  the package, so `npx --yes @abap2ui5/mcp-server` — the registration every
+  document gives — failed with "could not determine executable to run", and
+  the step above stayed green because it called the bin by name. The bin
+  `mcp-server` is that name; `scripts/pack-smoke.mjs` (the workflow step
+  `npx runs the packed tarball the way users do`) runs `npx --yes <tarball>`,
+  `npx -p <tarball> abap2ui5-mcp` and `npx -p <tarball> abap2ui5-unit
+  --help`, answers an MCP `initialize` and checks the server exits when stdin
+  closes. Run it by hand (`npm pack && node scripts/pack-smoke.mjs
+  abap2ui5-mcp-server-*.tgz`) before tagging a release that touches `bin`
+  or `files`.
 - **The level-1 tools work from the tarball**: with only `AI_VIEW_CHECK_HOME`
   pointed at a linter checkout, `validate_view` returned `ok: true` on a clean
   view and `screenshot_view` returned a PNG. Neither needs the corpus.
@@ -120,17 +132,38 @@ not worth blocking the first release on.
 ## What is NOT covered by the release gate
 
 `npm test` on a bare checkout is the sibling-free half: the parsers, the
-config resolution, the process-tree timeouts, the degradation contract. It
-does **not** cover `run_app`, `build_backend` or the render half of
-`validate_view`, because those need the samples-controls checkout, its own
-`npm ci` and a Chromium — minutes of setup for a check that then takes tens
-of minutes to transpile.
+config resolution, the process-tree timeouts, the degradation contract - and,
+since the npm backend, the backend half of the expensive loop:
+`test/npm-integration.test.mjs` installs the published
+`@abap2ui5/node-runtime`, fetches open-abap-core, lints, builds, runs a test
+class, boots the backend and does a GET and a POST roundtrip (about 30 s;
+it skips itself when the registry or GitHub cannot be reached, so read the
+test count). It does **not** cover the BROWSER half of `run_app` and
+`interact_app`, nor the render half of `validate_view`: those need UI5 - the
+CDN, or the `@openui5` packages of a corpus or linter install - and a
+Chromium.
 
-So a release is verified for everything that can run without a corpus, and
+So a release is verified for everything up to a served backend, and
 verified by hand for the screenshot loop. If that loop breaks, it breaks
 after the tag. Worth remembering before cutting one.
 
+**`@abap2ui5/node-runtime` is a dependency of the loop without being one
+of `package.json`'s**: the server installs whatever release the registry
+names as latest (or `A2UI5_MCP_RUNTIME_VERSION` pins), at runtime. A new
+framework release reaches users of an unchanged server within a day. What
+has to hold across such a release is written down in AGENTS.md (the
+compatibility surface); the integration test is the check - run it after
+the framework publishes, not only before this server does.
+
 ## After a release
+
+**The floating major tag.** The composite action is used as
+`abap2UI5/mcp-server@v0`; the workflow's `move-major-tag` job points `v0` at
+each release it publishes (it needs `contents: write`, and nothing else in the
+workflow does). 0.2.0 was released before that job existed, so `v0` did not
+exist until the next release — the README pins `@v0.2.0` until then. Creating
+it once by hand is the other way:
+`git tag -f v0 v0.2.0^{} && git push -f origin refs/tags/v0`.
 
 Both of these were done when 0.1.0 landed; they are here as the checklist for
 the release after a **rename**, which is when they come back:
@@ -139,5 +172,6 @@ the release after a **rename**, which is when they come back:
   registers this server via `npx --yes @abap2ui5/mcp-server` — unpinned, because
   the server's compatibility is with the corpora it reads and not with that
   extension. A rename of this package is a change in that repository.
-- The README's setup section leads with `npx @abap2ui5/mcp-server` and mentions
+- The README's setup section leads with `npx --yes -p @abap2ui5/mcp-server
+  abap2ui5-mcp` (the form every version answers) and mentions
   a checkout only for working on the server itself.

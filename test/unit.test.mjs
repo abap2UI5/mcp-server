@@ -6,13 +6,13 @@ import assert from 'node:assert/strict';
 import { stripJsonc, LOCAL_BENIGN, benignRules, deployApp, removeApp } from '../lib/runtime.mjs';
 import { parseCapabilities, searchCapabilities } from '../lib/capabilities.mjs';
 import { parseExamples, searchExamples, catalogueEntries, CATALOGUES } from '../lib/examples.mjs';
-import { CORPUS_DIRS, resolveLintConfig } from '../lib/repos.mjs';
+import { CORPUS_DIRS, resolveLintConfig, viewCheckCandidates, SERVER_ROOT } from '../lib/repos.mjs';
 import { sliceCatalogue } from '../lib/pitfalls.mjs';
 import { sliceGuide, guideChapters } from '../lib/guide.mjs';
 import { parseApi, searchApi, apiSummary } from '../lib/api.mjs';
 import { searchDocs } from '../lib/docs.mjs';
 import { parseSizes } from '../lib/screenshot.mjs';
-import { oneOf, boundedInt, stringArray } from '../lib/args.mjs';
+import { oneOf, boundedInt, stringArray, checkStringArgs } from '../lib/args.mjs';
 import { readCached } from '../lib/cache.mjs';
 import { scaffold, rename, validClassName, templateFiles, readSpec } from '../lib/scaffold.mjs';
 import fs from 'node:fs';
@@ -1632,6 +1632,21 @@ test('the substitution engine applies every substitution asked for at once', () 
   );
 });
 
+/* The free-text values land in XML and JSON and used to be spliced in raw,
+ * as a String.replace replacement STRING: `R&D <tools>` broke the sidecar's
+ * XML, `my"repo` broke package.json, and `$&` expanded to the matched text. */
+test('the substitution engine escapes package text and repository name for the format they land in', () => {
+  const pkg = sub('src/package.devc.xml', '<DEVC><CTEXT>Template app</CTEXT></DEVC>', { packageText: 'R&D <tools> $& end' });
+  assert.equal(pkg, '<DEVC><CTEXT>R&amp;D &lt;tools&gt; $&amp; end</CTEXT></DEVC>');
+  const abapgit = sub('.abapgit.xml', '<NAME>app-template</NAME>', { repo: 'my"repo $\' <x>' });
+  assert.equal(abapgit, '<NAME>my&quot;repo $&apos; &lt;x&gt;</NAME>');
+  const json = sub('package.json', '{\n  "name": "abap2ui5-app-template",\n  "version": "1.0.0"\n}', { repo: 'my"repo $& \\ end' });
+  assert.deepEqual(JSON.parse(json), { name: 'my"repo $& \\ end', version: '1.0.0' }, 'package.json stays JSON and says exactly what was asked');
+  // an existing value with an escaped quote is replaced whole, not half
+  const again = sub('package.json', '{ "name": "a\\"b" }', { repo: 'c' });
+  assert.deepEqual(JSON.parse(again), { name: 'c' });
+});
+
 test('scaffolding renames the class in the ABAP, the sidecar and the file name', (t) => {
   const root = path.join(ROOT, '..', 'app-template');
   // template.json, not abaplint.jsonc: the file list and the substitutions
@@ -1705,4 +1720,200 @@ test('a template without its own description is reported, not guessed at', () =>
   const { files, noSpec } = scaffold(dir, {});
   assert.equal(noSpec, true);
   assert.deepEqual(files, []);
+});
+
+// ------------------------------------------------------------------- bins ----
+
+/* `npx --yes @abap2ui5/mcp-server` runs the bin named after the package's
+ * UNSCOPED name, or the only bin when there is exactly one. 0.2.0 had two
+ * bins and neither was called `mcp-server`, so every registration the docs
+ * give failed with "could not determine executable to run". The release
+ * workflow proves the whole npx path against the tarball
+ * (scripts/pack-smoke.mjs); this pins the manifest half on every `npm test`. */
+test('the package carries a bin named after its unscoped name, and keeps the explicit ones', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+  const unscoped = pkg.name.replace(/^@[^/]+\//, '');
+  assert.equal(pkg.bin[unscoped], 'server.mjs', `npx ${pkg.name} runs bin '${unscoped}' - it must be the server`);
+  assert.equal(pkg.bin['abap2ui5-mcp'], 'server.mjs', 'the explicit form every version answers stays');
+  assert.equal(pkg.bin['abap2ui5-unit'], 'scripts/ci-unit.mjs', 'the CI runner bin is a contract with app-template');
+  for (const file of new Set(Object.values(pkg.bin))) {
+    assert.ok(pkg.files.some((f) => file === f || file.startsWith(f)), `${file} is a bin and must be in files`);
+    assert.match(fs.readFileSync(path.join(ROOT, file), 'utf8'), /^#!\/usr\/bin\/env node\n/, `${file} needs its shebang`);
+  }
+});
+
+// ---------------------------------------------------------------- run_app ----
+
+/* waitForFunction(fn, arg, options): the boot wait passed { timeout } as the
+ * ARG, so the page function received it and the wait kept Playwright's
+ * default 30 s - run_app's and interact_app's timeout_ms did nothing. */
+test('the boot wait hands timeout_ms to Playwright as options, not as the page argument', async () => {
+  const { waitForBoot } = await import('../lib/runtime.mjs');
+  const calls = [];
+  const page = { waitForFunction: async (...args) => { calls.push(args); } };
+  await waitForBoot(page, 12345);
+  assert.equal(calls.length, 1);
+  const [fn, arg, options] = calls[0];
+  assert.equal(typeof fn, 'function');
+  assert.equal(arg, undefined, 'nothing is passed to the page function');
+  assert.deepEqual(options, { timeout: 12345 });
+});
+
+/* The framework page's CSP allows its inline bootstrap by hash only; the
+ * locally served @openui5 SOURCE sap-ui-core.js document.write()s inline
+ * scripts, which that policy blocks, so a run_app with a corpus beside it
+ * never booted. bypassCSP exactly when local sources are served - with the
+ * CDN's built file the app boots under the framework's own policy. */
+test('the app context bypasses CSP only while UI5 is served from local sources', async () => {
+  const { appContextOptions } = await import('../lib/runtime.mjs');
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-csp-'));
+  const saved = { SAMPLES_CONTROLS_HOME: process.env.SAMPLES_CONTROLS_HOME, AI_DEMOKIT_HOME: process.env.AI_DEMOKIT_HOME };
+  try {
+    const corpus = path.join(base, 'samples-controls');
+    fs.mkdirSync(path.join(corpus, 'scripts'), { recursive: true });
+    fs.writeFileSync(path.join(corpus, 'scripts', 'e2e-build.mjs'), '');
+    process.env.SAMPLES_CONTROLS_HOME = corpus;
+    delete process.env.AI_DEMOKIT_HOME;
+    assert.equal(appContextOptions().bypassCSP, undefined, 'a corpus without its npm install: CDN, the page\'s own CSP');
+    fs.mkdirSync(path.join(corpus, 'node_modules', '@openui5', 'sap.m', 'src'), { recursive: true });
+    assert.equal(appContextOptions().bypassCSP, true);
+    assert.deepEqual(appContextOptions().viewport, { width: 1280, height: 800 });
+    process.env.SAMPLES_CONTROLS_HOME = path.join(base, 'nowhere');
+    assert.equal(appContextOptions().bypassCSP, undefined, 'no corpus: CDN');
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// ----------------------------------------------------------- linter lookup ----
+
+/* app-template ships @abap2ui5/linter as a devDependency, and the server
+ * started in such a project said "linter checkout not found - clone it as a
+ * sibling". The project's install and the server's own node_modules are
+ * candidates now, after the checkout siblings (and after a set env var, which
+ * still decides alone). */
+test('an installed @abap2ui5/linter is a linter candidate: the project\'s, then the server\'s own', () => {
+  const project = path.join(os.tmpdir(), 'some-project');
+  const c = viewCheckCandidates({ cwd: project });
+  const inProject = path.join(project, 'node_modules', '@abap2ui5', 'linter');
+  const inServer = path.join(SERVER_ROOT, 'node_modules', '@abap2ui5', 'linter');
+  assert.ok(c.includes(inProject), 'the project the server runs in');
+  assert.ok(c.includes(inServer), 'installed beside the server');
+  assert.ok(c.indexOf(path.join(SERVER_ROOT, '..', 'linter')) < c.indexOf(inProject), 'a sibling checkout still comes first');
+  assert.ok(c.indexOf(inProject) < c.indexOf(inServer));
+});
+
+// ---------------------------------------------------------- validate_view ----
+
+/* A render gate that cannot START (no @abap2ui5/linter-render, a Chromium
+ * that will not launch) throws out of the linter. validate_view used to
+ * return that throw - an error, or 5 KB of Playwright's ANSI launch log - and
+ * lose the property findings that had already been computed. */
+test('validate_view falls back to the property gate when the render gate cannot start', async () => {
+  const { withRenderFallback, renderFailureReason, renderSkippedNote } = await import('../lib/validate.mjs');
+  const launchLog = '\u001b[31mbrowserType.launch: Target page, context or browser has been closed\u001b[39m\nBrowser logs:\n\n<launching> /opt/x --no-sandbox ' + 'x'.repeat(5000);
+  const calls = [];
+  const res = await withRenderFallback({
+    render: true,
+    withRender: async () => { calls.push('render'); throw new Error(launchLog); },
+    withoutRender: async () => { calls.push('properties'); return { findings: [{ type: 'unknown-icon' }], notes: [] }; },
+  });
+  assert.deepEqual(calls, ['render', 'properties']);
+  assert.deepEqual(res.result.findings, [{ type: 'unknown-icon' }], 'the property findings survive');
+  assert.equal(res.renderSkipped, 'browserType.launch: Target page, context or browser has been closed');
+  assert.ok(!/\u001b/.test(res.renderSkipped), 'no terminal colour codes');
+  assert.match(renderSkippedNote(res.renderSkipped), /property findings only/);
+  assert.ok(renderFailureReason(new Error('y'.repeat(1000))).length <= 300);
+
+  // a clean render: nothing skipped, no second run
+  const ok = await withRenderFallback({ render: true, withRender: async () => ({ findings: [] }), withoutRender: async () => { throw new Error('not called'); } });
+  assert.equal(ok.renderSkipped, null);
+  // render: false asked for, so the throw is about something else - it stands
+  await assert.rejects(withRenderFallback({ render: false, withRender: async () => { throw new Error('parse'); }, withoutRender: async () => ({}) }), /parse/);
+});
+
+// ------------------------------------------------------- small contracts ----
+
+/* The generation_rules footer linked docs/cookbook/overview, a page the site
+ * never had. Every docs URL this repository hands out is checked against the
+ * docs sources when a local docs checkout is there (the CI smoke job clones
+ * one); on a bare checkout there is nothing to check against. */
+test('every abap2ui5.github.io/docs link the server or README hands out names a real page', async (t) => {
+  const { resolveDocs } = await import('../lib/repos.mjs');
+  const docs = resolveDocs({ local: true });
+  if (!docs) return t.skip('no local docs checkout');
+  const files = ['server.mjs', 'README.md', ...fs.readdirSync(path.join(ROOT, 'lib')).filter((f) => f.endsWith('.mjs')).map((f) => `lib/${f}`)];
+  const seen = new Set();
+  for (const f of files) {
+    for (const m of fs.readFileSync(path.join(ROOT, f), 'utf8').matchAll(/https:\/\/abap2ui5\.github\.io\/docs\/([A-Za-z0-9_./-]+)/g)) {
+      const page = m[1].replace(/#.*$/, '').replace(/\.(html|md)$/, '').replace(/\/$/, '/index');
+      if (!page || page.includes('...') || seen.has(page)) continue;
+      seen.add(page);
+      assert.ok(fs.existsSync(path.join(docs, 'docs', `${page}.md`)), `${f} links docs/${m[1]}, which is no page (docs/${page}.md)`);
+    }
+  }
+  assert.ok(seen.size > 0);
+});
+
+/* scaffold_app's schema advertised ^[zy]c[lx]_ while the template (and the
+ * fallback here) enforce ^z(cl|cx)_ - an agent following the schema got
+ * `ycl_…` refused. */
+test('scaffold_app advertises the class rule it enforces', async () => {
+  const { TOOLS } = await import('../lib/tools.mjs');
+  const { classNameRule } = await import('../lib/scaffold.mjs');
+  const desc = TOOLS.find((x) => x.name === 'scaffold_app').inputSchema.properties.class.description;
+  const prefix = classNameRule(null).rule.split('[')[0]; // ^z(cl|cx)_
+  assert.ok(desc.includes(prefix), `the schema says ${desc}`);
+  assert.doesNotMatch(desc, /\[zy\]/);
+});
+
+test('a list argument\'s error shows an example of THAT argument', () => {
+  assert.throws(() => stringArray('zcl_x', { name: 'class_names', example: '["zcl_my_app"]' }), /e\.g\. \["zcl_my_app"\]/);
+  assert.throws(() => stringArray([], { name: 'class_names', example: '["zcl_my_app"]' }), /e\.g\. \["zcl_my_app"\]/);
+  assert.throws(() => stringArray('sap.m.Wizard', { name: 'entities' }), /e\.g\. \["sap\.m\.Wizard"\]/, 'the default stays scope_of\'s');
+});
+
+/* `capabilities { query: 42 }` answered "query.toLowerCase is not a
+ * function". Every string-typed argument is checked against the tool's own
+ * schema before its handler runs. */
+test('a string argument that is not a string is refused by name, for every tool', async () => {
+  const { TOOLS } = await import('../lib/tools.mjs');
+  const tool = (n) => TOOLS.find((x) => x.name === n);
+  assert.throws(() => checkStringArgs(tool('capabilities'), { query: 42 }), /query must be a string, not 42 \(number\)/);
+  assert.throws(() => checkStringArgs(tool('validate_view'), { xml: ['<x/>'] }), /xml must be a string.*an array/);
+  assert.throws(() => checkStringArgs(tool('scaffold_app'), { class: { a: 1 } }), /class must be a string/);
+  checkStringArgs(tool('capabilities'), { query: 'popup', status: undefined });
+  checkStringArgs(tool('capabilities'), { query: null });
+  checkStringArgs(tool('examples'), { limit: 5 }); // a number where the schema says number
+  checkStringArgs(undefined, { anything: 1 }); // an unknown tool is the handler's to report
+  // every string-typed property of every tool is covered by the one check
+  for (const t of TOOLS) {
+    for (const [name, schema] of Object.entries(t.inputSchema.properties || {})) {
+      if (schema.type !== 'string') continue;
+      assert.throws(() => checkStringArgs(t, { [name]: 7 }), new RegExp(`${name} must be a string`), `${t.name}.${name}`);
+    }
+  }
+});
+
+/* setup_status only knew three hard-coded paths (one of them a sandbox
+ * image's /opt/pw-browsers link), so a machine with a perfectly good
+ * Playwright-managed Chromium was reported as having none. */
+test('the Chromium is the explicit one, then Playwright\'s own, then a system binary', async () => {
+  const { resolveChromium } = await import('../lib/runtime.mjs');
+  const has = (...paths) => (p) => paths.includes(p);
+  const managed = () => '/home/u/.cache/ms-playwright/chromium-1/chrome';
+  assert.deepEqual(resolveChromium({ env: {}, exists: has('/home/u/.cache/ms-playwright/chromium-1/chrome', '/usr/bin/chromium'), managed }),
+    { path: '/home/u/.cache/ms-playwright/chromium-1/chrome', source: 'playwright', exists: true });
+  assert.deepEqual(resolveChromium({ env: {}, exists: has('/usr/bin/chromium', '/opt/pw-browsers/chromium'), managed }),
+    { path: '/usr/bin/chromium', source: 'system', exists: true }, 'the sandbox link is the last resort');
+  assert.deepEqual(resolveChromium({ env: {}, exists: has('/opt/pw-browsers/chromium'), managed: () => null }),
+    { path: '/opt/pw-browsers/chromium', source: 'system', exists: true });
+  assert.deepEqual(resolveChromium({ env: { A2UI5_MCP_CHROMIUM: '/x/chrome', CHROMIUM_BIN: '/y' }, exists: has(), managed }),
+    { path: '/x/chrome', source: 'A2UI5_MCP_CHROMIUM', exists: false }, 'an explicit choice is reported even when it is wrong');
+  assert.equal(resolveChromium({ env: { CHROMIUM_BIN: '/y' }, exists: has('/y'), managed }).source, 'CHROMIUM_BIN');
+  assert.equal(resolveChromium({ env: {}, exists: has(), managed }), null);
 });

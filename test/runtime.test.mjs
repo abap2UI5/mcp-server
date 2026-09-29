@@ -7,7 +7,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnWithTimeout, buildBackend } from '../lib/runtime.mjs';
+import { spawnWithTimeout, buildBackend, killChildren } from '../lib/runtime.mjs';
+import { treeKillCommand } from '../lib/spawn.mjs';
 
 // ------------------------------------------------------- spawnWithTimeout ----
 
@@ -63,17 +64,49 @@ test('spawnWithTimeout leaves a fast child alone and streams its lines', async (
  * build must not keep transpiling under a request nobody waits for. */
 test('spawnWithTimeout kills the child promptly when the signal aborts', async () => {
   const ac = new AbortController();
-  setTimeout(() => ac.abort(), 200);
+  // aborted once the child has spoken, not after a fixed 200 ms: a node child
+  // on a loaded machine (the suite runs its files in parallel) can take longer
+  // than that to print, and the kept-output assertion below then failed on
+  // timing, not on the behaviour it is about
   const t0 = Date.now();
   const res = await spawnWithTimeout(
     process.execPath,
     ['-e', 'console.log("started"); setInterval(() => {}, 1000);'],
-    { timeoutMs: 30000, signal: ac.signal },
+    { timeoutMs: 30000, signal: ac.signal, onLine: (l) => { if (/started/.test(l)) ac.abort(); } },
   );
   assert.equal(res.aborted, true);
   assert.equal(res.timedOut, false, 'an abort is reported as an abort, not as a timeout');
   assert.ok(Date.now() - t0 < 5000, 'the abort must not wait for the timeout');
   assert.match(res.stdout, /started/, 'output before the kill is kept');
+});
+
+/* The shutdown path: the server kills what is still running when its client
+ * goes away (server.mjs shutdown). The children are process-group leaders,
+ * so nothing else would - a build outlived the session that started it. */
+test('killChildren kills every child spawnWithTimeout still has running', async () => {
+  const t0 = Date.now();
+  const running = spawnWithTimeout(process.execPath, ['-e', 'setInterval(() => {}, 1000);'], { timeoutMs: 30000 });
+  await new Promise((r) => setTimeout(r, 200));
+  killChildren();
+  const res = await running;
+  assert.equal(res.timedOut, false);
+  assert.ok(Date.now() - t0 < 5000, 'the child dies at once, not at its timeout');
+  killChildren(); // nothing left: a second call is a no-op
+});
+
+/* A grandchild - what npm runs git through, what a shell runs npm through
+ * (cmd.exe on Windows) - dies with the child: the promise resolves at the
+ * timeout, not when the grandchild would have finished and closed the pipe. */
+test('a timeout ends the grandchildren too, and taskkill /T is how on Windows', async () => {
+  const t0 = Date.now();
+  const grandchild = `require('child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'inherit' }); setInterval(() => {}, 1000);`;
+  const res = await spawnWithTimeout(process.execPath, ['-e', grandchild], { timeoutMs: 500 });
+  assert.equal(res.timedOut, true);
+  assert.ok(Date.now() - t0 < 10000, `resolved after ${Date.now() - t0} ms - the grandchild held the pipe open`);
+
+  assert.deepEqual(treeKillCommand(4242, 'win32'), ['taskkill', ['/pid', '4242', '/T', '/F']]);
+  assert.equal(treeKillCommand(4242, 'linux'), null, 'POSIX signals the process group instead');
+  assert.equal(treeKillCommand(undefined, 'win32'), null, 'a child that never started has no tree');
 });
 
 test('spawnWithTimeout never spawns under an already-aborted signal', async () => {
@@ -241,12 +274,19 @@ test('sliceLog stays within bounds however it is paged', async () => {
  * again in a finally. Two lints at once therefore raced, with one loser: the
  * first to finish removed the config the second's abaplint was still reading.
  *
- * The stand-in for abaplint is a script on PATH that records whether the
- * config was there when it started AND when it finished, which is exactly the
- * window the race opened. Without the queue in lintApp the second call records
- * a disappearance; with it, neither does. */
-test('two concurrent lints do not delete each other\'s config', { skip: process.platform === 'win32' && 'needs a POSIX shell on PATH' }, async () => {
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-lint-'));
+ * The stand-in for abaplint is the checkout's own install (lintApp runs
+ * <root>/node_modules/@abaplint/cli's bin, never npx): a script that records
+ * whether the config was there when it started AND when it finished, which is
+ * exactly the window the race opened. Without the queue in lintApp the second
+ * call records a disappearance; with it, neither does. */
+function fakeAbaplint(root, script) {
+  const dir = path.join(root, 'node_modules', '@abaplint', 'cli');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: '@abaplint/cli', bin: { abaplint: './abaplint' } }));
+  fs.writeFileSync(path.join(dir, 'abaplint'), script);
+}
+
+function fakeLintCorpus(base) {
   const corpus = path.join(base, 'ai-demokit');
   fs.mkdirSync(path.join(corpus, 'scripts'), { recursive: true });
   fs.writeFileSync(path.join(corpus, 'scripts', 'e2e-build.mjs'), '');
@@ -254,41 +294,88 @@ test('two concurrent lints do not delete each other\'s config', { skip: process.
     path.join(corpus, 'abaplint.jsonc'),
     '{ "global": { "exclude": ["zz_dev"] }, "rules": { "object_naming": { "clas": "^Z2UI5_CL_SMPC_" } } }',
   );
-  const marker = path.join(base, 'gone.txt');
-  const bin = path.join(base, 'bin');
-  fs.mkdirSync(bin);
-  // npx abaplint <config> --format json, slow enough for the two calls to
-  // overlap if nothing sequences them
-  fs.writeFileSync(path.join(bin, 'npx'), [
-    '#!/bin/sh',
-    'cfg="$2"',
-    '[ -f "$cfg" ] || echo start >> "$LINT_MARKER"',
-    'sleep 0.4',
-    '[ -f "$cfg" ] || echo end >> "$LINT_MARKER"',
-    'echo "[]"',
-  ].join('\n'));
-  fs.chmodSync(path.join(bin, 'npx'), 0o755);
+  return corpus;
+}
 
+async function withLintEnv(corpus, extra, fn) {
   const saved = { ...process.env };
-  Object.assign(process.env, {
-    AI_DEMOKIT_HOME: corpus,
-    SAMPLES_CONTROLS_HOME: '',
-    LINT_MARKER: marker,
-    PATH: `${bin}${path.delimiter}${process.env.PATH}`,
-  });
+  Object.assign(process.env, { AI_DEMOKIT_HOME: corpus, SAMPLES_CONTROLS_HOME: '', ...extra });
   try {
-    const { lintApp } = await import('../lib/runtime.mjs');
-    const both = await Promise.all([lintApp('zcl_one'), lintApp('zcl_two')]);
-    for (const r of both) assert.equal(r.ok, true, `a lint must still answer: ${JSON.stringify(r)}`);
-    assert.equal(fs.existsSync(marker), false,
-      `the config vanished under a running lint: ${fs.existsSync(marker) ? fs.readFileSync(marker, 'utf8') : ''}`);
-    assert.equal(fs.existsSync(path.join(corpus, '.abaplint-mcp-dev.jsonc')), false,
-      'and it is cleaned up when the lints are done');
+    return await fn();
   } finally {
-    for (const k of ['AI_DEMOKIT_HOME', 'SAMPLES_CONTROLS_HOME', 'LINT_MARKER', 'PATH']) {
+    for (const k of ['AI_DEMOKIT_HOME', 'SAMPLES_CONTROLS_HOME', ...Object.keys(extra)]) {
       if (saved[k] === undefined) delete process.env[k];
       else process.env[k] = saved[k];
     }
+  }
+}
+
+test('two concurrent lints do not delete each other\'s config', async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-lint-'));
+  const corpus = fakeLintCorpus(base);
+  const marker = path.join(base, 'gone.txt');
+  // abaplint <config> --format json, slow enough for the two calls to
+  // overlap if nothing sequences them
+  fakeAbaplint(corpus, [
+    "const fs = require('fs');",
+    'const cfg = process.argv[2];',
+    "if (!fs.existsSync(cfg)) fs.appendFileSync(process.env.LINT_MARKER, 'start\\n');",
+    'setTimeout(() => {',
+    "  if (!fs.existsSync(cfg)) fs.appendFileSync(process.env.LINT_MARKER, 'end\\n');",
+    "  console.log('[]');",
+    '}, 400);',
+  ].join('\n'));
+  try {
+    await withLintEnv(corpus, { LINT_MARKER: marker }, async () => {
+      const { lintApp } = await import('../lib/runtime.mjs');
+      const both = await Promise.all([lintApp('zcl_one'), lintApp('zcl_two')]);
+      for (const r of both) assert.equal(r.ok, true, `a lint must still answer: ${JSON.stringify(r)}`);
+      assert.equal(fs.existsSync(marker), false,
+        `the config vanished under a running lint: ${fs.existsSync(marker) ? fs.readFileSync(marker, 'utf8') : ''}`);
+      assert.equal(fs.existsSync(path.join(corpus, '.abaplint-mcp-dev.jsonc')), false,
+        'and it is cleaned up when the lints are done');
+    });
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+/* `npx abaplint` / `npx abap_transpile` fell back to the REGISTRY when the
+ * checkout had no local bin (stdin is no TTY under an MCP client, so npx
+ * answered its own install prompt), and `abap_transpile` is an unclaimed npm
+ * name. A missing install is a sentence now - and npx is not even consulted:
+ * an `npx` on PATH that records being called must stay silent. */
+test('a checkout without its own abaplint/transpiler install is reported, never fetched through npx', { skip: process.platform === 'win32' && 'needs a POSIX shell on PATH' }, async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-nobin-'));
+  const corpus = fakeLintCorpus(base);
+  const bin = path.join(base, 'bin');
+  const called = path.join(base, 'npx-called.txt');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'npx'), `#!/bin/sh\necho "$@" >> ${JSON.stringify(called)}\necho "[]"\n`);
+  fs.chmodSync(path.join(bin, 'npx'), 0o755);
+  try {
+    await withLintEnv(corpus, { PATH: `${bin}${path.delimiter}${process.env.PATH}` }, async () => {
+      const { lintApp, localBin } = await import('../lib/runtime.mjs');
+      assert.equal(localBin(corpus, '@abaplint/cli', 'abaplint'), null);
+      const r = await lintApp('zcl_one');
+      assert.equal(r.ok, false);
+      assert.equal(r.issues[0].rule, 'abaplint-missing');
+      assert.match(r.issues[0].message, /npm ci/);
+      assert.match(r.issues[0].message, new RegExp(corpus.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+      assert.equal(fs.existsSync(path.join(corpus, '.abaplint-mcp-dev.jsonc')), false, 'no config written for a lint that cannot run');
+    });
+    // the incremental transpile: a framework checkout with a prior build but no transpiler install
+    await withFakeRepos('', { PATH: `${bin}${path.delimiter}${process.env.PATH}` }, async ({ a2 }) => {
+      fs.mkdirSync(path.join(a2, 'node/downport'), { recursive: true });
+      fs.mkdirSync(path.join(a2, 'node/output'), { recursive: true });
+      fs.writeFileSync(path.join(a2, 'node/output/init.mjs'), '');
+      const res = await buildBackend({ mode: 'incremental' });
+      assert.equal(res.ok, false);
+      assert.match(res.tail, /abap_transpile is not installed/);
+      assert.match(res.tail, /never lets npx fetch/);
+    });
+    assert.equal(fs.existsSync(called), false, `npx was called: ${fs.existsSync(called) ? fs.readFileSync(called, 'utf8') : ''}`);
+  } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }
 });

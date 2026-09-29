@@ -52,6 +52,8 @@ import { searchDocs, docsRoot } from './lib/docs.mjs';
 import { scaffold, readSpec, validClassName, classNameRule, templateFiles, SPEC_FILE } from './lib/scaffold.mjs';
 import { fixSource } from './lib/fixview.mjs';
 import { lintOptionsFor } from './lib/lintopts.mjs';
+import { withRenderFallback, renderSkippedNote } from './lib/validate.mjs';
+import { ANSWER_BUDGET, takeWithin, takeSmallestWithin } from './lib/budget.mjs';
 import { getRenderer, dropRenderer, closeRenderers, rendererLooksDead } from './lib/renderer.mjs';
 import { TOOLS } from './lib/tools.mjs';
 import { RESOURCES, RESOURCE_TEMPLATES, GUIDE_CHAPTER_TEMPLATE, readResource } from './lib/resources.mjs';
@@ -59,7 +61,7 @@ import { PROMPTS, getPrompt } from './lib/prompts.mjs';
 import { missingSiblingMessage, missingLocalSiblingMessage } from './lib/siblings.mjs';
 import { hydrate, REMOTE_TOOLS, resourceRepos, fetchRemoteFile, isRemoteCheckout } from './lib/remote.mjs';
 import { resolveKey, RESOLVERS } from './lib/repos.mjs';
-import { oneOf, boundedInt, stringArray } from './lib/args.mjs';
+import { oneOf, boundedInt, stringArray, checkStringArgs } from './lib/args.mjs';
 import {
   deployApp,
   removeApp,
@@ -78,6 +80,10 @@ import {
   runUnitTests,
   sandbox,
   setupStatus,
+  killChildren,
+  backendKind,
+  npmModeProblem,
+  npmPreferenceProblem,
 } from './lib/runtime.mjs';
 import { explicitEnv } from './lib/repos.mjs';
 
@@ -108,9 +114,25 @@ function missingLocalSibling(...repos) {
   return msg ? toolError(msg) : null;
 }
 
-/* The dev sandbox - the corpus' src/zz_dev, or the framework's node/zz_dev
- * when there is no corpus (lib/runtime.mjs sandbox) - as a tool error when
- * neither checkout is there. */
+/* The backend a boot, a test run or `backend start` needs: a framework
+ * checkout, or the npm backend - which needs no checkout at all and is the
+ * default without one (lib/runtime.mjs backendKind). What is left to refuse
+ * is an A2UI5_HOME that points nowhere (reported as the missing checkout it
+ * names, never built around) and A2UI5_MCP_BACKEND=clone before the clone. */
+function missingBackend() {
+  const kind = backendKind();
+  if (kind === 'checkout' || kind === 'npm') return null;
+  const msg = missingLocalSiblingMessage('abap2UI5')
+    || `no backend: ${kind === 'clone' ? 'the framework is not cloned yet' : 'A2UI5_HOME points at no checkout'}`;
+  return toolError(msg + (kind === 'clone'
+    ? ' - A2UI5_MCP_BACKEND=clone: run build_backend first, it clones the release (or unset it to run on @abap2ui5/node-runtime)'
+    : ' - or unset it: without a checkout the backend runs on the npm package @abap2ui5/node-runtime'));
+}
+
+/* The dev sandbox - the corpus' src/zz_dev, the framework's node/zz_dev when
+ * there is no corpus, the npm backend's workspace sandbox when there is no
+ * framework checkout either (lib/runtime.mjs sandbox) - as a tool error when
+ * none of them is there. */
 function missingSandbox() {
   try {
     sandbox();
@@ -267,19 +289,23 @@ async function handle(name, args = {}, ctx = {}) {
           hint: 'pass `query` (keywords) to get matching apps; each entry names a class to READ in its repository',
         });
       }
-      const hits = searchExamples({
-        query: args.query,
-        area,
-        repo,
-        limit: boundedInt(args.limit, { name: 'limit', dflt: 20, min: 1, max: 200 }),
-      });
+      const limit = boundedInt(args.limit, { name: 'limit', dflt: 20, min: 1, max: 200 });
+      const offset = boundedInt(args.offset, { name: 'offset', dflt: 0, min: 0 });
+      const all = searchExamples({ query: args.query, area, repo, limit: Number.MAX_SAFE_INTEGER });
+      /* Paged against the answer budget too (lib/budget.mjs): 200 entries
+       * were ~135 KB, over what a client accepts as one answer. */
+      const page = takeWithin(all.slice(offset, offset + limit), ANSWER_BUDGET - 5000);
+      const nextOffset = offset + page.taken.length;
       return text({
-        matches: hits.length,
+        matches: all.length,
+        ...(offset ? { offset } : {}),
+        returned: page.taken.length,
+        ...(nextOffset < all.length ? { more: `${all.length - nextOffset} more - call again with offset: ${nextOffset}` } : {}),
         searched,
         ...(notSearched.length ? { notSearched } : {}),
         repositories: Object.fromEntries(found.map((c) => [c.repo, c.url])),
         next: 'read the `path` of the closest match, in the repository its `repo` names — it is a complete, gated app, not a fragment',
-        entries: hits,
+        entries: page.taken,
       });
     }
     case 'read_example': {
@@ -397,10 +423,36 @@ async function handle(name, args = {}, ctx = {}) {
           + 'update it (git pull), or point APP_TEMPLATE_HOME at a complete checkout');
       }
 
+      /* Paged (lib/budget.mjs): the whole template is ~280 KB - AGENTS.md and
+       * three skills are most of it - which is over what an MCP client
+       * accepts as one answer, and a refused answer is no files at all. The
+       * first page carries every file that fits, smallest first so the class,
+       * its sidecar and the configs always come; `remaining` names the rest,
+       * which `files` fetches (in order, page by page). */
+      let pick = files;
+      let page;
+      if (args.files !== undefined && args.files !== null) {
+        const wanted = stringArray(args.files, { name: 'files', maxItems: 200, maxLength: 300, example: '["AGENTS.md"]' });
+        const unknown = wanted.filter((p) => !files.some((f) => f.path === p));
+        if (unknown.length) {
+          return toolError(`not a file of this scaffold: ${unknown.join(', ')} — the paths are the ones this tool returns `
+            + `(with the same class): ${files.map((f) => f.path).join(', ')}`);
+        }
+        pick = files.filter((f) => wanted.includes(f.path));
+        page = takeWithin(pick, ANSWER_BUDGET - 5000);
+      } else {
+        page = takeSmallestWithin(files, ANSWER_BUDGET - 5000);
+      }
+      const rest = page.rest;
       return text({
         source: 'abap2UI5/app-template',
         class: cls || spec.placeholderClass,
-        files,
+        files: page.taken,
+        ...(rest.length ? {
+          remaining: rest.map((f) => ({ path: f.path, chars: f.text.length })),
+          more: `${rest.length} more file(s) did not fit this answer - call scaffold_app again with the same class/package/repo `
+            + `and files: ${JSON.stringify(rest.map((f) => f.path))} (each answer carries what fits and lists the rest again)`,
+        } : {}),
         /* Reported, never silent: this list is a claim about another
          * repository, and a project quietly missing its CI workflow is not
          * noticed until somebody wonders why nothing is checked. */
@@ -464,7 +516,7 @@ async function handle(name, args = {}, ctx = {}) {
         rules +
           '\n\n---\nThis is the PORTING brief. Building an app of your own instead? Call `app_guide`.\n' +
           'More depth: AGENTS.md (conventions, gates), CAPABILITIES.md via the capabilities tool, ' +
-          'and https://abap2ui5.github.io/docs/cookbook/overview for the cookbook.',
+          'and https://abap2ui5.github.io/docs/cookbook/index.html for the cookbook.',
       );
     }
     case 'docs_search': {
@@ -512,7 +564,24 @@ async function handle(name, args = {}, ctx = {}) {
             + 'call it without a query to read the whole thing (it is meant to be read once per task)',
         });
       }
-      return text({ matches: total, catalogues: found });
+      /* Paged by SECTION (lib/budget.mjs): both catalogues whole are ~120 KB,
+       * over what a client accepts as one answer - and a section is the unit
+       * that must not be cut (symptom, evidence and fix belong together).
+       * `offset` counts sections across the catalogues, in order. */
+      const offset = boundedInt(args.offset, { name: 'offset', dflt: 0, min: 0 });
+      const flat = found.flatMap((c) => c.sections.map((sec) => ({ area: c.area, sec })));
+      const page = takeWithin(flat.slice(offset), ANSWER_BUDGET - 5000);
+      const nextOffset = offset + page.taken.length;
+      const catalogues = found
+        .map((c) => ({ ...c, sections: page.taken.filter((x) => x.area === c.area).map((x) => x.sec) }))
+        .filter((c) => c.sections.length);
+      return text({
+        matches: total,
+        ...(offset ? { offset } : {}),
+        returned: page.taken.length,
+        ...(nextOffset < total ? { more: `${total - nextOffset} more section(s) - call again with offset: ${nextOffset} (same area and query)` } : {}),
+        catalogues,
+      });
     }
     case 'scope_of': {
       const miss = missingLocalSibling('samples-controls');
@@ -545,7 +614,11 @@ async function handle(name, args = {}, ctx = {}) {
          * the call is alive; whatever lines it does print stream throttled in
          * between. */
         const report = progressReporter(ctx);
-        if (report) report(`abaplint: linting ${res.class} against the corpus config`, true);
+        const home = sandbox().kind;
+        if (report) {
+          report(`abaplint: linting ${res.class} with ${home === 'corpus' ? 'the corpus config' : 'app-template\'s config'}`
+            + (home === 'npm' ? ' (the first lint on the npm backend installs @abap2ui5/node-runtime first)' : ''), true);
+        }
         reply.lint = await lintApp(res.class, { signal: ctx.signal, onLine: report });
         if (report) report(`abaplint: finished (${reply.lint.ok ? 'clean' : `${reply.lint.issues.length} finding(s)`})`, true);
         if (reply.lint.aborted) {
@@ -568,7 +641,7 @@ async function handle(name, args = {}, ctx = {}) {
       if (miss) return miss;
       const res = readAppSource(args.class_name);
       if (!res.found) {
-        return toolError(`no dev app '${res.class}' in src/zz_dev (looked for ${res.file}) — `
+        return toolError(`no dev app '${res.class}' in the dev sandbox (looked for ${res.file}) — `
           + 'remove_app without arguments lists the deployed ones');
       }
       return text({
@@ -615,22 +688,33 @@ async function handle(name, args = {}, ctx = {}) {
        * An older linter gets exactly the cold path it always had; a warm
        * browser that died mid-call is dropped and the call retried cold. */
       const GATE_POOL = { pages: 1 };
-      let result;
-      const renderer = opt.render === false ? null : await getRenderer(GATE_POOL);
-      if (renderer) {
+      const checkWithRender = async () => {
+        const renderer = opt.render === false ? null : await getRenderer(GATE_POOL);
+        if (!renderer) return check(opt);
+        let r;
         try {
-          result = await check({ ...opt, renderer });
+          r = await check({ ...opt, renderer });
         } catch (e) {
           await dropRenderer(GATE_POOL); // whatever threw, a fresh one next call
           throw e;
         }
-        if (rendererLooksDead(result.renderErrors)) {
+        if (rendererLooksDead(r.renderErrors)) {
           await dropRenderer(GATE_POOL);
-          result = await check(opt);
+          r = await check(opt);
         }
-      } else {
-        result = await check(opt);
-      }
+        return r;
+      };
+      /* A render gate that cannot START (no @abap2ui5/linter-render, a
+       * Chromium that will not launch) throws out of the linter; that throw
+       * used to be the whole answer and cost the property findings with it.
+       * Now the property gate's answer comes back with the reason in the
+       * notes (lib/validate.mjs). */
+      const { result, renderSkipped } = await withRenderFallback({
+        render: opt.render,
+        withRender: checkWithRender,
+        withoutRender: () => check({ ...opt, render: false }),
+      });
+      if (renderSkipped) result.notes = [...(result.notes || []), renderSkippedNote(renderSkipped)];
 
       /* Every finding carries its severity, a ready-made message and (where
        * the gate could place it) line/column. ok follows the linter's failOn
@@ -657,6 +741,7 @@ async function handle(name, args = {}, ctx = {}) {
         reconstructedDocs: result.docs.length,
         skippedRender: result.skippedRender ? `view parts in helper methods (${result.helperTokens} calls) — not statically reconstructable` : undefined,
         notes: result.notes,
+        ...(renderSkipped ? { renderSkipped } : {}),
         config: configFile || undefined,
         hint: counts.error === 0 && counts.warning > 0
           ? 'what is left is about the UI5 version you target: fix it, raise min_ui5 if the system is newer, or accept it via allow'
@@ -794,26 +879,41 @@ async function handle(name, args = {}, ctx = {}) {
        * and a typo therefore cost a full build - tens of minutes - instead of
        * a sentence. */
       const mode = oneOf(args.mode, {
-        name: 'mode', allowed: ['auto', 'incremental', 'prebuilt', 'transpile', 'full'], dflt: 'auto',
+        name: 'mode', allowed: ['auto', 'npm', 'incremental', 'prebuilt', 'transpile', 'full'], dflt: 'auto',
       });
-      /* Which checkout a build needs depends on the mode: the full e2e-build
-       * is the corpus' script (and can bootstrap the in-repo .abap2UI5 clone);
-       * prebuilt and incremental work inside the abap2UI5 checkout alone. The
-       * build itself reports the rest (a missing prior build, a failed
-       * download) in its tail. */
+      /* Which checkout a build needs depends on the mode and on the backend
+       * in use (lib/runtime.mjs backendKind): the npm backend needs none -
+       * auto and incremental build on it whenever no framework checkout is
+       * there; the full e2e-build is the corpus' script (and can bootstrap
+       * the in-repo .abap2UI5 clone); prebuilt, transpile and incremental work
+       * inside the abap2UI5 checkout, and prebuilt and transpile CLONE it when
+       * nothing is there and nothing is configured - a set A2UI5_HOME that
+       * points nowhere is reported instead. The build reports the rest (a
+       * missing prior build, a failed download or install) in its tail. */
+      const kind = backendKind();
       const a2 = resolveKey('a2ui5', { local: true });
-      /* prebuilt (and auto without a prior build) can CLONE the framework
-       * when nothing is there and nothing is configured; a set A2UI5_HOME
-       * that points nowhere is reported instead. full is the corpus' script. */
-      const cloneable = !a2 && !explicitEnv('a2ui5') && (mode === 'prebuilt' || mode === 'auto');
-      const needsCorpus = mode === 'full' || (mode === 'auto' && !a2 && !cloneable);
-      const miss = needsCorpus ? missingLocalSibling('samples-controls') : (cloneable ? null : missingLocalSibling('abap2UI5'));
+      const onNpm = mode === 'npm' || ((mode === 'auto' || mode === 'incremental') && kind === 'npm');
+      const cloneable = !a2 && !explicitEnv('a2ui5') && (mode === 'prebuilt' || mode === 'transpile' || (mode === 'auto' && kind === 'clone'));
+      const needsCorpus = mode === 'full' || (mode === 'auto' && kind === 'missing');
+      let miss = null;
+      // refused before the running backend is stopped: a build nothing would serve
+      const unserved = npmPreferenceProblem({ mode, a2 });
+      if (unserved) miss = toolError(unserved);
+      else if (needsCorpus) miss = missingLocalSibling('samples-controls');
+      else if (onNpm) miss = npmModeProblem(kind) ? toolError(npmModeProblem(kind)) : null;
+      else if (!cloneable) miss = missingLocalSibling('abap2UI5');
       if (miss) return miss;
       await stopBackend();
       const res = await buildBackend({ mode, onLine: progressReporter(ctx), signal: ctx.signal });
       if (res.aborted) return toolError(`build cancelled by the client (mode ${res.mode || mode}):\n${res.tail}`);
       if (!res.ok) return toolError(`build failed (exit ${res.code}, mode ${res.mode || mode}):\n${res.tail}`);
-      return text({ built: true, mode: res.mode, next: 'run_app { class_name } to boot and screenshot the app', tail: res.tail.split('\n').slice(-5).join('\n') });
+      return text({
+        built: true,
+        mode: res.mode,
+        ...(res.runtime ? { runtime: `@abap2ui5/node-runtime ${res.runtime}` } : {}),
+        next: 'run_app { class_name } to boot and screenshot the app',
+        tail: res.tail.split('\n').slice(-5).join('\n'),
+      });
     }
     case 'verify_app': {
       /* Composed out of the single tools' handlers, so a stage answers
@@ -832,7 +932,13 @@ async function handle(name, args = {}, ctx = {}) {
         stages[label] = { ok: !r.isError, ...(parsed && typeof parsed === 'object' ? parsed : { text: parsed }) };
         return !r.isError;
       };
-      const done = (stoppedAt, extra) => text({ ok: !stoppedAt, ...(stoppedAt ? { stoppedAt } : {}), stages, ...(extra || {}) });
+      /* A stage that failed makes the CALL an error: the report used to come
+       * back with isError false and `ok: false` inside, so a client (or an
+       * agent) that goes by the protocol's flag saw a green verify_app. */
+      const done = (stoppedAt, extra) => ({
+        ...text({ ok: !stoppedAt, ...(stoppedAt ? { stoppedAt } : {}), stages, ...(extra || {}) }),
+        ...(stoppedAt ? { isError: true } : {}),
+      });
       // 1. validate - skipped, not failed, without a linter checkout
       if (missingSiblingMessage('linter')) {
         stages.validate = { skipped: missingSiblingMessage('linter') };
@@ -885,9 +991,9 @@ async function handle(name, args = {}, ctx = {}) {
       return text(log);
     }
     case 'run_app': {
-      // abap2UI5 carries the backend; samples-controls, when it is there,
-      // serves the local @openui5 modules (the CDN otherwise)
-      const miss = missingLocalSibling('abap2UI5');
+      // the backend - a framework checkout or the npm one; samples-controls,
+      // when it is there, serves the local @openui5 modules (the CDN otherwise)
+      const miss = missingBackend();
       if (miss) return miss;
       /* Bounded: the boot timeout is how long this call holds a browser and a
        * backend open, and a client that sends 0, a string or a day's worth of
@@ -909,7 +1015,7 @@ async function handle(name, args = {}, ctx = {}) {
       return { content, isError: !res.booted };
     }
     case 'interact_app': {
-      const miss = missingLocalSibling('abap2UI5');
+      const miss = missingBackend();
       if (miss) return miss;
       let res;
       try {
@@ -938,13 +1044,16 @@ async function handle(name, args = {}, ctx = {}) {
       return { content, isError: !res.booted };
     }
     case 'run_unit_tests': {
-      const miss = missingLocalSibling('abap2UI5');
+      const miss = missingBackend();
       if (miss) return miss;
       const report = progressReporter(ctx);
-      const classNames = args.class_names === undefined ? undefined : stringArray(args.class_names, { name: 'class_names' });
+      const classNames = args.class_names === undefined ? undefined : stringArray(args.class_names, { name: 'class_names', example: '["zcl_my_app", "zcl_my_other_app"]' });
       const res = await runUnitTests({ className: args.class_name, classNames, signal: ctx.signal, onLine: report });
       if (res.aborted || res.timedOut) return toolError(res.error);
-      if (res.class && res.tests.length === 0) {
+      /* No test line at all is "no test class" only for a run that passed: a
+       * class_setup that threw prints none either, and that hint sent an
+       * agent to redeploy tests that were there all along. */
+      if (res.class && res.ok && res.tests.length === 0) {
         return text({
           ...res,
           hint: `no test class of ${res.class} in the built backend — deploy_app with \`testclasses\`, then build_backend (a deploy after the last build is not in it yet: read_app says so)`,
@@ -952,7 +1061,13 @@ async function handle(name, args = {}, ctx = {}) {
       }
       return text({
         ...res,
-        ...(res.ok ? {} : { hint: res.failed ? 'the first failing test stops the runner; fix it, deploy, build, run again' : 'the runner failed before or outside a test - the error is what it printed' }),
+        ...(res.ok ? {} : {
+          hint: res.failed
+            ? (res.failed.fixture
+              ? `${res.failed.object}'s test class failed in its ${res.failed.method}, before the test method it prepares ran - that stops the runner too; fix it, deploy, build, run again`
+              : 'the first failing test stops the runner; fix it, deploy, build, run again')
+            : 'the runner failed before or outside a test - the error is what it printed',
+        }),
       });
     }
     case 'backend': {
@@ -964,7 +1079,7 @@ async function handle(name, args = {}, ctx = {}) {
       });
       if (action === 'start' || action === 'restart') {
         // status/stop work without any checkout; starting needs the backend
-        const miss = missingLocalSibling('abap2UI5');
+        const miss = missingBackend();
         if (miss) return miss;
       }
       if (action === 'start') return text(await startBackend());
@@ -1052,6 +1167,7 @@ server.setRequestHandler(CompleteRequestSchema, async (req) => {
 });
 server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
   try {
+    checkStringArgs(TOOLS.find((t) => t.name === req.params.name), req.params.arguments || {});
     await hydrateRepos(REMOTE_TOOLS[req.params.name]);
     return await handle(req.params.name, req.params.arguments || {}, {
       progressToken: req.params._meta && req.params._meta.progressToken,
@@ -1086,14 +1202,37 @@ function logCrash(kind, err) {
 process.on('unhandledRejection', (reason) => logCrash('unhandled rejection', reason));
 process.on('uncaughtException', (err) => logCrash('uncaught exception', err));
 
-process.on('SIGINT', async () => {
-  await Promise.all([stopBackend().catch(() => {}), closeRenderers()]);
-  process.exit(0);
-});
-process.on('SIGTERM', async () => {
-  await Promise.all([stopBackend().catch(() => {}), closeRenderers()]);
-  process.exit(0);
-});
+/* The server lives exactly as long as its client.
+ *
+ * It used to stop only on SIGINT/SIGTERM, and a client that goes away does
+ * not necessarily send either: an MCP client ends a stdio session by closing
+ * the pipe, and under `npx` a SIGTERM reaches npm (or the sh wrapper), not
+ * this process. So the server kept running with nobody on the other end -
+ * node, the warm Chromium, run_app's browser and the express backend - and
+ * the next session's `backend start` found the old backend still holding the
+ * port. An ended or closed stdin now shuts down the same way the signals do
+ * (SIGHUP too, a closed terminal): warm renderers and browsers closed, the
+ * backend stopped, every build/lint child's process tree killed. Single-shot,
+ * and bounded - a close that hangs must not keep an orphan alive either. */
+let shuttingDown = null;
+function shutdown(reason) {
+  if (shuttingDown) return shuttingDown;
+  const hardStop = setTimeout(() => process.exit(0), 5000);
+  shuttingDown = (async () => {
+    try {
+      killChildren();
+      await Promise.all([stopBackend().catch(() => {}), closeRenderers().catch(() => {})]);
+    } catch (e) {
+      console.error(`abap2ui5 MCP server: shutdown (${reason}) - ${(e && e.message) || e}`);
+    }
+    clearTimeout(hardStop);
+    process.exit(0);
+  })();
+  return shuttingDown;
+}
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => shutdown(sig));
+process.stdin.on('end', () => shutdown('stdin ended'));
+process.stdin.on('close', () => shutdown('stdin closed'));
 
 const transport = new StdioServerTransport();
 await server.connect(transport);

@@ -13,11 +13,14 @@
 #           the job that catches a sibling drifting away from what this server
 #           consumes.
 #
-# What neither job covers, and should be said rather than assumed: run_app,
-# build_backend and the render half of validate_view. They need the corpus'
-# own npm install and a Chromium, which is minutes of setup for a check that
-# would then take tens of minutes to transpile. The screenshot loop - half of
-# what this server is for - is therefore verified by hand today.
+# The backend half of the expensive loop IS covered, by `npm test` itself:
+# test/npm-integration.test.mjs installs @abap2ui5/node-runtime from the
+# registry and runs deploy, build, unit tests, boot and an HTTP roundtrip
+# (about 30 s; it skips itself without registry or GitHub access). What
+# neither job covers, and should be said rather than assumed: the BROWSER half
+# of run_app/interact_app and the render half of validate_view. They need UI5
+# (the CDN, or a corpus' @openui5 packages) and a Chromium; the screenshot
+# loop - half of what this server is for - is therefore verified by hand.
 name: ci
 
 on:
