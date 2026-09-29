@@ -483,3 +483,65 @@ test('action.yml\'s pin step writes one sane pin and backend, whatever the input
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+/* abap2ui5-unit on a checkout somebody named (--home): every class and
+ * interface into its dev sandbox, the incremental build, the tests - and
+ * exactly the files it wrote taken out of the sandbox and node/downport
+ * again, an MCP session's app beside them left alone. The transpiler is a
+ * stand-in that writes a runner of the generated shape over node/downport. */
+test('abap2ui5-unit on a named checkout deploys every object and takes exactly those out again', { skip: process.platform === 'win32' && 'POSIX stand-ins' }, withFakeFramework(async (t, { root, a2 }) => {
+  const { spawnSync } = await import('node:child_process');
+  for (const d of ['node/downport', 'node/output', 'node/setup', 'node/deps/open-abap-core']) fs.mkdirSync(path.join(a2, d), { recursive: true });
+  fs.writeFileSync(path.join(a2, 'node/output/init.mjs'), '');
+  fs.writeFileSync(path.join(a2, 'node/downport/zcl_sicf.clas.abap'), '* the framework\'s own');
+  fs.writeFileSync(path.join(a2, 'node/setup/abap_transpile.json'), JSON.stringify({
+    input_folder: 'node/downport', output_folder: 'node/output', libs: [{ url: 'https://github.com/open-abap/open-abap-core', folder: '/node/deps/open-abap-core' }],
+  }));
+  const cli = path.join(a2, 'node_modules/@abaplint/transpiler-cli');
+  fs.mkdirSync(cli, { recursive: true });
+  fs.writeFileSync(path.join(cli, 'package.json'), JSON.stringify({ bin: { abap_transpile: './abap_transpile' } }));
+  fs.writeFileSync(path.join(cli, 'abap_transpile'), `
+const fs = require('fs'); const path = require('path');
+const down = 'node/downport'; const out = 'node/output';
+const tests = fs.readdirSync(down).filter((f) => f.endsWith('.clas.testclasses.abap'));
+let data = '';
+for (const f of tests) {
+  const o = f.replace('.testclasses.abap', '');
+  const fail = fs.readFileSync(path.join(down, f), 'utf8').includes('FAIL');
+  fs.writeFileSync(path.join(out, o + '.testclasses.mjs'), 'export class ltcl { async constructor_() { return this; } async check() { ' + (fail ? 'throw new Error("assert_equals failed");' : '') + ' } }\\n');
+  data += '  ret.push({objectName: "' + o.split('.')[0].toUpperCase() + '", localClass: "ltcl", methods: [{"name":"check"}], filename: "./' + o + '.testclasses.mjs"});\\n';
+}
+fs.writeFileSync(path.join(out, 'index.mjs'), 'import "./init.mjs";\\nfunction getData() {\\n  const ret = [];\\n' + data + '  return ret;\\n}\\nasync function run() {\\n  for (const st of getData()) {\\n    const localClass = (await import(st.filename))[st.localClass];\\n    for (const m of st.methods) {\\n      const test = await (new localClass()).constructor_();\\n      console.log(st.objectName + ": running " + st.localClass + "->" + m.name);\\n      await test[m.name]();\\n    }\\n  }\\n}\\nrun().then(() => process.exit(0)).catch((err) => { console.log(err); process.exit(1); });\\n');
+fs.writeFileSync(path.join(out, 'init.mjs'), '');
+fs.appendFileSync('inputs.log', fs.readdirSync(down).filter((f) => !f.startsWith('.')).sort().join(',') + '\\n');
+`);
+  // an MCP session's app in the checkout's sandbox
+  deployApp({ className: 'zcl_session', source: appNamed('zcl_session') });
+  const repo = path.join(root, 'project');
+  const src = path.join(repo, 'src');
+  fs.mkdirSync(src, { recursive: true });
+  fs.writeFileSync(path.join(src, 'zcl_proj_app.clas.abap'), appNamed('zcl_proj_app'));
+  fs.writeFileSync(path.join(src, 'zcl_proj_app.clas.testclasses.abap'), TESTS);
+  fs.writeFileSync(path.join(src, 'zcl_proj_app.clas.locals_imp.abap'), 'CLASS lcl DEFINITION. ENDCLASS.');
+  fs.writeFileSync(path.join(src, 'zcl_proj_helper.clas.abap'), 'CLASS zcl_proj_helper DEFINITION PUBLIC. ENDCLASS.');
+  fs.writeFileSync(path.join(src, 'zcl_proj_helper.clas.testclasses.abap'), `${TESTS} " FAIL`);
+  fs.writeFileSync(path.join(src, 'zif_proj_thing.intf.abap'), 'INTERFACE zif_proj_thing PUBLIC. ENDINTERFACE.');
+  const box = sandbox().dir;
+  const before = fs.readdirSync(box).sort();
+
+  const res = spawnSync(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ci-unit.mjs'), 'src', '--home', a2, '--json'], {
+    cwd: repo, encoding: 'utf8', env: { ...process.env, A2UI5_MCP_BACKEND: '' },
+  });
+  const report = JSON.parse(res.stdout || 'null');
+  assert.ok(report, res.stderr);
+  assert.equal(report.backend, 'checkout');
+  const inputs = fs.readFileSync(path.join(a2, 'inputs.log'), 'utf8').trim().split('\n').pop();
+  assert.match(inputs, /zcl_proj_app\.clas\.locals_imp\.abap.*zcl_proj_helper\.clas\.testclasses\.abap.*zif_proj_thing\.intf\.abap/, 'every file of every object was transpiled');
+  const byClass = Object.fromEntries(report.results.map((r) => [r.cls, r]));
+  assert.equal(byClass.zcl_proj_helper.failed.object, 'ZCL_PROJ_HELPER');
+  assert.equal(byClass.zcl_proj_app.failed, null);
+  assert.equal(res.status, 1, res.stderr);
+  assert.deepEqual(fs.readdirSync(box).sort(), before, 'the session\'s app stays, the project\'s files are gone');
+  assert.ok(!fs.readdirSync(path.join(a2, 'node/downport')).some((f) => f.startsWith('zcl_proj_') || f.startsWith('zif_proj_')), 'no copy of the project left in node/downport');
+  assert.ok(fs.existsSync(path.join(a2, 'node/downport/zcl_sicf.clas.abap')), 'the framework\'s own file stays');
+}));
