@@ -91,6 +91,15 @@
   checked against the release's `downport/` (npm backend), `src/` and
   `node/srv/` of a checkout, and the corpus' own samples, and the refusal
   says where the original is.
+- **On Windows a timeout or a cancel ends the whole child tree, and no
+  console window opens.** Windows has no process groups, so killing a child
+  ended that child alone - and npm runs through `cmd.exe` there, so a
+  timed-out or cancelled install ended the wrapper while npm and the git it
+  started kept running, holding the output open: the call returned only
+  when they had finished on their own. The tree is ended with `taskkill /T`
+  now. And a server a desktop client starts has no console, so every child
+  it spawned (npm, git, the transpiler, the backend) opened a console window
+  of its own; they are started hidden.
 - **`setup_status` names the abaplint install the next build makes.** After
   `abap2ui5-unit` installed a release (without the lint's `@abaplint/cli`),
   or after app-template moved its pin, the next `build_backend` ran an npm

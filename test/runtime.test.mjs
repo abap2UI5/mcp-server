@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnWithTimeout, buildBackend, killChildren } from '../lib/runtime.mjs';
+import { treeKillCommand } from '../lib/spawn.mjs';
 
 // ------------------------------------------------------- spawnWithTimeout ----
 
@@ -91,6 +92,21 @@ test('killChildren kills every child spawnWithTimeout still has running', async 
   assert.equal(res.timedOut, false);
   assert.ok(Date.now() - t0 < 5000, 'the child dies at once, not at its timeout');
   killChildren(); // nothing left: a second call is a no-op
+});
+
+/* A grandchild - what npm runs git through, what a shell runs npm through
+ * (cmd.exe on Windows) - dies with the child: the promise resolves at the
+ * timeout, not when the grandchild would have finished and closed the pipe. */
+test('a timeout ends the grandchildren too, and taskkill /T is how on Windows', async () => {
+  const t0 = Date.now();
+  const grandchild = `require('child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'inherit' }); setInterval(() => {}, 1000);`;
+  const res = await spawnWithTimeout(process.execPath, ['-e', grandchild], { timeoutMs: 500 });
+  assert.equal(res.timedOut, true);
+  assert.ok(Date.now() - t0 < 10000, `resolved after ${Date.now() - t0} ms - the grandchild held the pipe open`);
+
+  assert.deepEqual(treeKillCommand(4242, 'win32'), ['taskkill', ['/pid', '4242', '/T', '/F']]);
+  assert.equal(treeKillCommand(4242, 'linux'), null, 'POSIX signals the process group instead');
+  assert.equal(treeKillCommand(undefined, 'win32'), null, 'a child that never started has no tree');
 });
 
 test('spawnWithTimeout never spawns under an already-aborted signal', async () => {
