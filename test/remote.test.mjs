@@ -272,3 +272,20 @@ test('a used-up unauthenticated API limit says so and names the token', withEnv(
     }
   }
 }));
+
+/* template.json is a file in another repository, and its entries become
+ * paths under the mirror directory: an entry that climbs out of it must
+ * refuse the mirror, not write outside it. */
+test('a template.json entry that escapes the repository refuses the whole mirror', withEnv(async (t, dir) => {
+  for (const bad of ['../../escaped.txt', '/etc/escaped.txt', 'src/../../escaped.txt']) {
+    resetRemote();
+    const spec = { placeholderClass: 'zcl_app_001', files: { shared: ['package.json', bad], named: [] } };
+    const impl = fakeFetch({ '/template.json': JSON.stringify(spec), '/package.json': '{}', 'escaped.txt': 'pwned' });
+    const res = await hydrate('appTemplate', { local: null, fetchImpl: impl });
+    assert.equal(res.root, null, bad);
+    assert.match(res.error, /outside the repository/);
+    assert.ok(!impl.calls.some((u) => u.endsWith('escaped.txt')), 'the bad entry is not even fetched');
+    assert.ok(!fs.existsSync(path.join(dir, 'escaped.txt')) && !fs.existsSync(path.join(path.dirname(dir), 'escaped.txt')));
+    assert.ok(!isRemoteCheckout(remoteRoot('appTemplate')), 'no half mirror either');
+  }
+}));

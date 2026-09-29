@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **The mirror stays inside its directory.** The template mirror joined
+  every path `template.json` lists (and the docs mirror every path the tree
+  listing names) onto the cache directory unchecked, so an entry like
+  `../../x` was fetched and written outside it. Listed paths now pass the
+  same whitelist as an agent's path; one bad entry refuses the mirror.
 - **A stale `GITHUB_TOKEN` no longer breaks the GitHub mirror.** The token
   was sent to `raw.githubusercontent.com` too, which answers a token it does
   not accept with 404 - every knowledge tool then reported every file as
