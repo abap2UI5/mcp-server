@@ -379,6 +379,39 @@ test('two dev apps deployed without a description do not share one', withFakeFra
   removeApp('zcl_two');
 }));
 
+/* The customer namespace is not the dev apps' alone: the framework's z2ui5_*
+ * classes are in it, and so is zcl_sicf, the ICF handler in node/srv every
+ * host boots - the incremental build would copy a dev app of that name over
+ * the framework's own output. */
+test('a dev app is never named like the framework\'s or the corpus\' own objects, and is no clash with itself', withFakeFramework(async (t, { root, a2 }) => {
+  fs.mkdirSync(path.join(a2, 'src', '02'), { recursive: true });
+  fs.writeFileSync(path.join(a2, 'src', '02', 'z2ui5_cl_app_hello_world.clas.abap'), '');
+  fs.writeFileSync(path.join(a2, 'node', 'srv', 'zcl_sicf.clas.abap'), '');
+  assert.throws(() => deployApp({ className: 'zcl_sicf', source: appNamed('zcl_sicf') }),
+    /zcl_sicf is the framework's own class \(.*node[\\/]srv[\\/]zcl_sicf\.clas\.abap\).*second copy/s);
+  assert.throws(() => deployApp({ className: 'Z2UI5_CL_APP_HELLO_WORLD', source: appNamed('z2ui5_cl_app_hello_world') }),
+    /z2ui5_cl_app_hello_world is the framework's own class/);
+  assert.deepEqual(listDevApps(), [], 'nothing written for a refused name');
+  deployApp({ className: 'zcl_probe', source: APP });
+  deployApp({ className: 'zcl_probe', source: APP });
+
+  // the corpus: its own samples count, and so does the framework beside it -
+  // its src/zz_dev, the sandbox itself, does not
+  const corpus = path.join(root, 'samples-controls');
+  fs.mkdirSync(path.join(corpus, 'scripts'), { recursive: true });
+  fs.writeFileSync(path.join(corpus, 'scripts', 'e2e-build.mjs'), '// probe');
+  fs.mkdirSync(path.join(corpus, 'src', '01'), { recursive: true });
+  fs.writeFileSync(path.join(corpus, 'src', '01', 'z2ui5_cl_demo_app_001.clas.abap'), '');
+  process.env.SAMPLES_CONTROLS_HOME = corpus;
+  assert.equal(sandbox().kind, 'corpus');
+  assert.throws(() => deployApp({ className: 'z2ui5_cl_demo_app_001', source: appNamed('z2ui5_cl_demo_app_001') }),
+    /z2ui5_cl_demo_app_001 is samples-controls' own class/);
+  assert.throws(() => deployApp({ className: 'zcl_sicf', source: appNamed('zcl_sicf') }), /the framework's own class/);
+  deployApp({ className: 'zcl_probe', source: APP });
+  deployApp({ className: 'zcl_probe', source: APP });
+  assert.deepEqual(listDevApps(), ['zcl_probe']);
+}));
+
 /* GitHub's releases/latest is the NEWEST release, and the framework publishes
  * each version twice: X.Y.Z (with the prebuilt backend asset) and, seconds
  * later, its 7.02 downport X.Y.Z-702. "latest" was the downport, so the clone

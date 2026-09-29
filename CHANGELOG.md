@@ -81,6 +81,16 @@
   directory: with `A2UI5_MCP_WORKSPACE=.abap2ui5-mcp` the lint and the
   transpiler failed with "Cannot find module" on a doubled path. It is
   resolved against the directory the server runs in now.
+- **`deploy_app` refuses a name the framework or the corpus already
+  defines.** The customer namespace a dev app may use holds the
+  framework's own `z2ui5_*` classes and interfaces too, and `zcl_sicf`, the
+  ICF handler every host boots. A dev app of such a name was written and
+  built beside the original: a second copy that failed the transpile, or -
+  on a checkout, whose incremental build copies the sandbox over the output
+  - replaced the framework's class in what the host served. The name is
+  checked against the release's `downport/` (npm backend), `src/` and
+  `node/srv/` of a checkout, and the corpus' own samples, and the refusal
+  says where the original is.
 - **`setup_status` names the abaplint install the next build makes.** After
   `abap2ui5-unit` installed a release (without the lint's `@abaplint/cli`),
   or after app-template moved its pin, the next `build_backend` ran an npm

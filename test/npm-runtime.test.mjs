@@ -16,7 +16,7 @@ import {
   backendBuilt, runUnitTests, setupStatus, backendStatus, frameworkLintConfig, npmLintTarget, npmModeProblem, planBuild,
   npmPreferenceProblem,
 } from '../lib/runtime.mjs';
-import { resetNpmBackend, appsDir } from '../lib/npm-backend.mjs';
+import { resetNpmBackend, appsDir, downportDir } from '../lib/npm-backend.mjs';
 import { fakeRelease, fakeTemplate, APP, TESTS, VERSION, CORE_SHA } from './helpers/npm-fixture.mjs';
 
 const ENV = [
@@ -128,6 +128,20 @@ test('the npm sandbox is the workspace\'s, and deploy, list, read and remove wor
   assert.equal(readAppSource('zcl_npm_app').staleInBackend, false);
   assert.equal(removeApp('zcl_npm_app'), 3);
   assert.deepEqual(listDevApps(), []);
+}));
+
+test('a dev app named like one of the framework\'s own objects is refused, not built as a second copy', withNpm(async (t, { dir }) => {
+  // the release's downport/ is the list of what the framework itself defines
+  fs.writeFileSync(path.join(downportDir(dir), '02', 'z2ui5_cl_ui5_app_hi_world.clas.abap'), 'CLASS z2ui5_cl_ui5_app_hi_world DEFINITION PUBLIC. ENDCLASS.\n');
+  assert.throws(
+    () => deployApp({ className: 'z2ui5_cl_ui5_app_hi_world', source: APP('z2ui5_cl_ui5_app_hi_world') }),
+    /z2ui5_cl_ui5_app_hi_world is the framework's own class .*second copy/s,
+  );
+  assert.throws(() => deployApp({ className: 'Z2UI5_IF_APP', source: APP('z2ui5_if_app') }), /z2ui5_if_app is the framework's own/);
+  assert.deepEqual(listDevApps(), [], 'nothing written for a refused name');
+  // an ordinary name still deploys
+  deployApp({ className: 'zcl_hi_world', source: APP('zcl_hi_world') });
+  assert.deepEqual(listDevApps(), ['zcl_hi_world']);
 }));
 
 test('the npm sandbox lints with app-template\'s config against the release\'s downport/', withNpm(async (t, { root, workspace }) => {
