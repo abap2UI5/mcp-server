@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **`setup_status` sees a Playwright-managed Chromium.** It only probed three
+  hard-coded paths (one of them the `/opt/pw-browsers` link of a sandbox
+  image) and reported a machine with `npx playwright install chromium` done
+  as having no browser. `resolveChromium` asks Playwright for its own
+  executable after `A2UI5_MCP_CHROMIUM` and `CHROMIUM_BIN` (the linter's
+  variable, now honoured by `run_app` too), keeps the system paths as the
+  fallback with the sandbox link last, and `setup_status` reports the source.
 - **A failed `verify_app` is a failed call.** It answered `isError: false`
   with `ok: false` inside when a stage stopped it; a client going by the
   protocol's flag saw it green. `isError` is now set whenever `stoppedAt` is.

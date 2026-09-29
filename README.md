@@ -263,8 +263,10 @@ duplicates none of their content:
   packages — with network access it loads from the CDN (styled screenshots);
   without, apps render unstyled but structurally complete. `A2UI5_MCP_OFFLINE=1`
   forces the hermetic behaviour.
-- **Chromium:** uses the Playwright-managed browser; if absent, falls back to a
-  system chromium (`A2UI5_MCP_CHROMIUM` overrides the executable path).
+- **Chromium:** `A2UI5_MCP_CHROMIUM` (or `CHROMIUM_BIN`, which the linter
+  reads too) names the executable; otherwise the Playwright-managed browser
+  (`npx playwright install chromium`); otherwise a system chromium.
+  `setup_status` says which one it found and where it came from.
 - **Screenshots:** `run_app` writes its PNG to
   `<tmp>/abap2ui5-mcp-screenshots/<class>.png` and returns the path beside the
   image — deliberately not into the install directory, which is inside

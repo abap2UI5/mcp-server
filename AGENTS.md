@@ -55,7 +55,9 @@ only inside that tool's description in `lib/tools.mjs`, which is the one place
 a maintainer setting a machine up does not look.
 
 Also: `A2UI5_MCP_PORT`, `A2UI5_MCP_OFFLINE=1` (no CDN fallback for UI5, and
-no GitHub mirror either), `A2UI5_MCP_CHROMIUM` (browser path),
+no GitHub mirror either), `A2UI5_MCP_CHROMIUM` (browser path; `CHROMIUM_BIN`,
+the linter's variable, is read after it — then Playwright's managed browser,
+then a system binary, `resolveChromium`),
 `A2UI5_MCP_SCREENSHOT_DIR` (where `run_app` and `interact_app` write their
 PNGs; default `<tmp>/abap2ui5-mcp-screenshots`, and deliberately not the
 install directory — that is inside `node_modules` for an npx/npm install),

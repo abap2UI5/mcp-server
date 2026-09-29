@@ -1898,3 +1898,22 @@ test('a string argument that is not a string is refused by name, for every tool'
     }
   }
 });
+
+/* setup_status only knew three hard-coded paths (one of them a sandbox
+ * image's /opt/pw-browsers link), so a machine with a perfectly good
+ * Playwright-managed Chromium was reported as having none. */
+test('the Chromium is the explicit one, then Playwright\'s own, then a system binary', async () => {
+  const { resolveChromium } = await import('../lib/runtime.mjs');
+  const has = (...paths) => (p) => paths.includes(p);
+  const managed = () => '/home/u/.cache/ms-playwright/chromium-1/chrome';
+  assert.deepEqual(resolveChromium({ env: {}, exists: has('/home/u/.cache/ms-playwright/chromium-1/chrome', '/usr/bin/chromium'), managed }),
+    { path: '/home/u/.cache/ms-playwright/chromium-1/chrome', source: 'playwright', exists: true });
+  assert.deepEqual(resolveChromium({ env: {}, exists: has('/usr/bin/chromium', '/opt/pw-browsers/chromium'), managed }),
+    { path: '/usr/bin/chromium', source: 'system', exists: true }, 'the sandbox link is the last resort');
+  assert.deepEqual(resolveChromium({ env: {}, exists: has('/opt/pw-browsers/chromium'), managed: () => null }),
+    { path: '/opt/pw-browsers/chromium', source: 'system', exists: true });
+  assert.deepEqual(resolveChromium({ env: { A2UI5_MCP_CHROMIUM: '/x/chrome', CHROMIUM_BIN: '/y' }, exists: has(), managed }),
+    { path: '/x/chrome', source: 'A2UI5_MCP_CHROMIUM', exists: false }, 'an explicit choice is reported even when it is wrong');
+  assert.equal(resolveChromium({ env: { CHROMIUM_BIN: '/y' }, exists: has('/y'), managed }).source, 'CHROMIUM_BIN');
+  assert.equal(resolveChromium({ env: {}, exists: has(), managed }), null);
+});
