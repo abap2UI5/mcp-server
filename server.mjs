@@ -81,6 +81,8 @@ import {
   sandbox,
   setupStatus,
   killChildren,
+  backendKind,
+  npmModeProblem,
 } from './lib/runtime.mjs';
 import { explicitEnv } from './lib/repos.mjs';
 
@@ -111,9 +113,22 @@ function missingLocalSibling(...repos) {
   return msg ? toolError(msg) : null;
 }
 
-/* The dev sandbox - the corpus' src/zz_dev, or the framework's node/zz_dev
- * when there is no corpus (lib/runtime.mjs sandbox) - as a tool error when
- * neither checkout is there. */
+/* The backend a boot, a test run or `backend start` needs: a framework
+ * checkout, or the npm backend - which needs no checkout at all and is the
+ * default without one (lib/runtime.mjs backendKind). What is left to refuse
+ * is an A2UI5_HOME that points nowhere (reported as the missing checkout it
+ * names, never built around) and A2UI5_MCP_BACKEND=clone before the clone. */
+function missingBackend() {
+  const kind = backendKind();
+  if (kind === 'checkout' || kind === 'npm') return null;
+  return missingLocalSibling('abap2UI5')
+    || toolError(`no backend: ${kind === 'clone' ? 'A2UI5_MCP_BACKEND=clone and the framework is not cloned yet - run build_backend first' : 'A2UI5_HOME points at no checkout'}`);
+}
+
+/* The dev sandbox - the corpus' src/zz_dev, the framework's node/zz_dev when
+ * there is no corpus, the npm backend's workspace sandbox when there is no
+ * framework checkout either (lib/runtime.mjs sandbox) - as a tool error when
+ * none of them is there. */
 function missingSandbox() {
   try {
     sandbox();
@@ -618,7 +633,7 @@ async function handle(name, args = {}, ctx = {}) {
       if (miss) return miss;
       const res = readAppSource(args.class_name);
       if (!res.found) {
-        return toolError(`no dev app '${res.class}' in src/zz_dev (looked for ${res.file}) — `
+        return toolError(`no dev app '${res.class}' in the dev sandbox (looked for ${res.file}) — `
           + 'remove_app without arguments lists the deployed ones');
       }
       return text({
@@ -856,26 +871,38 @@ async function handle(name, args = {}, ctx = {}) {
        * and a typo therefore cost a full build - tens of minutes - instead of
        * a sentence. */
       const mode = oneOf(args.mode, {
-        name: 'mode', allowed: ['auto', 'incremental', 'prebuilt', 'transpile', 'full'], dflt: 'auto',
+        name: 'mode', allowed: ['auto', 'npm', 'incremental', 'prebuilt', 'transpile', 'full'], dflt: 'auto',
       });
-      /* Which checkout a build needs depends on the mode: the full e2e-build
-       * is the corpus' script (and can bootstrap the in-repo .abap2UI5 clone);
-       * prebuilt and incremental work inside the abap2UI5 checkout alone. The
-       * build itself reports the rest (a missing prior build, a failed
-       * download) in its tail. */
+      /* Which checkout a build needs depends on the mode and on the backend
+       * in use (lib/runtime.mjs backendKind): the npm backend needs none -
+       * auto and incremental build on it whenever no framework checkout is
+       * there; the full e2e-build is the corpus' script (and can bootstrap
+       * the in-repo .abap2UI5 clone); prebuilt, transpile and incremental work
+       * inside the abap2UI5 checkout, and prebuilt and transpile CLONE it when
+       * nothing is there and nothing is configured - a set A2UI5_HOME that
+       * points nowhere is reported instead. The build reports the rest (a
+       * missing prior build, a failed download or install) in its tail. */
+      const kind = backendKind();
       const a2 = resolveKey('a2ui5', { local: true });
-      /* prebuilt (and auto without a prior build) can CLONE the framework
-       * when nothing is there and nothing is configured; a set A2UI5_HOME
-       * that points nowhere is reported instead. full is the corpus' script. */
-      const cloneable = !a2 && !explicitEnv('a2ui5') && (mode === 'prebuilt' || mode === 'auto');
-      const needsCorpus = mode === 'full' || (mode === 'auto' && !a2 && !cloneable);
-      const miss = needsCorpus ? missingLocalSibling('samples-controls') : (cloneable ? null : missingLocalSibling('abap2UI5'));
+      const onNpm = mode === 'npm' || ((mode === 'auto' || mode === 'incremental') && kind === 'npm');
+      const cloneable = !a2 && !explicitEnv('a2ui5') && (mode === 'prebuilt' || mode === 'transpile' || (mode === 'auto' && kind === 'clone'));
+      const needsCorpus = mode === 'full' || (mode === 'auto' && kind === 'missing');
+      let miss = null;
+      if (needsCorpus) miss = missingLocalSibling('samples-controls');
+      else if (onNpm) miss = npmModeProblem(kind) ? toolError(npmModeProblem(kind)) : null;
+      else if (!cloneable) miss = missingLocalSibling('abap2UI5');
       if (miss) return miss;
       await stopBackend();
       const res = await buildBackend({ mode, onLine: progressReporter(ctx), signal: ctx.signal });
       if (res.aborted) return toolError(`build cancelled by the client (mode ${res.mode || mode}):\n${res.tail}`);
       if (!res.ok) return toolError(`build failed (exit ${res.code}, mode ${res.mode || mode}):\n${res.tail}`);
-      return text({ built: true, mode: res.mode, next: 'run_app { class_name } to boot and screenshot the app', tail: res.tail.split('\n').slice(-5).join('\n') });
+      return text({
+        built: true,
+        mode: res.mode,
+        ...(res.runtime ? { runtime: `@abap2ui5/node-runtime ${res.runtime}` } : {}),
+        next: 'run_app { class_name } to boot and screenshot the app',
+        tail: res.tail.split('\n').slice(-5).join('\n'),
+      });
     }
     case 'verify_app': {
       /* Composed out of the single tools' handlers, so a stage answers
@@ -953,9 +980,9 @@ async function handle(name, args = {}, ctx = {}) {
       return text(log);
     }
     case 'run_app': {
-      // abap2UI5 carries the backend; samples-controls, when it is there,
-      // serves the local @openui5 modules (the CDN otherwise)
-      const miss = missingLocalSibling('abap2UI5');
+      // the backend - a framework checkout or the npm one; samples-controls,
+      // when it is there, serves the local @openui5 modules (the CDN otherwise)
+      const miss = missingBackend();
       if (miss) return miss;
       /* Bounded: the boot timeout is how long this call holds a browser and a
        * backend open, and a client that sends 0, a string or a day's worth of
@@ -977,7 +1004,7 @@ async function handle(name, args = {}, ctx = {}) {
       return { content, isError: !res.booted };
     }
     case 'interact_app': {
-      const miss = missingLocalSibling('abap2UI5');
+      const miss = missingBackend();
       if (miss) return miss;
       let res;
       try {
@@ -1006,7 +1033,7 @@ async function handle(name, args = {}, ctx = {}) {
       return { content, isError: !res.booted };
     }
     case 'run_unit_tests': {
-      const miss = missingLocalSibling('abap2UI5');
+      const miss = missingBackend();
       if (miss) return miss;
       const report = progressReporter(ctx);
       const classNames = args.class_names === undefined ? undefined : stringArray(args.class_names, { name: 'class_names', example: '["zcl_my_app", "zcl_my_other_app"]' });
@@ -1032,7 +1059,7 @@ async function handle(name, args = {}, ctx = {}) {
       });
       if (action === 'start' || action === 'restart') {
         // status/stop work without any checkout; starting needs the backend
-        const miss = missingLocalSibling('abap2UI5');
+        const miss = missingBackend();
         if (miss) return miss;
       }
       if (action === 'start') return text(await startBackend());
