@@ -419,3 +419,28 @@ test('run_unit_tests names a failing class_setup instead of calling the tests mi
     p.kill();
   }
 }));
+
+/* A2UI5_MCP_WORKSPACE was used as given. Relative (a project's .mcp.json,
+ * a CI env), every path the npm backend hands a child that runs in ANOTHER
+ * directory resolved twice: the lint's abaplint and the transpiler were
+ * "Cannot find module .../ws/runtime/1.145.0/ws/runtime/...", the build's
+ * input and output folders pointed into the runtime directory. The
+ * workspace is resolved once, against the directory the server runs in. */
+test('a relative A2UI5_MCP_WORKSPACE is the workspace under the server\'s directory', withNpm(async (t, { root }) => {
+  const cwd = process.cwd();
+  process.chdir(root);
+  try {
+    process.env.A2UI5_MCP_WORKSPACE = 'workspace';
+    assert.equal(sandbox().dir, path.join(fs.realpathSync(root), 'workspace', 'sandbox'));
+    deployApp({ className: 'zcl_npm_rel', source: APP('zcl_npm_rel'), testclasses: TESTS() });
+    const lint = await lintApp('zcl_npm_rel');
+    assert.equal(lint.ok, true, JSON.stringify(lint.issues));
+    const built = await buildBackend({ mode: 'auto' });
+    assert.equal(built.ok, true, built.tail);
+    const unit = await runUnitTests({ className: 'zcl_npm_rel' });
+    assert.equal(unit.ok, true, JSON.stringify(unit));
+    assert.equal(unit.tests.length, 1);
+  } finally {
+    process.chdir(cwd);
+  }
+}));

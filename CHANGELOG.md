@@ -76,6 +76,11 @@
   `run_app` and `run_unit_tests` kept running on the package and said
   "backend not built". They are refused now, before a running backend is
   stopped, and `setup_status`'s hint no longer suggests them there.
+- **A relative `A2UI5_MCP_WORKSPACE` works.** It was used as given, and the
+  npm backend hands workspace paths to children that run in another
+  directory: with `A2UI5_MCP_WORKSPACE=.abap2ui5-mcp` the lint and the
+  transpiler failed with "Cannot find module" on a doubled path. It is
+  resolved against the directory the server runs in now.
 - **`setup_status` names the abaplint install the next build makes.** After
   `abap2ui5-unit` installed a release (without the lint's `@abaplint/cli`),
   or after app-template moved its pin, the next `build_backend` ran an npm

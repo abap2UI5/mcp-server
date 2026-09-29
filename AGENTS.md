@@ -76,7 +76,9 @@ from; default the framework release asset, see below), the mirror knobs
 the docs tree listing's rate limit; never to `raw.githubusercontent.com`, which
 answers a token it rejects with 404, and a token the API refuses is dropped
 with a warning), `A2UI5_MCP_WORKSPACE` (where the npm backend installs, its
-sandbox lives and a framework clone lands, below), `A2UI5_MCP_BACKEND`
+sandbox lives and a framework clone lands, below; a relative path is taken
+from the directory the server runs in, once - `workspaceRoot` resolves it,
+because the backend hands its paths to children running elsewhere), `A2UI5_MCP_BACKEND`
 (`npm`: the npm backend even beside a framework checkout; `clone`: the
 framework clone as the answer to "no checkout", the default before the npm
 backend), `A2UI5_MCP_RUNTIME_VERSION` (the `@abap2ui5/node-runtime` release,
