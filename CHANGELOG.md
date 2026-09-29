@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **The server exits with its client.** It stopped only on SIGINT/SIGTERM,
+  but a client ends a stdio session by closing the pipe, and under `npx` a
+  SIGTERM reaches npm rather than the server - so node, the warm Chromium and
+  the express backend outlived every session, and the next one's `backend
+  start` met the old backend on the port. An ended or closed stdin and SIGHUP
+  now shut down like the signals do: browsers closed, the backend stopped,
+  every running build/lint child's process tree killed, with a five-second
+  hard stop.
 - **Dependencies:** `@modelcontextprotocol/sdk` ^1.30.1 and `playwright`
   ^1.63.0 (lockfile refreshed within range). The linter's render runtime is
   now published as `@abap2ui5/linter-render` (formerly

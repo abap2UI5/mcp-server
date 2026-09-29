@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnWithTimeout, buildBackend } from '../lib/runtime.mjs';
+import { spawnWithTimeout, buildBackend, killChildren } from '../lib/runtime.mjs';
 
 // ------------------------------------------------------- spawnWithTimeout ----
 
@@ -77,6 +77,20 @@ test('spawnWithTimeout kills the child promptly when the signal aborts', async (
   assert.equal(res.timedOut, false, 'an abort is reported as an abort, not as a timeout');
   assert.ok(Date.now() - t0 < 5000, 'the abort must not wait for the timeout');
   assert.match(res.stdout, /started/, 'output before the kill is kept');
+});
+
+/* The shutdown path: the server kills what is still running when its client
+ * goes away (server.mjs shutdown). The children are process-group leaders,
+ * so nothing else would - a build outlived the session that started it. */
+test('killChildren kills every child spawnWithTimeout still has running', async () => {
+  const t0 = Date.now();
+  const running = spawnWithTimeout(process.execPath, ['-e', 'setInterval(() => {}, 1000);'], { timeoutMs: 30000 });
+  await new Promise((r) => setTimeout(r, 200));
+  killChildren();
+  const res = await running;
+  assert.equal(res.timedOut, false);
+  assert.ok(Date.now() - t0 < 5000, 'the child dies at once, not at its timeout');
+  killChildren(); // nothing left: a second call is a no-op
 });
 
 test('spawnWithTimeout never spawns under an already-aborted signal', async () => {

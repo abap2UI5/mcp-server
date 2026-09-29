@@ -78,6 +78,7 @@ import {
   runUnitTests,
   sandbox,
   setupStatus,
+  killChildren,
 } from './lib/runtime.mjs';
 import { explicitEnv } from './lib/repos.mjs';
 
@@ -1086,14 +1087,37 @@ function logCrash(kind, err) {
 process.on('unhandledRejection', (reason) => logCrash('unhandled rejection', reason));
 process.on('uncaughtException', (err) => logCrash('uncaught exception', err));
 
-process.on('SIGINT', async () => {
-  await Promise.all([stopBackend().catch(() => {}), closeRenderers()]);
-  process.exit(0);
-});
-process.on('SIGTERM', async () => {
-  await Promise.all([stopBackend().catch(() => {}), closeRenderers()]);
-  process.exit(0);
-});
+/* The server lives exactly as long as its client.
+ *
+ * It used to stop only on SIGINT/SIGTERM, and a client that goes away does
+ * not necessarily send either: an MCP client ends a stdio session by closing
+ * the pipe, and under `npx` a SIGTERM reaches npm (or the sh wrapper), not
+ * this process. So the server kept running with nobody on the other end -
+ * node, the warm Chromium, run_app's browser and the express backend - and
+ * the next session's `backend start` found the old backend still holding the
+ * port. An ended or closed stdin now shuts down the same way the signals do
+ * (SIGHUP too, a closed terminal): warm renderers and browsers closed, the
+ * backend stopped, every build/lint child's process tree killed. Single-shot,
+ * and bounded - a close that hangs must not keep an orphan alive either. */
+let shuttingDown = null;
+function shutdown(reason) {
+  if (shuttingDown) return shuttingDown;
+  const hardStop = setTimeout(() => process.exit(0), 5000);
+  shuttingDown = (async () => {
+    try {
+      killChildren();
+      await Promise.all([stopBackend().catch(() => {}), closeRenderers().catch(() => {})]);
+    } catch (e) {
+      console.error(`abap2ui5 MCP server: shutdown (${reason}) - ${(e && e.message) || e}`);
+    }
+    clearTimeout(hardStop);
+    process.exit(0);
+  })();
+  return shuttingDown;
+}
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => shutdown(sig));
+process.stdin.on('end', () => shutdown('stdin ended'));
+process.stdin.on('close', () => shutdown('stdin closed'));
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
