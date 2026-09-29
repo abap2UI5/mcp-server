@@ -174,6 +174,27 @@ test('npm is run without a shell, except on Windows where the arguments are quot
   const c = npmCommand(['install', 'express@^4.21.0 || ^5.0.0']);
   if (POSIX) assert.deepEqual(c, { cmd: 'npm', args: ['install', 'express@^4.21.0 || ^5.0.0'], shell: false });
   else assert.deepEqual(c.args, ['install', '"express@^4.21.0 || ^5.0.0"']);
+  /* The Windows decisions, on every platform: npm is a .cmd script there,
+   * which spawn runs only through cmd.exe (and Node joins the arguments
+   * with spaces into ONE command line) - so every argument carrying a
+   * space or a character cmd.exe reads (^ is its escape, | & < > ( ) are
+   * operators) is double-quoted, inside which cmd.exe takes them
+   * literally; a double quote cannot be escaped for cmd.exe and is dropped. */
+  const win = npmCommand([
+    'install', '--ignore-scripts', '--save-exact', `${RUNTIME_PKG}@1.145.0`, '@abaplint/transpiler-cli@2.13.91',
+    'express@^5.0.0', 'express@^4.21.0 || ^5.0.0', 'express@>=5.0.0 <6', 'a"b&c',
+  ], 'win32');
+  assert.equal(win.cmd, 'npm.cmd');
+  assert.equal(win.shell, true);
+  assert.deepEqual(win.args, [
+    'install', '--ignore-scripts', '--save-exact', `${RUNTIME_PKG}@1.145.0`, '@abaplint/transpiler-cli@2.13.91',
+    '"express@^5.0.0"', '"express@^4.21.0 || ^5.0.0"', '"express@>=5.0.0 <6"', '"ab&c"',
+  ]);
+  assert.deepEqual(npmCommand(['view', `${RUNTIME_PKG}@latest`, 'version', '--json'], 'win32').args, ['view', `${RUNTIME_PKG}@latest`, 'version', '--json'], 'nothing to quote');
+  assert.deepEqual(npmCommand(['install', 'express@^5.0.0'], 'darwin'), { cmd: 'npm', args: ['install', 'express@^5.0.0'], shell: false }, 'no shell anywhere else');
+  // and nothing reaches that command line unvalidated: a version is X.Y.Z, a range a range
+  assert.equal(expressRangeOf({ peerDependencies: { express: '^5 %PATH%' } }), EXPRESS_FALLBACK_RANGE, '%VAR% expands even inside quotes');
+  assert.equal(readRuntimePin({ A2UI5_MCP_RUNTIME_VERSION: '1.145.0 & calc' }).invalid, '1.145.0 & calc');
 });
 
 // ------------------------------------------------------------ the release ----
