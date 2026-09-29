@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **`run_app` boots with the corpus' local UI5, and honours `timeout_ms`.**
+  The framework page's hash-only CSP blocks the inline scripts the SOURCE
+  `sap-ui-core.js` from the local `@openui5` packages `document.write()`s, so
+  with a samples-controls checkout beside it no app ever booted; the browser
+  context now bypasses CSP exactly when local sources are served (with the
+  CDN the page keeps its own policy). The boot wait passed `{ timeout }` as
+  `waitForFunction`'s page argument instead of its options, so `timeout_ms`
+  (run_app, interact_app, verify_app) was ignored and every boot waited
+  Playwright's default 30 s.
 - **The second dev app lints.** `deploy_app` without a `description` wrote
   the constant `MCP dev app` into every sidecar, and abaplint's
   `identical_descriptions` (on in app-template's config, which lints the

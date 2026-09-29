@@ -1726,3 +1726,50 @@ test('the package carries a bin named after its unscoped name, and keeps the exp
     assert.match(fs.readFileSync(path.join(ROOT, file), 'utf8'), /^#!\/usr\/bin\/env node\n/, `${file} needs its shebang`);
   }
 });
+
+// ---------------------------------------------------------------- run_app ----
+
+/* waitForFunction(fn, arg, options): the boot wait passed { timeout } as the
+ * ARG, so the page function received it and the wait kept Playwright's
+ * default 30 s - run_app's and interact_app's timeout_ms did nothing. */
+test('the boot wait hands timeout_ms to Playwright as options, not as the page argument', async () => {
+  const { waitForBoot } = await import('../lib/runtime.mjs');
+  const calls = [];
+  const page = { waitForFunction: async (...args) => { calls.push(args); } };
+  await waitForBoot(page, 12345);
+  assert.equal(calls.length, 1);
+  const [fn, arg, options] = calls[0];
+  assert.equal(typeof fn, 'function');
+  assert.equal(arg, undefined, 'nothing is passed to the page function');
+  assert.deepEqual(options, { timeout: 12345 });
+});
+
+/* The framework page's CSP allows its inline bootstrap by hash only; the
+ * locally served @openui5 SOURCE sap-ui-core.js document.write()s inline
+ * scripts, which that policy blocks, so a run_app with a corpus beside it
+ * never booted. bypassCSP exactly when local sources are served - with the
+ * CDN's built file the app boots under the framework's own policy. */
+test('the app context bypasses CSP only while UI5 is served from local sources', async () => {
+  const { appContextOptions } = await import('../lib/runtime.mjs');
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-csp-'));
+  const saved = { SAMPLES_CONTROLS_HOME: process.env.SAMPLES_CONTROLS_HOME, AI_DEMOKIT_HOME: process.env.AI_DEMOKIT_HOME };
+  try {
+    const corpus = path.join(base, 'samples-controls');
+    fs.mkdirSync(path.join(corpus, 'scripts'), { recursive: true });
+    fs.writeFileSync(path.join(corpus, 'scripts', 'e2e-build.mjs'), '');
+    process.env.SAMPLES_CONTROLS_HOME = corpus;
+    delete process.env.AI_DEMOKIT_HOME;
+    assert.equal(appContextOptions().bypassCSP, undefined, 'a corpus without its npm install: CDN, the page\'s own CSP');
+    fs.mkdirSync(path.join(corpus, 'node_modules', '@openui5', 'sap.m', 'src'), { recursive: true });
+    assert.equal(appContextOptions().bypassCSP, true);
+    assert.deepEqual(appContextOptions().viewport, { width: 1280, height: 800 });
+    process.env.SAMPLES_CONTROLS_HOME = path.join(base, 'nowhere');
+    assert.equal(appContextOptions().bypassCSP, undefined, 'no corpus: CDN');
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
