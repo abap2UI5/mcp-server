@@ -74,6 +74,13 @@
   `run_app` and `run_unit_tests` kept running on the package and said
   "backend not built". They are refused now, before a running backend is
   stopped, and `setup_status`'s hint no longer suggests them there.
+- **A build killed half-way no longer leaves its output behind for good.**
+  The npm backend's build, open-abap-core fetch and `abap2ui5-unit` run
+  clean up in a `finally` that a killed process never reaches - and closing
+  the MCP session mid-build is such a kill: every one left a staging
+  directory of up to 22 MB in `~/.abap2ui5-mcp/runtime/<version>`. Their
+  names now carry the process id, and the next build removes those whose
+  process is gone.
 - **A cached "latest" the registry no longer has is asked again.** The
   registry's latest release is cached a day; when the release it named
   could not be installed any more (unpublished, or npm pointed at another

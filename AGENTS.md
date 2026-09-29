@@ -591,7 +591,11 @@ agent) find these artifacts in a dirty sibling worktree, mcp-server caused them:
   `.abaplint-mcp-dev.jsonc` at its root while a lint of that sandbox runs.
   `runtime/<version>/.staging-*` and `.apps-*` exist only during a build,
   `unit-*` and `runtime/<version>/apps-unit-*` only during an
-  `abap2ui5-unit` run (with `--keep`, until deleted).
+  `abap2ui5-unit` run (with `--keep`, until deleted), `open-abap-core/.tmp-*`
+  only during a fetch - unless the process was killed first (a session
+  closed mid-build, a SIGKILL, Ctrl+C): their names carry the pid that made
+  them, and the next build removes those whose process is gone
+  (`sweepLeftovers`; ten minutes' grace, a day at most whatever the pid).
   Deleting any of it is safe: it is installed, fetched or built again.
 - `<tmp>/abap2ui5-mcp-remote/<repo>/` — the read-only GitHub mirrors (not a
   sibling worktree, but the same question "where did this come from": a

@@ -355,7 +355,8 @@ async function main(argv) {
   let appsPath = null;
   if (backend === 'npm') {
     fs.mkdirSync(workspaceRoot(), { recursive: true });
-    box = fs.mkdtempSync(path.join(workspaceRoot(), 'unit-'));
+    // with this process's pid: a run killed before its finally is swept by the next build
+    box = fs.mkdtempSync(path.join(workspaceRoot(), `unit-${process.pid}-`));
     appsName = `apps-${path.basename(box)}`;
   } else {
     box = sandbox().dir;

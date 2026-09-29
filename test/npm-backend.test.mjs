@@ -554,6 +554,51 @@ test('the build keeps only the dev apps, points their imports at the package, an
   assert.ok(!fs.readdirSync(apps).some((f) => f.startsWith('zcl_b')), fs.readdirSync(apps).join(', '));
 }));
 
+/* A build, a fetch or a unit run cleans up in a finally - which a killed
+ * process never reaches: a client closing the session mid-build (the
+ * server's shutdown kills the transpiler and exits), a SIGKILL, Ctrl+C at
+ * abap2ui5-unit. Each left its staging directory - up to 22 MB of
+ * transpiler output - in the runtime directory for good. They carry their
+ * creator's pid; the next build removes those whose process is gone. */
+test('the next build removes what builds, fetches and unit runs of dead processes left behind', { skip: !POSIX && 'pids' }, withWorkspace(async (t, { workspace }) => {
+  const { dir, core } = fakeRuntime('1.145.0');
+  const box = npmSandboxDir();
+  fs.mkdirSync(box, { recursive: true });
+  fs.writeFileSync(path.join(box, 'zcl_a.clas.abap'), '* source');
+  const { spawnSync } = await import('node:child_process');
+  const dead = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' }).stdout;
+  const live = process.ppid; // alive, and not this process
+  const old = new Date(Date.now() - 20 * 60_000);
+  const leftover = (where, name, { age = old } = {}) => {
+    fs.mkdirSync(path.join(where, name, 'sub'), { recursive: true });
+    fs.writeFileSync(path.join(where, name, 'sub', 'f.mjs'), 'x');
+    fs.utimesSync(path.join(where, name), age, age);
+    return name;
+  };
+  const coreBase = path.dirname(core);
+  const gone = [
+    [dir, leftover(dir, `.staging-${dead}-abc123`)],
+    [dir, leftover(dir, `.apps-${dead}-abc123`)],
+    [dir, leftover(dir, `.apps-old-${dead}-1790000000000`)],
+    [dir, leftover(dir, `apps-unit-${dead}-abc123`)],
+    [workspace, leftover(workspace, `unit-${dead}-abc123`)],
+    [coreBase, leftover(coreBase, `.tmp-b2d219df61f8-${dead}-1790000000000`)],
+  ];
+  const kept = [
+    [dir, leftover(dir, `.staging-${live}-abc123`)], // somebody's build, running
+    [dir, leftover(dir, `.staging-${dead}-new123`, { age: new Date() })], // too young to judge: another pid namespace may be building
+    [dir, leftover(dir, 'apps-mine')], // not a leftover's name
+  ];
+  const lines = [];
+  const res = await buildApps({ dir, version: '1.145.0', inputDir: box, coreDir: core, onLine: (l) => lines.push(l) });
+  assert.equal(res.ok, true, res.reason);
+  for (const [where, name] of gone) assert.ok(!fs.existsSync(path.join(where, name)), `${name} removed`);
+  for (const [where, name] of kept) assert.ok(fs.existsSync(path.join(where, name)), `${name} kept`);
+  assert.ok(lines.some((l) => /removed 6 leftover/.test(l)), lines.join('\n'));
+  // and what this build made itself carries its pid, so the next one can tell
+  assert.ok(!fs.readdirSync(dir).some((f) => f.startsWith(`.staging-${process.pid}-`)), 'its own staging is gone after the build');
+}));
+
 test('a class the transpiler rejects fails the build with its message, and the last good apps/ stays', withWorkspace(async () => {
   const { dir, core } = fakeRuntime('1.145.0');
   const box = npmSandboxDir();
