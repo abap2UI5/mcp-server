@@ -1632,6 +1632,21 @@ test('the substitution engine applies every substitution asked for at once', () 
   );
 });
 
+/* The free-text values land in XML and JSON and used to be spliced in raw,
+ * as a String.replace replacement STRING: `R&D <tools>` broke the sidecar's
+ * XML, `my"repo` broke package.json, and `$&` expanded to the matched text. */
+test('the substitution engine escapes package text and repository name for the format they land in', () => {
+  const pkg = sub('src/package.devc.xml', '<DEVC><CTEXT>Template app</CTEXT></DEVC>', { packageText: 'R&D <tools> $& end' });
+  assert.equal(pkg, '<DEVC><CTEXT>R&amp;D &lt;tools&gt; $&amp; end</CTEXT></DEVC>');
+  const abapgit = sub('.abapgit.xml', '<NAME>app-template</NAME>', { repo: 'my"repo $\' <x>' });
+  assert.equal(abapgit, '<NAME>my&quot;repo $&apos; &lt;x&gt;</NAME>');
+  const json = sub('package.json', '{\n  "name": "abap2ui5-app-template",\n  "version": "1.0.0"\n}', { repo: 'my"repo $& \\ end' });
+  assert.deepEqual(JSON.parse(json), { name: 'my"repo $& \\ end', version: '1.0.0' }, 'package.json stays JSON and says exactly what was asked');
+  // an existing value with an escaped quote is replaced whole, not half
+  const again = sub('package.json', '{ "name": "a\\"b" }', { repo: 'c' });
+  assert.deepEqual(JSON.parse(again), { name: 'c' });
+});
+
 test('scaffolding renames the class in the ABAP, the sidecar and the file name', (t) => {
   const root = path.join(ROOT, '..', 'app-template');
   // template.json, not abaplint.jsonc: the file list and the substitutions

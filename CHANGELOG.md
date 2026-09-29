@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **`scaffold_app` escapes what it writes.** The package text and the
+  repository name were spliced into the XML sidecars and `package.json` raw,
+  as a `String.replace` replacement string: `R&D <tools>` produced
+  unparseable XML, `my"repo` an unparseable `package.json`, and `$&` was
+  expanded into the matched text. Both are now escaped for the format they
+  land in and substituted through replacer functions.
 - **The mirror stays inside its directory.** The template mirror joined
   every path `template.json` lists (and the docs mirror every path the tree
   listing names) onto the cache directory unchecked, so an entry like
