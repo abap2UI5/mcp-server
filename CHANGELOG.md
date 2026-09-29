@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Answers fit the client.** Claude Code refuses a tool result over 25,000
+  tokens, and three defaults went far over: `scaffold_app` (~280 KB, the
+  whole template), `pitfalls` without a query (~120 KB) and `examples` with a
+  large `limit` (~135 KB at 200). Each is now paged at about 60,000
+  characters (`lib/budget.mjs`) and names the arguments that fetch the rest:
+  `scaffold_app` returns every file that fits, smallest first (the class,
+  its sidecar and the configs always), lists the others under `remaining`
+  and takes them back through the new `files` argument; `pitfalls` pages by
+  whole section and `examples` by entry, both with a new `offset`. `examples`'
+  `matches` is now the total, with `returned` for the page.
 - **`setup_status` sees a Playwright-managed Chromium.** It only probed three
   hard-coded paths (one of them the `/opt/pw-browsers` link of a sandbox
   image) and reported a machine with `npx playwright install chromium` done

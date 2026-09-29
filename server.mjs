@@ -53,6 +53,7 @@ import { scaffold, readSpec, validClassName, classNameRule, templateFiles, SPEC_
 import { fixSource } from './lib/fixview.mjs';
 import { lintOptionsFor } from './lib/lintopts.mjs';
 import { withRenderFallback, renderSkippedNote } from './lib/validate.mjs';
+import { ANSWER_BUDGET, takeWithin, takeSmallestWithin } from './lib/budget.mjs';
 import { getRenderer, dropRenderer, closeRenderers, rendererLooksDead } from './lib/renderer.mjs';
 import { TOOLS } from './lib/tools.mjs';
 import { RESOURCES, RESOURCE_TEMPLATES, GUIDE_CHAPTER_TEMPLATE, readResource } from './lib/resources.mjs';
@@ -269,19 +270,23 @@ async function handle(name, args = {}, ctx = {}) {
           hint: 'pass `query` (keywords) to get matching apps; each entry names a class to READ in its repository',
         });
       }
-      const hits = searchExamples({
-        query: args.query,
-        area,
-        repo,
-        limit: boundedInt(args.limit, { name: 'limit', dflt: 20, min: 1, max: 200 }),
-      });
+      const limit = boundedInt(args.limit, { name: 'limit', dflt: 20, min: 1, max: 200 });
+      const offset = boundedInt(args.offset, { name: 'offset', dflt: 0, min: 0 });
+      const all = searchExamples({ query: args.query, area, repo, limit: Number.MAX_SAFE_INTEGER });
+      /* Paged against the answer budget too (lib/budget.mjs): 200 entries
+       * were ~135 KB, over what a client accepts as one answer. */
+      const page = takeWithin(all.slice(offset, offset + limit), ANSWER_BUDGET - 5000);
+      const nextOffset = offset + page.taken.length;
       return text({
-        matches: hits.length,
+        matches: all.length,
+        ...(offset ? { offset } : {}),
+        returned: page.taken.length,
+        ...(nextOffset < all.length ? { more: `${all.length - nextOffset} more - call again with offset: ${nextOffset}` } : {}),
         searched,
         ...(notSearched.length ? { notSearched } : {}),
         repositories: Object.fromEntries(found.map((c) => [c.repo, c.url])),
         next: 'read the `path` of the closest match, in the repository its `repo` names — it is a complete, gated app, not a fragment',
-        entries: hits,
+        entries: page.taken,
       });
     }
     case 'read_example': {
@@ -399,10 +404,36 @@ async function handle(name, args = {}, ctx = {}) {
           + 'update it (git pull), or point APP_TEMPLATE_HOME at a complete checkout');
       }
 
+      /* Paged (lib/budget.mjs): the whole template is ~280 KB - AGENTS.md and
+       * three skills are most of it - which is over what an MCP client
+       * accepts as one answer, and a refused answer is no files at all. The
+       * first page carries every file that fits, smallest first so the class,
+       * its sidecar and the configs always come; `remaining` names the rest,
+       * which `files` fetches (in order, page by page). */
+      let pick = files;
+      let page;
+      if (args.files !== undefined && args.files !== null) {
+        const wanted = stringArray(args.files, { name: 'files', maxItems: 200, maxLength: 300, example: '["AGENTS.md"]' });
+        const unknown = wanted.filter((p) => !files.some((f) => f.path === p));
+        if (unknown.length) {
+          return toolError(`not a file of this scaffold: ${unknown.join(', ')} — the paths are the ones this tool returns `
+            + `(with the same class): ${files.map((f) => f.path).join(', ')}`);
+        }
+        pick = files.filter((f) => wanted.includes(f.path));
+        page = takeWithin(pick, ANSWER_BUDGET - 5000);
+      } else {
+        page = takeSmallestWithin(files, ANSWER_BUDGET - 5000);
+      }
+      const rest = page.rest;
       return text({
         source: 'abap2UI5/app-template',
         class: cls || spec.placeholderClass,
-        files,
+        files: page.taken,
+        ...(rest.length ? {
+          remaining: rest.map((f) => ({ path: f.path, chars: f.text.length })),
+          more: `${rest.length} more file(s) did not fit this answer - call scaffold_app again with the same class/package/repo `
+            + `and files: ${JSON.stringify(rest.map((f) => f.path))} (each answer carries what fits and lists the rest again)`,
+        } : {}),
         /* Reported, never silent: this list is a claim about another
          * repository, and a project quietly missing its CI workflow is not
          * noticed until somebody wonders why nothing is checked. */
@@ -514,7 +545,24 @@ async function handle(name, args = {}, ctx = {}) {
             + 'call it without a query to read the whole thing (it is meant to be read once per task)',
         });
       }
-      return text({ matches: total, catalogues: found });
+      /* Paged by SECTION (lib/budget.mjs): both catalogues whole are ~120 KB,
+       * over what a client accepts as one answer - and a section is the unit
+       * that must not be cut (symptom, evidence and fix belong together).
+       * `offset` counts sections across the catalogues, in order. */
+      const offset = boundedInt(args.offset, { name: 'offset', dflt: 0, min: 0 });
+      const flat = found.flatMap((c) => c.sections.map((sec) => ({ area: c.area, sec })));
+      const page = takeWithin(flat.slice(offset), ANSWER_BUDGET - 5000);
+      const nextOffset = offset + page.taken.length;
+      const catalogues = found
+        .map((c) => ({ ...c, sections: page.taken.filter((x) => x.area === c.area).map((x) => x.sec) }))
+        .filter((c) => c.sections.length);
+      return text({
+        matches: total,
+        ...(offset ? { offset } : {}),
+        returned: page.taken.length,
+        ...(nextOffset < total ? { more: `${total - nextOffset} more section(s) - call again with offset: ${nextOffset} (same area and query)` } : {}),
+        catalogues,
+      });
     }
     case 'scope_of': {
       const miss = missingLocalSibling('samples-controls');

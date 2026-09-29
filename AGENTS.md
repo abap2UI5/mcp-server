@@ -505,6 +505,14 @@ legitimately slower.
   (`npm run repo-dirs:check`, `bump-repo-dirs.yml`), so a rename lands in one
   place and propagates. Dropping an alias still un-finds somebody's working
   checkout — do that only deliberately.
+- **An answer has a size limit, and it is the client's.** Claude Code refuses
+  a tool result over 25,000 tokens and the agent then sees nothing at all.
+  `lib/budget.mjs` (`ANSWER_BUDGET`, about 60,000 characters) is what the
+  tools that can grow past it page against — `scaffold_app` (`files`),
+  `pitfalls` and `examples` (`offset`) — and each page names the arguments
+  that fetch the rest; `test/paging.test.mjs` walks the pages to the end
+  over fake checkouts. A tool whose answer can grow with upstream content
+  pages the same way, never by dropping content.
 - **Never `npx <tool>` inside a checkout.** Under an MCP client stdin is no
   TTY, so npx answers its own install prompt and runs whatever the registry
   holds under that name when the checkout has no local bin — `abap_transpile`
