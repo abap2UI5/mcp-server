@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **String arguments are checked against the schema.** `capabilities` with
+  `{ query: 42 }` answered "query.toLowerCase is not a function"; every
+  argument a tool's schema declares a string is now refused by name when it
+  is not one, once, before any handler runs.
 - **Three wrong pointers.** `generation_rules` linked
   `docs/cookbook/overview`, a page the site never had (now the cookbook's
   index; a test checks every docs link against a local docs checkout);

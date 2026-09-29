@@ -12,7 +12,7 @@ import { sliceGuide, guideChapters } from '../lib/guide.mjs';
 import { parseApi, searchApi, apiSummary } from '../lib/api.mjs';
 import { searchDocs } from '../lib/docs.mjs';
 import { parseSizes } from '../lib/screenshot.mjs';
-import { oneOf, boundedInt, stringArray } from '../lib/args.mjs';
+import { oneOf, boundedInt, stringArray, checkStringArgs } from '../lib/args.mjs';
 import { readCached } from '../lib/cache.mjs';
 import { scaffold, rename, validClassName, templateFiles, readSpec } from '../lib/scaffold.mjs';
 import fs from 'node:fs';
@@ -1875,4 +1875,26 @@ test('a list argument\'s error shows an example of THAT argument', () => {
   assert.throws(() => stringArray('zcl_x', { name: 'class_names', example: '["zcl_my_app"]' }), /e\.g\. \["zcl_my_app"\]/);
   assert.throws(() => stringArray([], { name: 'class_names', example: '["zcl_my_app"]' }), /e\.g\. \["zcl_my_app"\]/);
   assert.throws(() => stringArray('sap.m.Wizard', { name: 'entities' }), /e\.g\. \["sap\.m\.Wizard"\]/, 'the default stays scope_of\'s');
+});
+
+/* `capabilities { query: 42 }` answered "query.toLowerCase is not a
+ * function". Every string-typed argument is checked against the tool's own
+ * schema before its handler runs. */
+test('a string argument that is not a string is refused by name, for every tool', async () => {
+  const { TOOLS } = await import('../lib/tools.mjs');
+  const tool = (n) => TOOLS.find((x) => x.name === n);
+  assert.throws(() => checkStringArgs(tool('capabilities'), { query: 42 }), /query must be a string, not 42 \(number\)/);
+  assert.throws(() => checkStringArgs(tool('validate_view'), { xml: ['<x/>'] }), /xml must be a string.*an array/);
+  assert.throws(() => checkStringArgs(tool('scaffold_app'), { class: { a: 1 } }), /class must be a string/);
+  checkStringArgs(tool('capabilities'), { query: 'popup', status: undefined });
+  checkStringArgs(tool('capabilities'), { query: null });
+  checkStringArgs(tool('examples'), { limit: 5 }); // a number where the schema says number
+  checkStringArgs(undefined, { anything: 1 }); // an unknown tool is the handler's to report
+  // every string-typed property of every tool is covered by the one check
+  for (const t of TOOLS) {
+    for (const [name, schema] of Object.entries(t.inputSchema.properties || {})) {
+      if (schema.type !== 'string') continue;
+      assert.throws(() => checkStringArgs(t, { [name]: 7 }), new RegExp(`${name} must be a string`), `${t.name}.${name}`);
+    }
+  }
 });

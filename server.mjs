@@ -60,7 +60,7 @@ import { PROMPTS, getPrompt } from './lib/prompts.mjs';
 import { missingSiblingMessage, missingLocalSiblingMessage } from './lib/siblings.mjs';
 import { hydrate, REMOTE_TOOLS, resourceRepos, fetchRemoteFile, isRemoteCheckout } from './lib/remote.mjs';
 import { resolveKey, RESOLVERS } from './lib/repos.mjs';
-import { oneOf, boundedInt, stringArray } from './lib/args.mjs';
+import { oneOf, boundedInt, stringArray, checkStringArgs } from './lib/args.mjs';
 import {
   deployApp,
   removeApp,
@@ -1066,6 +1066,7 @@ server.setRequestHandler(CompleteRequestSchema, async (req) => {
 });
 server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
   try {
+    checkStringArgs(TOOLS.find((t) => t.name === req.params.name), req.params.arguments || {});
     await hydrateRepos(REMOTE_TOOLS[req.params.name]);
     return await handle(req.params.name, req.params.arguments || {}, {
       progressToken: req.params._meta && req.params._meta.progressToken,
