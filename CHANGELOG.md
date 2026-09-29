@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **The framework clone is the release, not its 7.02 downport.** Without a
+  checkout, `build_backend` and an unpinned `abap2ui5-unit` cloned the tag
+  GitHub's `releases/latest` names - and the framework publishes every
+  version twice, `X.Y.Z` and seconds later `X.Y.Z-702`, so "latest" was the
+  downport (downported sources, no prebuilt backend). The release list is
+  read instead and the highest plain `X.Y.Z` taken.
 - **`scaffold_app` escapes what it writes.** The package text and the
   repository name were spliced into the XML sidecars and `package.json` raw,
   as a `String.replace` replacement string: `R&D <tools>` produced

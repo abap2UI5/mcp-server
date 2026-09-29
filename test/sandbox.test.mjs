@@ -327,3 +327,49 @@ test('two dev apps deployed without a description do not share one', withFakeFra
   removeApp('zcl_one');
   removeApp('zcl_two');
 }));
+
+/* GitHub's releases/latest is the NEWEST release, and the framework publishes
+ * each version twice: X.Y.Z (with the prebuilt backend asset) and, seconds
+ * later, its 7.02 downport X.Y.Z-702. "latest" was the downport, so the clone
+ * got downported sources no backend asset exists for. */
+test('the framework clone takes the highest plain X.Y.Z release, never the -702 downport', async () => {
+  const { latestPlainRelease, cloneFramework } = await import('../lib/runtime.mjs');
+  const releases = [
+    { tag_name: '1.145.0-702' }, { tag_name: '1.145.0' }, { tag_name: '1.144.1-702' }, { tag_name: '1.144.1' },
+    { tag_name: '1.146.0', draft: true }, { tag_name: '1.147.0', prerelease: true }, { tag_name: '1.99.9' }, { tag_name: 'v1.100.0' },
+  ];
+  assert.equal(latestPlainRelease(releases), '1.145.0');
+  assert.equal(latestPlainRelease([{ tag_name: '1.9.0' }, { tag_name: '1.10.0' }]), '1.10.0', 'numeric, not lexical');
+  assert.equal(latestPlainRelease([{ tag_name: '1.145.0-702' }]), null);
+  assert.equal(latestPlainRelease(null), null);
+
+  // and cloneFramework asks the LIST, then clones exactly that tag - git is a
+  // recording stand-in on PATH, so nothing reaches the network
+  if (process.platform === 'win32') return;
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-clone-'));
+  const bin = path.join(ws, 'bin');
+  fs.mkdirSync(bin);
+  const record = path.join(ws, 'git-args.txt');
+  fs.writeFileSync(path.join(bin, 'git'), `#!/bin/sh\necho "$@" > ${JSON.stringify(record)}\nexit 1\n`);
+  fs.chmodSync(path.join(bin, 'git'), 0o755);
+  const saved = { A2UI5_MCP_WORKSPACE: process.env.A2UI5_MCP_WORKSPACE, PATH: process.env.PATH };
+  process.env.A2UI5_MCP_WORKSPACE = path.join(ws, 'workspace');
+  process.env.PATH = `${bin}${path.delimiter}${process.env.PATH}`;
+  try {
+    const asked = [];
+    const fetchImpl = async (url) => {
+      asked.push(url);
+      return { ok: true, status: 200, json: async () => releases };
+    };
+    const res = await cloneFramework({ fetchImpl, onLine: () => {} });
+    assert.equal(res.ok, false, 'the stand-in git clones nothing');
+    assert.ok(asked[0].includes('/releases?'), `the release list is asked, not releases/latest: ${asked[0]}`);
+    assert.match(fs.readFileSync(record, 'utf8'), /--branch 1\.145\.0 /);
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});

@@ -141,8 +141,11 @@ four are optional now, and the fourth is a download:
   found that `deploy_app`'s sidecar had no BOM: the template config enables
   `xml_bom`, the corpus config never asked.
 - **`build_backend` mode `prebuilt` clones the framework when nothing is
-  there** (`cloneFramework`): a shallow clone of the latest release (asked of
-  the GitHub releases API; the default branch when that cannot be reached)
+  there** (`cloneFramework`): a shallow clone of the latest release (the
+  highest plain `X.Y.Z` in the GitHub release list — `latestPlainRelease`; not
+  `releases/latest`, which names the `X.Y.Z-702` downport the framework
+  publishes seconds after each release; the default branch when the list
+  cannot be read)
   into `A2UI5_MCP_WORKSPACE`, default `~/.abap2ui5-mcp/abap2UI5`, which
   `resolveA2UI5` lists as its last LOCAL candidate — a real checkout, not a
   mirror. Only when no `A2UI5_HOME` is set: a set env var that points nowhere
