@@ -65,7 +65,9 @@
   include, but the runner found no test method". The stack now names the
   fixture (`failed.fixture`, with the method that threw), and the runner
   keeps 100 stack frames instead of 10, so a failure deep in the code under
-  test keeps the test class's frame.
+  test keeps the test class's frame. `run_unit_tests` on a class whose
+  `class_setup` threw no longer answers "no test class of X in the built
+  backend - deploy_app with testclasses": that hint is for a run that passed.
 - **`build_backend` refuses a checkout build under
   `A2UI5_MCP_BACKEND=npm`.** Mode `npm` was already refused beside a
   checkout in use, but the mirror case went through: with the package

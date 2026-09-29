@@ -1050,7 +1050,10 @@ async function handle(name, args = {}, ctx = {}) {
       const classNames = args.class_names === undefined ? undefined : stringArray(args.class_names, { name: 'class_names', example: '["zcl_my_app", "zcl_my_other_app"]' });
       const res = await runUnitTests({ className: args.class_name, classNames, signal: ctx.signal, onLine: report });
       if (res.aborted || res.timedOut) return toolError(res.error);
-      if (res.class && res.tests.length === 0) {
+      /* No test line at all is "no test class" only for a run that passed: a
+       * class_setup that threw prints none either, and that hint sent an
+       * agent to redeploy tests that were there all along. */
+      if (res.class && res.ok && res.tests.length === 0) {
         return text({
           ...res,
           hint: `no test class of ${res.class} in the built backend — deploy_app with \`testclasses\`, then build_backend (a deploy after the last build is not in it yet: read_app says so)`,

@@ -381,3 +381,41 @@ test('setup_status names the lint\'s abaplint install the next build makes', wit
   fs.writeFileSync(markerFile, JSON.stringify(marker));
   assert.ok(!setupStatus().backend.npm.nextBuild.some((s) => /abaplint/.test(s)));
 }));
+
+/* run_unit_tests answered a class whose class_setup threw - no test line,
+ * the failure known - with "no test class of X in the built backend -
+ * deploy_app with testclasses": an agent redeployed a class that had its
+ * tests all along. The empty-tests hint is for a run that passed. */
+test('run_unit_tests names a failing class_setup instead of calling the tests missing', withNpm(async () => {
+  const { spawn } = await import('node:child_process');
+  deployApp({ className: 'zcl_npm_cs', source: APP('zcl_npm_cs'), testclasses: `${TESTS()} SETUP_THROWS` });
+  deployApp({ className: 'zcl_npm_none', source: APP('zcl_npm_none') });
+  assert.equal((await buildBackend({ mode: 'auto' })).ok, true);
+  const p = spawn(process.execPath, [path.join(import.meta.dirname, '..', 'server.mjs')], { stdio: ['pipe', 'pipe', 'ignore'], env: { ...process.env } });
+  let buf = '';
+  p.stdout.on('data', (d) => (buf += d));
+  const send = (o) => p.stdin.write(JSON.stringify(o) + '\n');
+  const until = (id) => new Promise((resolve, reject) => {
+    const t0 = Date.now();
+    const iv = setInterval(() => {
+      const hit = buf.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).find((m) => m && m.id === id);
+      if (hit) { clearInterval(iv); resolve(hit); } else if (Date.now() - t0 > 20000) { clearInterval(iv); reject(new Error(`no answer to ${id}`)); }
+    }, 50);
+  });
+  try {
+    send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'npm-rt', version: '0' } } });
+    await until(1);
+    send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'run_unit_tests', arguments: { class_name: 'zcl_npm_cs' } } });
+    const cs = JSON.parse((await until(2)).result.content[0].text);
+    assert.equal(cs.ok, false);
+    assert.deepEqual([cs.failed.object, cs.failed.method, cs.failed.fixture], ['ZCL_NPM_CS', 'class_setup', true]);
+    assert.match(cs.hint, /ZCL_NPM_CS's test class failed in its class_setup/);
+    assert.doesNotMatch(cs.hint, /no test class/);
+    // a class that really has no tests keeps its hint
+    send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'run_unit_tests', arguments: { class_name: 'zcl_npm_none' } } });
+    const none = JSON.parse((await until(3)).result.content[0].text);
+    assert.match(none.hint, /no test class of ZCL_NPM_NONE in the built backend/);
+  } finally {
+    p.kill();
+  }
+}));

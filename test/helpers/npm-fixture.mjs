@@ -35,7 +35,9 @@ export async function serve({ port, host }) {
 /* The transpiler: per input object a module that imports cx_root the way the
  * real output does and registers itself in abap.Classes, a testclasses
  * module per test include, the dependency output the real one writes too,
- * a runner over the dev tests (a test include containing FAIL throws) and
+ * a runner over the dev tests (a test include containing FAIL throws in its
+ * test, one containing SETUP_THROWS in its class_setup - which the runner
+ * calls before the class's first "running" line, as the real one does) and
  * an init.mjs. */
 const TRANSPILER = `
 const fs = require('fs'); const path = require('path');
@@ -64,9 +66,10 @@ for (const o of objs) {
   const tests = o + '.testclasses.abap';
   if (files.includes(tests)) {
     const fail = text(tests).includes('FAIL');
+    const setupThrows = text(tests).includes('SETUP_THROWS');
     fs.writeFileSync(path.join(out, o + '.testclasses.mjs'), [
       'const {' + name + '} = await import("./' + o + '.mjs");',
-      'export class ltcl { async constructor_() { return this; } async check() { ' + (fail ? 'throw new Error("assert_equals failed: exp 1 act 2");' : '') + ' } }',
+      'export class ltcl { ' + (setupThrows ? 'static async class_setup() { throw new Error("cx_sy_zerodivide in class_setup"); } ' : '') + 'async constructor_() { return this; } async check() { ' + (fail ? 'throw new Error("assert_equals failed: exp 1 act 2");' : '') + ' } }',
     ].join('\\n') + '\\n');
     data += '  ret.push({objectName: "' + name.toUpperCase() + '", localClass: "ltcl", methods: [{"name":"check","skip":false}], riskLevel: "HARMLESS", filename: "./' + o + '.testclasses.mjs"});\\n';
   }
@@ -82,6 +85,7 @@ fs.writeFileSync(path.join(out, 'index.mjs'), [
   '  for (const st of getData()) {',
   '    const imported = await import(st.filename);',
   '    const localClass = imported[st.localClass];',
+  '    if (localClass.class_setup) await localClass.class_setup();',
   '    for (const m of st.methods) {',
   '      console.log(st.objectName + ": running " + st.localClass + "->" + m.name);',
   '      const test = await (new localClass()).constructor_();',
