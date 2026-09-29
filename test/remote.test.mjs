@@ -210,3 +210,65 @@ test('fetchRemoteFile reads one file on demand, from the cache while fresh', wit
   await assert.rejects(fetchRemoteFile('samples', '../escape', { fetchImpl: impl }), /refusing path/);
   await assert.rejects(fetchRemoteFile('samples', 'src/none.abap', { fetchImpl: impl }), /could not fetch abap2UI5\/samples\/src\/none\.abap/);
 }));
+
+/* A token is for the API's rate limit and goes nowhere else. It used to be
+ * sent to raw.githubusercontent.com too, which answers a token it does not
+ * accept with 404 - so one stale GITHUB_TOKEN made every knowledge tool
+ * report every file missing. A token the API refuses is dropped, not fatal. */
+test('the GitHub token goes to the API only, and a refused one is retried without', withEnv(async () => {
+  const saved = { GITHUB_TOKEN: process.env.GITHUB_TOKEN, GH_TOKEN: process.env.GH_TOKEN };
+  const seen = [];
+  const tree = { tree: [{ type: 'blob', path: 'docs/index.md' }] };
+  const impl = async (url, init) => {
+    const auth = init && init.headers && init.headers.Authorization;
+    seen.push({ url, auth });
+    if (url.includes('api.github.com') && auth) return { ok: false, status: 401, headers: new Map(), text: async () => 'Bad credentials' };
+    if (url.includes('api.github.com')) return { ok: true, status: 200, text: async () => JSON.stringify(tree) };
+    if (auth) return { ok: false, status: 404, text: async () => 'not found' }; // what raw does with a bad token
+    return { ok: true, status: 200, text: async () => (url.endsWith('package.json') ? '{}' : '# Home') };
+  };
+  const errors = [];
+  const origError = console.error;
+  console.error = (m) => errors.push(String(m));
+  try {
+    process.env.GITHUB_TOKEN = 'ghp_stale';
+    delete process.env.GH_TOKEN;
+    const d = await hydrate('docs', { local: null, fetchImpl: impl });
+    assert.equal(d.fetched, true, `the mirror is fetched despite the bad token: ${d.error}`);
+    for (const c of seen.filter((x) => x.url.includes('raw.githubusercontent.com'))) {
+      assert.equal(c.auth, undefined, `no token to ${c.url}`);
+    }
+    const api = seen.filter((x) => x.url.includes('api.github.com'));
+    assert.deepEqual(api.map((x) => Boolean(x.auth)), [true, false], 'with the token first, then without');
+    assert.equal(errors.filter((e) => /refused the GITHUB_TOKEN/.test(e)).length, 1, 'one warning on stderr');
+  } finally {
+    console.error = origError;
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+}));
+
+test('a used-up unauthenticated API limit says so and names the token', withEnv(async () => {
+  const saved = { GITHUB_TOKEN: process.env.GITHUB_TOKEN, GH_TOKEN: process.env.GH_TOKEN };
+  delete process.env.GITHUB_TOKEN;
+  delete process.env.GH_TOKEN;
+  try {
+    const headers = new Map([['x-ratelimit-remaining', '0'], ['x-ratelimit-reset', '1900000000']]);
+    const impl = async (url) => (url.includes('api.github.com')
+      ? { ok: false, status: 403, headers, text: async () => 'rate limited' }
+      : { ok: true, status: 200, text: async () => '{}' });
+    const d = await hydrate('docs', { local: null, fetchImpl: impl });
+    assert.equal(d.root, null);
+    assert.match(d.error, /HTTP 403/);
+    assert.match(d.error, /unauthenticated API rate limit/);
+    assert.match(d.error, /GITHUB_TOKEN/);
+    assert.match(remoteStatus('docs'), /rate limit/);
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+}));

@@ -94,7 +94,10 @@ day at a time) that the server treats as a read-only checkout. `npx --yes -p
 @abap2ui5/mcp-server abap2ui5-mcp` in a fresh project therefore answers the first questions
 at once; the tools that write or build (`deploy_app`, `build_backend`,
 `run_app`, …) still need the real checkouts and say so. `A2UI5_MCP_REMOTE=0`
-or `A2UI5_MCP_OFFLINE=1` switches the mirror off.
+or `A2UI5_MCP_OFFLINE=1` switches the mirror off. The docs mirror lists its
+pages through GitHub's API, which allows 60 unauthenticated requests an hour
+per address; a `GITHUB_TOKEN` (or `GH_TOKEN`) in the environment raises that
+and is sent to `api.github.com` only.
 
 **The backend without the tens-of-minutes build, and without the corpus.**
 `build_backend` downloads the framework's released backend

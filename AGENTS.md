@@ -62,7 +62,10 @@ install directory — that is inside `node_modules` for an npx/npm install),
 `A2UI5_MCP_PREBUILT_URL` (where `build_backend` mode `prebuilt` downloads
 from; default the framework release asset, see below), the mirror knobs
 `A2UI5_MCP_REMOTE=0` / `A2UI5_MCP_REMOTE_DIR` / `A2UI5_MCP_REMOTE_TTL_MS`
-(below), `A2UI5_MCP_WORKSPACE` (where a framework clone lands, below), and the child-process timeouts `A2UI5_MCP_LINT_TIMEOUT_MS` /
+(below), `GITHUB_TOKEN`/`GH_TOKEN` (sent to `api.github.com` only — it raises
+the docs tree listing's rate limit; never to `raw.githubusercontent.com`, which
+answers a token it rejects with 404, and a token the API refuses is dropped
+with a warning), `A2UI5_MCP_WORKSPACE` (where a framework clone lands, below), and the child-process timeouts `A2UI5_MCP_LINT_TIMEOUT_MS` /
 `A2UI5_MCP_SCOPE_TIMEOUT_MS` (default 5 min), `A2UI5_MCP_BUILD_TIMEOUT_MS`
 (default 30 min, also the prebuilt download) and `A2UI5_MCP_UNIT_TIMEOUT_MS`
 (default 10 min, the test runner).

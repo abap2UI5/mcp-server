@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **A stale `GITHUB_TOKEN` no longer breaks the GitHub mirror.** The token
+  was sent to `raw.githubusercontent.com` too, which answers a token it does
+  not accept with 404 - every knowledge tool then reported every file as
+  missing. It now goes to `api.github.com` only, and a token the API refuses
+  (401/403) is dropped with one warning on stderr and the request repeated
+  without it. A used-up unauthenticated API limit (the docs tree listing) is
+  reported as that, with the token as the remedy, instead of a bare
+  `HTTP 403`.
 - **`run_app` boots with the corpus' local UI5, and honours `timeout_ms`.**
   The framework page's hash-only CSP blocks the inline scripts the SOURCE
   `sap-ui-core.js` from the local `@openui5` packages `document.write()`s, so
