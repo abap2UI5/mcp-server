@@ -66,6 +66,14 @@
   fixture (`failed.fixture`, with the method that threw), and the runner
   keeps 100 stack frames instead of 10, so a failure deep in the code under
   test keeps the test class's frame.
+- **The GitHub Action no longer runs its `paths` input as shell code.** The
+  test step read `set -- ${{ inputs.paths }}`, and the runner pastes an
+  expression into the script before bash parses it: a `paths` of
+  `src; exit 0 #` passed the step without running a test, and any `$`, `;`
+  or backtick in a path was code. Every input now reaches the scripts
+  through `env:`, and the pin and backend the cache key is made of are
+  reduced to a name before they go to `$GITHUB_OUTPUT` (a newline in the
+  `framework` input was a second output line).
 
 - **Answers fit the client.** Claude Code refuses a tool result over 25,000
   tokens, and three defaults went far over: `scaffold_app` (~280 KB, the

@@ -62,6 +62,12 @@ runs:
     # The pin decides the cache key: a project that bumps its framework gets
     # a fresh install, one that does not reuses last week's. Unpinned, the
     # key rolls over weekly so a new release of the package is picked up.
+    #
+    # Inputs reach every script through env: only - the runner pastes a
+    # `${{ }}` expression into the script text before bash parses it, so an
+    # input written into a run: block is code (a `paths` of `src; exit 0 #`
+    # passed the step without a test). And what goes to $GITHUB_OUTPUT (the
+    # cache key) is reduced to a name: a newline would be a second output.
     - id: pin
       shell: bash
       env:
@@ -70,10 +76,12 @@ runs:
       run: |
         pin="$A2UI5_UNIT_FRAMEWORK"
         if [ -z "$pin" ]; then
-          pin=$(node "${{ github.action_path }}/scripts/ci-unit.mjs" --print-pin 2>/dev/null || true)
+          pin=$(node "$GITHUB_ACTION_PATH/scripts/ci-unit.mjs" --print-pin 2>/dev/null || true)
         fi
+        pin=$(printf '%s' "$pin" | tr -c 'A-Za-z0-9._-' '_')
+        backend=$(printf '%s' "${A2UI5_UNIT_BACKEND:-npm}" | tr -c 'A-Za-z0-9._-' '_')
         echo "pin=${pin:-latest-$(date -u +%G-%V)}" >> "$GITHUB_OUTPUT"
-        echo "backend=${A2UI5_UNIT_BACKEND:-npm}" >> "$GITHUB_OUTPUT"
+        echo "backend=$backend" >> "$GITHUB_OUTPUT"
 
     # No restore-keys: a cache of another pin would carry that release's
     # install along into this key and grow with every bump. What is in the
@@ -87,10 +95,12 @@ runs:
     - shell: bash
       env:
         PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+        A2UI5_UNIT_PATHS: ${{ inputs.paths }}
         A2UI5_UNIT_FRAMEWORK: ${{ inputs.framework }}
         A2UI5_UNIT_BACKEND: ${{ inputs.backend }}
       run: |
-        set -- ${{ inputs.paths }}
+        # space-separated, and a wildcard still expands - but as data, never as code
+        set -- $A2UI5_UNIT_PATHS
         if [ -n "$A2UI5_UNIT_FRAMEWORK" ]; then set -- "$@" --framework "$A2UI5_UNIT_FRAMEWORK"; fi
         if [ -n "$A2UI5_UNIT_BACKEND" ]; then set -- "$@" --backend "$A2UI5_UNIT_BACKEND"; fi
-        node "${{ github.action_path }}/scripts/ci-unit.mjs" "$@"
+        node "$GITHUB_ACTION_PATH/scripts/ci-unit.mjs" "$@"

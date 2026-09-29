@@ -424,3 +424,62 @@ test('the framework clone takes the highest plain X.Y.Z release, never the -702 
     fs.rmSync(ws, { recursive: true, force: true });
   }
 });
+
+/* action.yml's run: blocks are shell scripts the runner builds by PASTING
+ * every `${{ ... }}` expression into the text before bash parses it:
+ * `set -- ${{ inputs.paths }}` ran a `paths` of `src; exit 0 #` as code -
+ * the step passed without running a test. Inputs reach a script through
+ * `env:` only, and what the scripts write to $GITHUB_OUTPUT (a cache key)
+ * is reduced to a name. */
+const ACTION = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'action.yml');
+function runBlocks(yml) {
+  const blocks = [];
+  const lines = yml.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^(\s*)(?:- )?run:\s*(.*)$/.exec(lines[i]);
+    if (!m) continue;
+    if (m[2] && m[2] !== '|' && m[2] !== '>') {
+      blocks.push(m[2]);
+      continue;
+    }
+    const body = [];
+    for (let j = i + 1; j < lines.length && (lines[j].trim() === '' || lines[j].search(/\S/) > m[1].length); j++) body.push(lines[j]);
+    blocks.push(body.join('\n'));
+  }
+  return blocks;
+}
+
+test('action.yml never pastes an expression into a shell script', () => {
+  const blocks = runBlocks(fs.readFileSync(ACTION, 'utf8'));
+  assert.ok(blocks.length >= 2, 'the pin step and the test step');
+  for (const b of blocks) assert.doesNotMatch(b, /\$\{\{/, `a run: block with an expression in it:\n${b}`);
+});
+
+test('action.yml\'s pin step writes one sane pin and backend, whatever the inputs hold', { skip: process.platform === 'win32' && 'bash' }, () => {
+  const pinStep = runBlocks(fs.readFileSync(ACTION, 'utf8'))[0];
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-action-'));
+  try {
+    const out = path.join(dir, 'output');
+    fs.writeFileSync(out, '');
+    run('bash', ['-c', pinStep], {
+      cwd: dir,
+      env: {
+        ...process.env,
+        GITHUB_OUTPUT: out,
+        GITHUB_ACTION_PATH: path.dirname(ACTION),
+        A2UI5_UNIT_FRAMEWORK: '1.145.0\nbackend=evil',
+        A2UI5_UNIT_BACKEND: 'npm x',
+      },
+    });
+    const lines = fs.readFileSync(out, 'utf8').trim().split('\n');
+    assert.deepEqual(lines, ['pin=1.145.0_backend_evil', 'backend=npm_x']);
+    // no input and no pin in the project: the week's latest
+    fs.writeFileSync(out, '');
+    run('bash', ['-c', pinStep], { cwd: dir, env: { ...process.env, GITHUB_OUTPUT: out, GITHUB_ACTION_PATH: path.dirname(ACTION), A2UI5_UNIT_FRAMEWORK: '', A2UI5_UNIT_BACKEND: '' } });
+    const [pin, backend] = fs.readFileSync(out, 'utf8').trim().split('\n');
+    assert.match(pin, /^pin=latest-\d{4}-\d{2}$/);
+    assert.equal(backend, 'backend=npm');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
