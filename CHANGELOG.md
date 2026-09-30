@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.0 - 2026-09-30
+
 - **The expensive half runs on the npm package `@abap2ui5/node-runtime` -
   no framework clone.** Without a framework checkout, `build_backend`
   shallow-cloned abap2UI5 and ran `npm ci` of its devDependencies there
