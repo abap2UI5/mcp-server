@@ -4,6 +4,10 @@
 
 ## 0.3.0 - 2026-09-30
 
+- **npm 12.** `npm view --json` prints an array there, and the registry
+  lookup read it as an object without a `version`: every lint, build and
+  unit run without a pinned release failed with "the registry could not be
+  asked". The lookup takes both shapes.
 - **The expensive half runs on the npm package `@abap2ui5/node-runtime` -
   no framework clone.** Without a framework checkout, `build_backend`
   shallow-cloned abap2UI5 and ran `npm ci` of its devDependencies there
