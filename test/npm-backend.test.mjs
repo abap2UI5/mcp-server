@@ -283,6 +283,8 @@ function fakeNpm(bin, log) {
 const fs = require('fs'); const path = require('path');
 const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ cwd: process.cwd(), args }) + '\\n');
+// what npm view prints (FAKE_NPM_VIEW)
+if (args[0] === 'view' && process.env.FAKE_NPM_VIEW) { process.stdout.write(process.env.FAKE_NPM_VIEW); process.exit(0); }
 if (args[0] !== 'install') process.exit(0);
 // a release the registry does not have (FAKE_NPM_MISSING): what npm says about it
 if (process.env.FAKE_NPM_MISSING && args.includes(process.env.FAKE_NPM_MISSING)) {
@@ -380,6 +382,25 @@ test('the registry lookup reads the npm config the install reads, not the start 
   assert.notEqual(view.cwd, fs.realpathSync(process.cwd()), 'not the directory the server was started in');
   assert.equal(view.cwd, fs.realpathSync(runtimeBase()), 'the workspace\'s runtime directory');
   assert.equal(path.dirname(install.cwd), view.cwd, 'beside the release directories the install runs in');
+}));
+
+/* npm 12 prints `npm view --json` as an array - one element per matching
+ * version, also for `@latest` - where npm 10 printed the object. Read as an
+ * object, the array had no `version`, and every lint and build without a
+ * pinned release failed with "the registry could not be asked" (the publish
+ * job of 0.3.0, on npm 12.1.0). */
+test('npm view answers as npm 10 and as npm 12 print it', { skip: !POSIX && 'a POSIX npm stand-in' }, withWorkspace(async (t, { ws }) => {
+  const bin = path.join(ws, 'bin');
+  fakeNpm(bin, path.join(ws, 'npm.log'));
+  process.env.PATH = `${bin}${path.delimiter}${process.env.PATH}`;
+  t.after(() => { delete process.env.FAKE_NPM_VIEW; });
+  const meta = { version: '1.146.0', abap2ui5: { transpiler: '2.13.93' } };
+  for (const [npm, out] of [['npm 10', meta], ['npm 12', [meta]]]) {
+    process.env.FAKE_NPM_VIEW = JSON.stringify(out, null, 2);
+    const res = await npmView(`${RUNTIME_PKG}@latest`);
+    assert.equal(res.ok, true, `${npm}: ${res.error}`);
+    assert.deepEqual(res.meta, meta, npm);
+  }
 }));
 
 /* The registry's latest is cached for a day. A release it named and no
