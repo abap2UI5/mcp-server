@@ -32,42 +32,46 @@ cheaper ones matter first.
 
 ## Quick start
 
-Level 1 — `validate_view` and `screenshot_view`, the two tools most work
-happens at. They need the [linter](https://github.com/abap2UI5/linter), and
-its render gate needs the UI5 libraries and Playwright: plan on **~150–200 MB**
-and a few minutes for the first install (the property gate alone is small; the
-`@openui5` packages and the browser driver behind the picture are not). The
-server looks for the linter, in this order: `AI_VIEW_CHECK_HOME`; a `linter`
-checkout next to the server; the project it is started in
-(`node_modules/@abap2ui5/linter` — app-template has it as a devDependency, so
-`npm install` there is all it takes); the server's own `node_modules`. Without
-a project, install both together:
+Level 1 — `validate_view`, `fix_view` and `screenshot_view`, the tools most
+work happens at. They need the [linter](https://github.com/abap2UI5/linter),
+which the server declares as a **peer dependency** (`@abap2ui5/linter`,
+`>=0.8.0 <0.9.0` — the range this server is built against). npm 7+ installs a
+non-optional peer by itself, so the one-liner below brings the linter along
+and `validate_view`/`fix_view` work out of the box. The render gate behind
+`screenshot_view` needs the UI5 libraries and Playwright on top
+(`@abap2ui5/linter-render`, declared as an **optional** peer: the compatible
+range is stated, the package is NOT installed for you — plan on
+**~150–200 MB** and a few minutes the first time you add it):
 
 ```sh
-claude mcp add abap2ui5 -- npx --yes -p @abap2ui5/mcp-server -p @abap2ui5/linter -p @abap2ui5/linter-render abap2ui5-mcp
+claude mcp add abap2ui5 -- npx --yes -p @abap2ui5/mcp-server abap2ui5-mcp                            # validate_view, fix_view
+claude mcp add abap2ui5 -- npx --yes -p @abap2ui5/mcp-server -p @abap2ui5/linter-render abap2ui5-mcp # + screenshot_view
 ```
 
-or from a checkout:
+The server looks for the linter, in this order: `AI_VIEW_CHECK_HOME`; a
+`linter` checkout next to the server (which is also where npm puts the peer
+for an npx run: `node_modules/@abap2ui5/{mcp-server,linter}`); the project it
+is started in (`node_modules/@abap2ui5/linter` — app-template has it as a
+devDependency, so `npm install` there is all it takes); the server's own
+`node_modules`; whatever Node's module resolution finds from the server's
+location. A set env var decides alone. Or work from a checkout:
 
 ```sh
 git clone https://github.com/abap2UI5/linter        # AI_VIEW_CHECK_HOME
 cd linter && npm ci
 ```
 
-The server itself is on npm, so it needs no checkout. Register it with Claude
-Code:
-
-```sh
-claude mcp add abap2ui5 -- npx --yes -p @abap2ui5/mcp-server abap2ui5-mcp
-```
+The server itself is on npm, so it needs no checkout; the registration above
+is the whole install. (With npm 6 or `--legacy-peer-deps`, add
+`-p @abap2ui5/linter` yourself.)
 
 (`-p … abap2ui5-mcp` names the bin explicitly, which every published version
 answers. The shorter `npx --yes @abap2ui5/mcp-server` needs a bin named after
 the package, which 0.2.0 and earlier do not have — npx stops there with "could
 not determine executable to run".)
 
-(The install is ~45 MB, 19 MB of it a Playwright driver only `run_app` uses —
-paid on the first start, cached after. From a checkout instead:
+(The install is ~47 MB: 19 MB of it a Playwright driver only `run_app` uses,
+2 MB the linter — paid on the first start, cached after. From a checkout instead:
 `git clone https://github.com/abap2UI5/mcp-server && cd mcp-server && npm ci`,
 then `claude mcp add abap2ui5 -- node /path/to/mcp-server/server.mjs`.)
 
@@ -149,8 +153,9 @@ available as `mode: "full"` for a checkout on an unreleased commit.
 Every tool reads live from a sibling checkout, and each one needs a specific
 sibling — there is no "optional" repository, only tools you do or do not use.
 The **Needs** column says which checkout a tool is dead without: the linter
-alone carries `validate_view` and `screenshot_view` (the fast loop, where most
-iterations happen), the framework checkout carries the guide, the pitfalls and
+alone carries `validate_view`, `fix_view` and `screenshot_view` (the fast
+loop, where most iterations happen — and the one dependency npm installs with
+the server, as its declared peer), the framework checkout carries the guide, the pitfalls and
 the interface (all three mirrored from GitHub when it is absent), the npm
 package `@abap2ui5/node-runtime` carries the backend when no framework
 checkout is there, and the corpus carries almost everything else. A tool

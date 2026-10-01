@@ -82,7 +82,9 @@ the Actions tab — same gates, same tarball, no registry write.
 ## What the first release was checked against
 
 Done once, by hand, before there was anything on npm — repeat it if
-`package.json`'s `files`, `bin` or `dependencies` ever change:
+`package.json`'s `files`, `bin`, `dependencies` or `peerDependencies` ever
+change (the peer declaration after 0.3.0 did: `pack-smoke` and a `setup_status`
+over the npx-installed tarball, which resolved the hoisted linter):
 
 - **The manifest carries everything a published package needs**: `name`,
   `version`, `description`, `bin` (`mcp-server` and `abap2ui5-mcp` →
@@ -128,6 +130,31 @@ dependency `optional` would not help — npm installs optional dependencies by
 default — so the fix is the shape `@abap2ui5/linter` arrived at: a separate
 package carrying the heavy runtime, declared as an optional PEER. Worth doing,
 not worth blocking the first release on.
+
+The half of that split that costs nothing is done (the release after
+0.3.0): **the linter is declared.** `package.json` names `@abap2ui5/linter` as a REGULAR peer
+(`>=0.8.0 <0.9.0`) and `@abap2ui5/linter-render` as an OPTIONAL one in the
+same range. Regular, not optional, on purpose, and measured rather than
+assumed (npm 10): `npx -p <pkg>` and `npm install` both install a
+non-optional peer by themselves, hoisted beside the package
+(`node_modules/@abap2ui5/{mcp-server,linter}` — the server's first sibling
+candidate, so no new lookup was needed), and both leave an optional peer
+alone. So `npx --yes -p @abap2ui5/mcp-server abap2ui5-mcp` now carries the
+property gate: 1.9 MB unpacked on top of a 45 MB install, against
+`validate_view` and `fix_view` being dead for everyone who did not also type
+`-p @abap2ui5/linter` (the VS Code extension's 0.30.1 had to grow a warning
+for exactly that). linter-render stays optional because it is the 123 MB of
+UI5 plus Playwright's browser, and because the range alone is what a user
+needs from the declaration: npm checks an optional peer that IS installed as
+strictly as a regular one (an out-of-range linter answers ERESOLVE either
+way — tested), so optional buys the choice, not a laxer install. What the
+declaration costs: the range has to MOVE with the linter's minor (the
+`compatibility surface` in AGENTS.md says how), and `npm install` in this
+checkout now installs the linter too (npm installs a root's own regular
+peer), which is why the lockfile carries it and `npm ci` in CI runs the
+lintopts and fix-view suites against the published linter. The playwright
+half — a separate package carrying the browser driver — is still the open
+part.
 
 ## What is NOT covered by the release gate
 

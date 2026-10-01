@@ -53,7 +53,7 @@ reads it live like a checkout.
 | `SAMPLES_STACK_HOME` | `../samples-stack`, `../abap2UI5-samples-stack` | `catalogue.json` (preferred) + `SAMPLES.md` (fallback) — the stack-dependent catalogue (OData, RAP, APC, launchpad) |
 | `APP_TEMPLATE_HOME` | `../app-template`, `../abap2UI5-app-template` | `template.json` and the files it lists — what `scaffold_app` serves and renames (the tool is dead without this checkout) |
 | `DOCS_HOME` | `../docs` | `docs/**/*.md` — the documentation site's sources, searched live by `docs_search` |
-| `AI_VIEW_CHECK_HOME` | `../linter` (legacy aliases: `../abap2UI5-linter`, `../ai-view-check`), then an INSTALLED `@abap2ui5/linter` — `<cwd>/node_modules/…` (app-template's devDependency), then the server's own `node_modules/…` (`viewCheckCandidates`) | `validate_view` + `screenshot_view`: dynamic import of the linter's package `exports` entries `.`, `./findings`, `./config`, `./rule-docs` (via `importViewCheck`) |
+| `AI_VIEW_CHECK_HOME` | `../linter` (legacy aliases: `../abap2UI5-linter`, `../ai-view-check`) — which for an npm/npx install is ALSO where npm hoists the declared peer `@abap2ui5/linter` (`node_modules/@abap2ui5/{mcp-server,linter}`), then an INSTALLED one elsewhere: `<cwd>/node_modules/…` (app-template's devDependency), the server's own `node_modules/…`, then wherever Node's resolver finds the package from `lib/repos.mjs` (`viewCheckCandidates`, `nodeResolvedViewCheck`) | `validate_view` + `fix_view` + `screenshot_view`: dynamic import of the linter's package `exports` entries `.`, `./findings`, `./config`, `./rule-docs` (via `importViewCheck`) |
 
 One more checkout is read but not by this server: **`OPENUI5_SRC`** (default
 `../fork-openui5`, relative to the SAMPLES-CONTROLS checkout, not to this one)
@@ -547,10 +547,27 @@ changes upstream, this repo must change in the same breath:
   **via the exports map** by `importViewCheck` in `lib/repos.mjs`, so internal
   file-layout refactors there are safe, but a removed or renamed export breaks
   a tool here even while the linter's own tests stay green. Two of those are
-  read **defensively**, because the linter is an UNPINNED sibling and can be
-  older than this server: a checkout without `screenshotFiles` gets a message
-  saying so, and one without `./rule-docs` costs the agent the explanations
-  and nothing else. Neither may cost it the findings.
+  read **defensively**, because a linter CHECKOUT is an unpinned sibling and
+  can be older than this server: a checkout without `screenshotFiles` gets a
+  message saying so, and one without `./rule-docs` costs the agent the
+  explanations and nothing else. Neither may cost it the findings. The npm
+  side is declared since the release after 0.3.0: `package.json` names `@abap2ui5/linter` as a
+  peer dependency at `>=0.8.0 <0.9.0` (npm 7+ installs a non-optional peer
+  with the server, so `npx -p @abap2ui5/mcp-server` carries the property
+  gate; `test/view-check-install.test.mjs` pins that the hoisted install is
+  found) and `@abap2ui5/linter-render` as an OPTIONAL peer in the same range
+  (a statement of compatibility, never an install - npm does not install
+  optional peers, and the 123 MB of UI5 behind it must stay a choice). The
+  range is a contract: when the linter's next minor lands, the exports the
+  server imports are checked against it and the range moved, the way the
+  linter moves its own range for linter-render (`npm run sync-peer-range`
+  there). A range that is not moved is a working linter that `npm install`
+  refuses with ERESOLVE beside this server - the same for an optional peer
+  that IS installed, so making linter-render optional buys the user the
+  choice, not a laxer check. `npm install` here installs the root's own
+  regular peer too, so a bare checkout's `node_modules/@abap2ui5/linter`
+  resolves after the siblings (CI's unit job runs the lintopts and fix-view
+  suites against it); the tarball ships none of it.
 
 ## Side effects on sibling repos — expected, not a bug
 
@@ -615,7 +632,7 @@ to finish deleted the config the second was still being linted against.
 ## Build & verify
 
 ```bash
-npm install          # @modelcontextprotocol/sdk + playwright
+npm install          # @modelcontextprotocol/sdk + playwright + the @abap2ui5/linter peer (npm 7+ installs a root peer too)
 npm start            # run the server on stdio (for an MCP client)
 ```
 
@@ -634,6 +651,10 @@ importing it in a test hangs the run rather than failing it — which is why
 it. `test/missing-siblings.test.mjs` boots the real server with the sibling env
 vars pointed at nonexistent directories and asserts every sibling-dependent
 tool degrades with its actionable error (this one runs everywhere);
+`test/view-check-install.test.mjs` copies `lib/` into the layouts npm leaves
+behind (the npx hoist, a nested install, a deeper hoist, a project's own
+devDependency) and asserts `resolveViewCheck` finds the installed linter in
+each, from a child process with the env var unset;
 `test/smoke.test.mjs` boots the real server over stdio (initialize, the full
 tool surface,
 a capabilities query, the resource list and a resource read, the prompt list

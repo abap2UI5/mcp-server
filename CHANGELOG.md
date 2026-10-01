@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- **The linter is a declared peer dependency, and `npx -p @abap2ui5/mcp-server`
+  brings it along.** The server had no dependency on `@abap2ui5/linter` at
+  all: the registration every document gives installed a server whose
+  `validate_view`, `fix_view` and `screenshot_view` were dead unless the user
+  also typed `-p @abap2ui5/linter -p @abap2ui5/linter-render` (the VS Code
+  extension 0.30.1 grew a warning for exactly this). `package.json` now names
+  `@abap2ui5/linter` as a regular peer at `>=0.8.0 <0.9.0` - npm 7+ installs
+  a non-optional peer by itself, for `npm install` and for `npx -p` alike,
+  hoisted beside the server where the sibling lookup already finds it, so
+  the plain one-liner carries the property gate (1.9 MB) - and
+  `@abap2ui5/linter-render` as an optional peer in the same range: the
+  compatible range is declared, the 123 MB of UI5 behind the render gate is
+  not installed for you (npm never installs an optional peer); add
+  `-p @abap2ui5/linter-render` for `screenshot_view`. The resolver gained a
+  last candidate after the checkout siblings, the project's and the server's
+  own `node_modules`: the `@abap2ui5/linter` Node's own module resolution
+  finds from the server's location, for a hoist the explicit paths cannot
+  name. `test/view-check-install.test.mjs` pins the npx layout, a nested
+  install, that deeper hoist and the project's own devDependency against
+  copies of `lib/`. The missing-linter hints and the README say what npm
+  installs and what it only declares.
+
 ## 0.3.0 - 2026-09-30
 
 - **npm 12.** `npm view --json` prints an array there, and the registry
