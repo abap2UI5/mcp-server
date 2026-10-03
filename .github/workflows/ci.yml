@@ -2,6 +2,9 @@
 #   test  — the sibling-free units (stripJsonc, the CAPABILITIES.md parser,
 #           deployApp validation, the BENIGN console filter) on a bare
 #           checkout; proves the server degrades cleanly with nothing around.
+#           First, as a step of its own, the server.json gate: the MCP
+#           Registry listing has to carry package.json's version, name and
+#           mcpName, or the registry publish fails after the npm one.
 #   audit — `npm audit` on the two runtime dependencies, separately so an
 #           advisory published overnight does not read as a failing test.
 #   smoke — the same suite in a sibling workspace (samples-controls, linter,
@@ -45,6 +48,7 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci
+      - run: npm run check:server-json
       - run: npm test
 
   # A job of its own rather than a step in `test`: an advisory published

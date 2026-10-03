@@ -2,6 +2,80 @@
 
 ## Unreleased
 
+## 1.0.0 - 2026-10-03
+
+**1.0 is a stability promise, not a feature release.** This server's tool
+names and result shapes are a contract with every agent configuration that
+registers it (RELEASING.md, "What a release is for"); from 1.0.0 on that
+contract follows semantic versioning, so an unpinned `npx` registration -
+the form the README, the VS Code extension and the app template all use -
+does not break an agent setup between two 1.x releases:
+
+- **Major** (2.0.0): a tool, resource URI, prompt, bin or GitHub Action input
+  removed or renamed; a tool argument removed, renamed, retyped or made
+  required; a field of a tool result removed, renamed or retyped, or an
+  answer that was a JSON object no longer being one; an environment variable
+  removed or renamed; a Node.js floor raised.
+- **Minor**: a new tool, resource, prompt, optional argument, result field or
+  environment variable; a new backend or mode; the linter peer range moving
+  to the linter's next minor.
+- **Patch**: fixes, and the wording of tool descriptions, hints and messages.
+
+What the promise does NOT cover, because this server bundles no content: the
+documents it serves (the guide, the client interface, the pitfall catalogues,
+the capability map, the sample catalogues, the docs) are read live from the
+abap2UI5 repositories and change when they do, and the backend runs the
+`@abap2ui5/node-runtime` release the npm registry names unless
+`A2UI5_MCP_RUNTIME_VERSION` pins one. Human-readable text - a description, a
+degradation message, a hint - is for the agent to read, not to parse.
+
+What 1.0 contains:
+
+- **24 tools.** `setup_status` (what works on this machine right now, and
+  why not); the knowledge half - `capabilities`, `examples`, `read_example`,
+  `app_guide`, `api_reference`, `generation_rules`, `scaffold_app`,
+  `docs_search`, `pitfalls`, `scope_of`; the cheap view half, seconds and no
+  backend - `validate_view`, `fix_view`, `screenshot_view`; the dev sandbox -
+  `deploy_app`, `read_app`, `remove_app`; and the expensive half on a real
+  transpiled backend - `build_backend`, `build_log`, `backend`, `run_app`,
+  `interact_app`, `run_unit_tests`, and `verify_app`, the whole loop in one
+  call.
+- **Six resources** (`abap2ui5://guide`, `abap2ui5://api`,
+  `abap2ui5://capabilities`, `abap2ui5://generation-rules`,
+  `abap2ui5://pitfalls/abap`, `abap2ui5://pitfalls/view`) plus the
+  per-chapter template `abap2ui5://guide/{chapter}`, and **two prompts**,
+  `build-an-abap2ui5-app` and `port-a-ui5-sample`.
+- **No checkout needed**: the knowledge tools fall back to a read-only GitHub
+  mirror, and the expensive half runs on `@abap2ui5/node-runtime` without a
+  framework clone; a sibling checkout or a set `*_HOME` variable still wins,
+  and a misconfigured one is reported, never worked around.
+- **Three bins** - `mcp-server`, `abap2ui5-mcp`, `abap2ui5-unit` - and the
+  composite GitHub Action `abap2UI5/mcp-server@v1`, which runs an app
+  repository's ABAP Unit tests without an SAP system. The release workflow
+  moves the floating major tag to `v1` with this release; `v0` stays at
+  0.3.0, so a workflow pinned to `@v0` keeps working and moves to `@v1` when
+  its owner decides to.
+
+- **Listed in the official MCP Registry as `io.github.abap2UI5/mcp-server`.**
+  `server.json` describes the npm package (stdio, `npx`) and every
+  environment variable the server reads - all optional, none with a default,
+  because a set variable is authoritative here. `package.json` carries the
+  `mcpName` the registry checks npm ownership by, and the release workflow
+  publishes the listing after the npm publish, in a job of its own, logged in
+  with GitHub OIDC (no secret) through a pinned, checksum-verified
+  `mcp-publisher`. `npm run check:server-json` (CI, the release workflow and
+  `npm test`) fails when `server.json`'s versions, package name or registry
+  name drift from `package.json`, or when its variable list and the code
+  disagree in either direction; `npm version` keeps the versions in step by
+  itself (the new `version` script).
+- **One-click install in the README**: VS Code and VS Code Insiders badges, a
+  Cursor badge and the direct `vscode:` / `cursor://` links beside the
+  `claude mcp add` line - all registering `npx --yes -p @abap2ui5/mcp-server
+  abap2ui5-mcp`, which `test/install-links.test.mjs` decodes from every link
+  and holds against the registration the README shows in clear - and the
+  Claude Code plugin (`/plugin marketplace add abap2UI5/abap2UI5`, `/plugin
+  install abap2ui5@abap2ui5`), which bundles the framework's agent skills with
+  this server.
 - **The linter is a declared peer dependency, and `npx -p @abap2ui5/mcp-server`
   brings it along.** The server had no dependency on `@abap2ui5/linter` at
   all: the registration every document gives installed a server whose
