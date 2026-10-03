@@ -137,6 +137,30 @@ test('applyResponse: a response without MODEL keeps the models, a MAIN display d
   assert.deepEqual(st.custom, [['MESSAGE_TOAST', 'show', 'hi']]);
 });
 
+test('applyResponse: a response of another APP takes the popup and the popover down (spec/response.md "View slots")', () => {
+  let st = applyResponse(emptyState(), {
+    S_FRONT: { ID: '1', APP: 'Z_A', S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'display', 'MAIN', '<A/>'], ['VIEW_SLOTS', 'display', 'POPOVER', '<B/>', { openById: 'x' }]] } },
+    MODEL: { X: 1 },
+  });
+  // the same app answering keeps its popover
+  st = applyResponse(st, { S_FRONT: { ID: '2', APP: 'Z_A' } });
+  assert.ok(st.slots.POPOVER, 'the same APP keeps the popover');
+  // a popup app takes over: its own dialog, no MAIN display, no destroy
+  st = applyResponse(st, { S_FRONT: { ID: '3', APP: 'Z_POP', S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'display', 'POPUP', '<D/>']] } }, MODEL: { Y: 2 } });
+  assert.deepEqual(Object.keys(st.slots).sort(), ['MAIN', 'POPUP'], 'the previous app\'s popover is gone, the new popup open');
+  assert.equal(st.models.POPOVER, undefined, 'with its model');
+  assert.equal(st.slots.POPUP.app, 'Z_POP');
+  assert.deepEqual(st.models.MAIN, { app: 'Z_A', data: { X: 1 } }, 'the caller\'s page behind it keeps its model');
+  // back to the caller without a destroy: the popup app's popup goes too
+  st = applyResponse(st, { S_FRONT: { ID: '4', APP: 'Z_A' } });
+  assert.deepEqual(Object.keys(st.slots), ['MAIN']);
+  assert.equal(st.models.POPUP, undefined);
+  // a response without APP changes nothing about the slots
+  st = applyResponse(st, { S_FRONT: { ID: '5', APP: 'Z_A', S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'display', 'POPUP', '<E/>']] } } });
+  st = applyResponse(st, { S_FRONT: { ID: '6' } });
+  assert.ok(st.slots.POPUP, 'no APP in the response: no app change');
+});
+
 // ------------------------------------------------------ snapshot: shape ----
 
 const CONTRACT_KEYS = ['snapshotVersion', 'session', 'app', 'title', 'layer', 'fields', 'actions', 'tables', 'messages', 'texts', 'unsupported'];

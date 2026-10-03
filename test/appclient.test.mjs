@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createAppClient, buildDelta, errorText, AgentError } from '../lib/appclient.mjs';
+import { createAppClient, buildDelta, errorText, AgentError, PROTOCOL, headerOf, validContextId } from '../lib/appclient.mjs';
 
 const FIX = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'agent');
 const fixture = (name) => JSON.parse(fs.readFileSync(path.join(FIX, `${name}.json`), 'utf8'));
@@ -62,10 +62,19 @@ test('buildDelta builds the delta the frontend builds (core/Lib.js buildDeltaFro
   assert.deepEqual(buildDelta(['/T', '/T/0/Q'], data), { T: data.T }, 'a whole table wins over a cell');
 });
 
-test('errorText reads the backend\'s 500 page', () => {
-  const t = errorText(500, '<html><body><pre>Error: boom<br> &nbsp; at x &lt;y&gt;</pre></body></html>');
-  assert.equal(t, 'HTTP 500: Error: boom\n   at x <y>');
+test('errorText shows the error body verbatim: markup is text, nothing stripped or decoded (spec/errors.md)', () => {
+  const body = 'abap2UI5 failed for <b>bold</b> &amp; <img src="x">\n\n--- error ---\n  at /?app_start=<script>x</script>  \n';
+  assert.equal(errorText(500, body), 'HTTP 500: abap2UI5 failed for <b>bold</b> &amp; <img src="x">\n\n--- error ---\n  at /?app_start=<script>x</script>');
+  assert.equal(errorText(500, '<pre>Error: boom<br> &nbsp; at x &lt;y&gt;</pre>'), 'HTTP 500: <pre>Error: boom<br> &nbsp; at x &lt;y&gt;</pre>', 'an HTML page too');
   assert.equal(errorText(502, ''), 'HTTP 502');
+  assert.equal(errorText(502, '  \n '), 'HTTP 502', 'a body of whitespace is no body');
+  assert.equal(errorText(500, 'a\r\nb\u001b[2Jc\u0000'), `HTTP 500: a\nb${String.fromCodePoint(0xfffd)}[2Jc${String.fromCodePoint(0xfffd)}`, 'control characters cannot reach a terminal');
+  const long = Array.from({ length: 60 }, (_, i) => `line ${i}`).join('\n');
+  const cut = errorText(500, long);
+  assert.ok(cut.startsWith('HTTP 500: line 0\nline 1\n'), 'a long body is shortened, from the start');
+  assert.match(cut, /line 39\n\.\.\. \(\d+ more characters\)$/);
+  assert.ok(!cut.includes('line 40'));
+  assert.ok(errorText(500, 'x'.repeat(10000)).length < 4100, 'and capped in characters');
 });
 
 // ---------------------------------------------- replay of real sessions ----
@@ -227,12 +236,12 @@ test('a backend error is a refusal with the backend\'s text, and the session is 
   let fail = false;
   const r = replay('popup-009');
   const fetchImpl = async (url, init) => (fail
-    ? new Response('<pre>Error: Void type: Z_X<br>at y</pre>', { status: 500 })
+    ? new Response('Error: Void type: <Z_X>\nat y', { status: 500, headers: { 'content-type': 'text/plain' } })
     : r.fetchImpl(url, init));
   const client = createAppClient({ baseUrl: BASE, fetchImpl });
   const s0 = await client.start('z2ui5_cl_smp_app_009');
   fail = true;
-  await rejects(client.act(s0.session, { values: { f4: 'Smith' }, event: 'BUTTON_SEND' }), /the backend refused the roundtrip - HTTP 500: Error: Void type: Z_X\nat y/);
+  await rejects(client.act(s0.session, { values: { f4: 'Smith' }, event: 'BUTTON_SEND' }), /the backend refused the roundtrip - HTTP 500: Error: Void type: <Z_X>\nat y$/);
   const after = client.describe(s0.session);
   assert.equal(after.session, s0.session);
   assert.equal(after.pending, undefined, 'the refused act rolled its values back');
@@ -281,6 +290,7 @@ test('transport + location: one roundtrip per call, the start request carries th
   assert.equal(r.calls[0].draftId, null, 'an app start continues no draft');
   assert.equal(r.calls[1].draftId, s0.session, 'an event names the draft it continues');
   assert.deepEqual(r.calls[0].headers, { 'content-type': 'application/json', 'sap-contextid-accept': 'header' });
+  assert.equal(r.calls[0].method, 'POST', 'a roundtrip is a POST');
   assert.ok(r.calls[0].signal instanceof AbortSignal);
   assert.equal(typeof r.calls[0].body, 'string');
   assert.ok(s1.session && s1.session !== s0.session);
@@ -451,4 +461,278 @@ test('row events of tables: listItem, rowIndex/rowContext and a row action item\
   s = await client.act(s.session, { event: 'NAV', row: 0 });
   assert.deepEqual(bodies.slice(1).map((b) => b.S_FRONT.T_EVENT_ARG), [['b1', 'a1'], [2, '/T/2', '/T/2'], ['a0', 0], ['b0']]);
   assert.ok(bodies.slice(1).every((b) => b.MODEL === undefined), 'a table row event selects nothing by itself');
+});
+
+// ------------------------------- the protocol's client rules (spec/*.md) ----
+
+/** A scripted backend as a `transport`: `answer(req, n)` builds the n-th
+ *  POST's answer ({ status?, headers?, body } or a response object); HEADs
+ *  go to `head(req)`. Every request is kept, and `hold()` keeps the next
+ *  POST's answer back until `release()`. */
+function scripted(answer, { head } = {}) {
+  const posts = [];
+  const heads = [];
+  let gate = null;
+  const transport = async (req) => {
+    if (req.method === 'HEAD') {
+      heads.push(req);
+      return head ? head(req) : { status: 200, headers: {}, body: '' };
+    }
+    const value = JSON.parse(req.body).value;
+    posts.push({ ...req, value });
+    const g = gate;
+    gate = null;
+    if (g) {
+      g.received();
+      await g.released;
+    }
+    const a = answer(req, posts.length, value);
+    return a && a.S_FRONT ? { status: 200, headers: {}, body: JSON.stringify(a) } : { status: 200, headers: {}, ...a, body: typeof a.body === 'string' ? a.body : JSON.stringify(a.body) };
+  };
+  const hold = () => {
+    let received;
+    let release;
+    const r = new Promise((res) => { received = res; });
+    const released = new Promise((res) => { release = res; });
+    gate = { received, released };
+    return { received: r, release };
+  };
+  const client = (opts = {}) => createAppClient({ transport, location: (app) => ({ origin: 'x', pathname: '/', search: `?app_start=${app}` }), ...opts });
+  return { transport, posts, heads, hold, client };
+}
+
+const FORM = page('<Input value="{/NAME}"/><Input value="{/ZIP}"/><Button text="Check" press=".eB([\'CHECK\'])"/><Button text="Other" press=".eB([\'OTHER\'])"/>');
+const startAnswer = (extra = {}) => ({ S_FRONT: { ID: 'D1', APP: 'Z_T', PROTOCOL: 2, S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'display', 'MAIN', FORM]] }, ...extra }, MODEL: { NAME: '', ZIP: '' } });
+const eventAnswer = (n, extra = {}) => ({ S_FRONT: { ID: `D${n}`, APP: 'Z_T', PROTOCOL: 2, ...extra } });
+
+test('PROTOCOL: a response declaring another number is refused whole, naming both; an absent one is let through', async () => {
+  assert.equal(PROTOCOL, 2);
+  const newer = scripted(() => startAnswer({ PROTOCOL: 3 }));
+  const c3 = newer.client();
+  await rejects(c3.start('z_t'), /^the backend answered protocol 3, this client speaks protocol 2 - the client is older; nothing of the response was adopted/);
+  assert.deepEqual(c3.sessions(), [], 'no session from a refused start');
+  assert.throws(() => c3.describe('D1'), /unknown session 'D1'/, 'its draft id is not adopted');
+  const older = scripted(() => startAnswer({ PROTOCOL: 1 }));
+  await rejects(older.client().start('z_t'), /answered protocol 1, this client speaks protocol 2 - the backend is older/);
+  const absent = scripted(() => { const a = startAnswer(); delete a.S_FRONT.PROTOCOL; return a; });
+  assert.equal((await absent.client().start('z_t')).session, 'D1', 'no PROTOCOL: a backend older than the field');
+  // during a session: the event's answer is refused, the session stays where it was
+  const mid = scripted((req, n) => (n === 1 ? startAnswer() : eventAnswer(n, { PROTOCOL: 3, S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'display', 'MAIN', page('<Text text="never"/>')]] } })));
+  const c = mid.client();
+  const s = await c.start('z_t');
+  await c.act(s.session, { values: { '/NAME': 'Ann' } });
+  await rejects(c.act(s.session, { event: 'CHECK' }), /protocol 3, this client speaks protocol 2/);
+  const after = c.describe(s.session);
+  assert.equal(after.session, 'D1', 'the draft id of the refused response was not adopted');
+  assert.ok(!after.texts.includes('never'), 'nor its view');
+  assert.deepEqual(after.pending, ['/NAME'], 'the edit it carried is still pending');
+  assert.throws(() => c.describe('D2'), /unknown session 'D2'/);
+});
+
+test('sap-contextid: kept from the last response that carried it, sent with every later POST of that session only', async () => {
+  const contexts = { 1: 'SID:ANON:1', 3: 'SID:ANON:2' };
+  const be = scripted((req, n, value) => {
+    const base = value.S_FRONT.ID ? eventAnswer(n) : startAnswer({ ID: `D${n}` });
+    const header = contexts[n];
+    return { body: base, headers: header ? (n === 3 ? { 'Sap-ContextId': [header] } : { 'sap-contextid': header }) : {} };
+  });
+  const c = be.client();
+  let s = await c.start('z_t');
+  s = await c.act(s.session, { event: 'CHECK' });
+  s = await c.act(s.session, { event: 'CHECK' });
+  s = await c.act(s.session, { event: 'CHECK' });
+  assert.deepEqual(be.posts.map((p) => p.headers['sap-contextid']), [undefined, 'SID:ANON:1', 'SID:ANON:1', 'SID:ANON:2'],
+    'none before one was handed out, the first kept through a response without it, the newer one (any header case) after');
+  assert.ok(be.posts.every((p) => p.headers['sap-contextid-accept'] === 'header'), 'every POST asks for the id in a header');
+  // another session of the same client starts without one
+  await c.start('z_t');
+  assert.equal(be.posts[4].headers['sap-contextid'], undefined, 'a session id is per session');
+  assert.ok(!('sap-contextid' in be.posts[4].headers));
+  // an empty id or the text `undefined` is never adopted
+  const bad = scripted((req, n, value) => ({ body: value.S_FRONT.ID ? eventAnswer(n) : startAnswer(), headers: { 'sap-contextid': n === 1 ? 'undefined' : '' } }));
+  const b = bad.client();
+  const t = await b.start('z_t');
+  await b.act(t.session, { event: 'CHECK' });
+  await b.act((b.sessions()[0]).session, { event: 'CHECK' });
+  assert.ok(bad.posts.every((p) => !('sap-contextid' in p.headers)));
+  assert.equal(validContextId('undefined'), false);
+  assert.equal(headerOf({ 'X-A': [' a', 'b '] }, 'x-a'), 'a, b');
+});
+
+test('one roundtrip at a time: a second act while one is in flight waits and continues the new draft id', async () => {
+  const be = scripted((req, n, value) => (value.S_FRONT.ID ? eventAnswer(n) : startAnswer()));
+  const c = be.client();
+  const s = await c.start('z_t');
+  const held = be.hold();
+  const first = c.act(s.session, { event: 'CHECK' });
+  await held.received;
+  // the agent fires again on the screen it has - the draft the first continues
+  const second = c.act(s.session, { event: 'OTHER' });
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(be.posts.length, 2, 'no second POST while the first is in flight');
+  held.release();
+  const [a, b] = await Promise.all([first, second]);
+  assert.equal(a.session, 'D2');
+  assert.equal(b.session, 'D3');
+  assert.deepEqual(be.posts.slice(1).map((p) => [p.value.S_FRONT.ID, p.value.S_FRONT.EVENT]), [['D1', 'CHECK'], ['D2', 'OTHER']],
+    'the queued act ran after the first, on the draft id it left');
+  // once it is done, the old id is an earlier state again
+  await rejects(c.act(s.session, { event: 'CHECK' }), /earlier state of this app session - continue with the current one: 'D3'/);
+});
+
+test('one roundtrip at a time: a failed or refused act does not block the queue', async () => {
+  let fail = true;
+  const be = scripted((req, n, value) => {
+    if (!value.S_FRONT.ID) return startAnswer();
+    if (fail) { fail = false; return { status: 500, body: 'boom' }; }
+    return eventAnswer(n);
+  });
+  const c = be.client();
+  const s = await c.start('z_t');
+  const held = be.hold();
+  const first = c.act(s.session, { event: 'CHECK' });
+  await held.received;
+  const refused = c.act(s.session, { event: 'NOPE' });
+  const second = c.act(s.session, { event: 'OTHER' });
+  held.release();
+  await rejects(first, /HTTP 500: boom/);
+  await rejects(refused, /no action 'NOPE' on this screen/);
+  assert.equal((await second).session, 'D3');
+  assert.equal(be.posts[2].value.S_FRONT.ID, 'D1', 'the failed roundtrip adopted nothing: the next continues D1');
+});
+
+test('edits made while a roundtrip is in flight survive its answer and travel with the next event', async () => {
+  const be = scripted((req, n, value) => {
+    if (!value.S_FRONT.ID) return startAnswer();
+    // the first event's answer pushes the model (the backend saw NAME only)
+    return n === 2 ? { ...eventAnswer(n), MODEL: { NAME: 'Ann', ZIP: '' } } : eventAnswer(n);
+  });
+  const c = be.client();
+  const s = await c.start('z_t');
+  await c.act(s.session, { values: { '/NAME': 'Ann' } });
+  const held = be.hold();
+  const first = c.act(s.session, { event: 'CHECK' });
+  await held.received;
+  // values without an event start no roundtrip: applied at once, not queued
+  const typed = await c.act(s.session, { values: { '/ZIP': '75001' } });
+  assert.deepEqual(typed.pending, ['/NAME', '/ZIP']);
+  held.release();
+  const a = await first;
+  assert.deepEqual(be.posts[1].value.MODEL, { NAME: 'Ann' }, 'the in-flight request carried what was pending when it left');
+  assert.deepEqual(a.pending, ['/ZIP'], 'only what it carried is done with');
+  assert.equal(a.fields.find((f) => f.path === '/ZIP').value, '75001', 'the edit survives the model push');
+  await c.act(a.session, { event: 'OTHER' });
+  assert.deepEqual(be.posts[2].value.MODEL, { ZIP: '75001' }, 'and travels with the next event');
+});
+
+test('an edit of a sent path made in flight stays pending; a failed roundtrip rolls back only its own edits', async () => {
+  let fail = false;
+  const be = scripted((req, n, value) => {
+    if (!value.S_FRONT.ID) return startAnswer();
+    return fail ? { status: 500, body: 'boom' } : eventAnswer(n);
+  });
+  const c = be.client();
+  const s = await c.start('z_t');
+  let held = be.hold();
+  const first = c.act(s.session, { values: { '/NAME': 'Ann' }, event: 'CHECK' });
+  await held.received;
+  await c.act(s.session, { values: { '/NAME': 'Bob' } });
+  held.release();
+  const a = await first;
+  assert.deepEqual(be.posts[1].value.MODEL, { NAME: 'Ann' });
+  assert.deepEqual(a.pending, ['/NAME'], 'the newer value of a sent path is a new edit');
+  assert.equal(a.fields.find((f) => f.path === '/NAME').value, 'Bob');
+  // a failing roundtrip: its own value rolled back, the one typed meanwhile kept
+  fail = true;
+  held = be.hold();
+  const failing = c.act(a.session, { values: { '/NAME': 'Cid' }, event: 'CHECK' });
+  await held.received;
+  await c.act(a.session, { values: { '/ZIP': '1010' } });
+  held.release();
+  await rejects(failing, /HTTP 500: boom/);
+  const after = c.describe(a.session);
+  assert.deepEqual(after.pending, ['/NAME', '/ZIP']);
+  assert.equal(after.fields.find((f) => f.path === '/NAME').value, 'Bob', 'the failed act\'s value is taken back');
+  assert.equal(after.fields.find((f) => f.path === '/ZIP').value, '1010', 'the edit made in flight is not');
+});
+
+test('CSRF: a token layer\'s 403 is answered by a HEAD token fetch and ONE re-send of the same body; the token goes with every later POST', async () => {
+  let token = null;
+  const posts = [];
+  const heads = [];
+  const transport = async (req) => {
+    if (req.method === 'HEAD') {
+      heads.push(req);
+      token = 'tok-1';
+      return { status: 200, headers: { 'X-CSRF-Token': token }, body: '' };
+    }
+    posts.push(req);
+    if (req.headers['x-csrf-token'] !== token || !token) return { status: 403, headers: { 'x-csrf-token': 'Required' }, body: 'CSRF token validation failed' };
+    const value = JSON.parse(req.body).value;
+    return { status: 200, body: JSON.stringify(value.S_FRONT.ID ? eventAnswer(posts.length) : startAnswer()) };
+  };
+  const c = createAppClient({ transport, location: (app) => ({ origin: 'x', pathname: '/', search: `?app_start=${app}` }) });
+  const s = await c.start('z_t');
+  assert.equal(heads.length, 1);
+  assert.equal(heads[0].headers['x-csrf-token'], 'Fetch');
+  assert.equal(heads[0].body, undefined, 'a HEAD has no body');
+  assert.equal(posts.length, 2);
+  assert.equal(posts[1].body, posts[0].body, 'the same body once more');
+  assert.equal(posts[1].headers['x-csrf-token'], 'tok-1');
+  assert.equal(posts[0].signal, posts[1].signal, 'still the one request: one timeout');
+  await c.act(s.session, { event: 'CHECK' });
+  assert.equal(posts[2].headers['x-csrf-token'], 'tok-1', 'the token travels with every later POST');
+  assert.equal(heads.length, 1, 'no fetch while the token is accepted');
+});
+
+test('CSRF: the backend\'s own 403 is final, and a token fetch that brings none ends in the refusal - one re-send at most', async () => {
+  let n = 0;
+  let heads = 0;
+  const final = createAppClient({ transport: async (req) => { if (req.method === 'HEAD') heads += 1; else n += 1; return { status: 403, headers: { 'content-type': 'text/plain' }, body: 'CSRF validation failed - cross-origin request rejected' }; } });
+  await rejects(final.start('z_x'), /^the backend refused the roundtrip - HTTP 403: CSRF validation failed - cross-origin request rejected$/);
+  assert.deepEqual([n, heads], [1, 0], 'no fetch, no re-send');
+  n = 0;
+  heads = 0;
+  const noToken = createAppClient({ transport: async (req) => {
+    if (req.method === 'HEAD') { heads += 1; return { status: 200, headers: { 'x-csrf-token': 'Required' }, body: '' }; }
+    n += 1;
+    return { status: 403, headers: { 'x-csrf-token': 'required' }, body: 'CSRF token validation failed' };
+  } });
+  await rejects(noToken.start('z_x'), /^the backend refused the roundtrip - HTTP 403: CSRF token validation failed$/);
+  assert.deepEqual([n, heads], [1, 1], 'a fetch without a token: no re-send');
+  n = 0;
+  heads = 0;
+  const refusedAgain = createAppClient({ transport: async (req) => {
+    if (req.method === 'HEAD') { heads += 1; return { status: 200, headers: { 'x-csrf-token': `t${heads}` }, body: '' }; }
+    n += 1;
+    return { status: 403, headers: { 'x-csrf-token': 'Required' }, body: 'CSRF token validation failed' };
+  } });
+  await rejects(refusedAgain.start('z_x'), /HTTP 403: CSRF token validation failed$/);
+  assert.deepEqual([n, heads], [2, 1], 'the re-sent body refused again: reported, no loop');
+  const throwing = createAppClient({ transport: async (req) => {
+    if (req.method === 'HEAD') throw new Error('ECONNRESET');
+    return { status: 403, headers: { 'x-csrf-token': 'Required' }, body: 'CSRF token validation failed' };
+  } });
+  await rejects(throwing.start('z_x'), /HTTP 403: CSRF token validation failed$/, 'a failed fetch reports the refusal that asked for it');
+});
+
+test('the default transport: the token fetch is a HEAD to baseUrl without a body, the session id a request header', async () => {
+  const seen = [];
+  const client = createAppClient({
+    baseUrl: BASE,
+    fetchImpl: async (url, init) => {
+      seen.push({ url, ...init });
+      if (init.method === 'HEAD') return new Response(null, { status: 200, headers: { 'x-csrf-token': 'abc' } });
+      if (!init.headers['x-csrf-token']) return new Response('need a token', { status: 403, headers: { 'x-csrf-token': 'Required' } });
+      const value = JSON.parse(init.body).value;
+      return new Response(JSON.stringify(value.S_FRONT.ID ? eventAnswer(3) : startAnswer()), { status: 200, headers: { 'sap-contextid': 'SID:1' } });
+    },
+  });
+  const s = await client.start('z_t');
+  assert.deepEqual(seen.map((r) => r.method), ['POST', 'HEAD', 'POST']);
+  assert.equal(seen[1].url, BASE);
+  assert.equal('body' in seen[1], false, 'no body on the HEAD');
+  assert.deepEqual(seen[1].headers, { 'x-csrf-token': 'Fetch' });
+  await client.act(s.session, { event: 'CHECK' });
+  assert.deepEqual(seen[3].headers, { 'content-type': 'application/json', 'sap-contextid-accept': 'header', 'sap-contextid': 'SID:1', 'x-csrf-token': 'abc' });
 });

@@ -147,7 +147,7 @@ import { fileURLToPath } from 'node:url';
 import { frameworkPinOf, collectObjects, writeObjects, parseArgs, renderSummary, staleWorkspaceClone, chooseBackend } from '../scripts/ci-unit.mjs';
 import { filteredRunner, RUNNER_LOOP } from '../lib/runtime.mjs';
 
-test('the CI runner reads the project\'s framework pin, collects classes and interfaces with all their files, and renders', () => {
+test('the CI runner reads the project\'s framework pin, collects classes, interfaces, tables and data elements with all their files, and renders', () => {
   assert.equal(frameworkPinOf('{ "dependencies": [ { "url": "https://github.com/abap2UI5/abap2UI5", "branch": "1.144.0", "files": "/src/**/*.*" } ] }'), '1.144.0');
   assert.equal(frameworkPinOf('{ "dependencies": [ { "url": "https://github.com/abap2UI5/abap2UI5.git", "branch": "main" } ] }'), null, 'a branch name is not a release pin');
   assert.equal(frameworkPinOf('{ "dependencies": [ { "url": "https://github.com/other/repo", "branch": "1.0.0" } ] }'), null);
@@ -165,12 +165,19 @@ test('the CI runner reads the project\'s framework pin, collects classes and int
     fs.writeFileSync(path.join(root, 'src', 'sub', 'zcl_b.clas.locals_imp.abap'), 'CLASS lcl_b');
     fs.writeFileSync(path.join(root, 'src', 'zcl_orphan.clas.xml'), '<x/>'); // a sidecar without its source is no object
     fs.writeFileSync(path.join(root, 'src', 'package.devc.xml'), '<x/>');
+    // a table and a data element are their XML alone
+    fs.writeFileSync(path.join(root, 'src', 'zmcp_note.tabl.xml'), '<x/>');
+    fs.writeFileSync(path.join(root, 'src', 'sub', 'zmcp_note_text.dtel.xml'), '<x/>');
     const objects = collectObjects([path.join(root, 'src')]).sort((a, b) => a.name.localeCompare(b.name));
     assert.deepEqual(objects.map((o) => [o.name, o.type, o.testclasses, o.files.map((f) => f.name).sort()]), [
       ['zcl_a', 'clas', true, ['zcl_a.clas.abap', 'zcl_a.clas.testclasses.abap', 'zcl_a.clas.xml']],
       ['zcl_b', 'clas', false, ['zcl_b.clas.abap', 'zcl_b.clas.locals_imp.abap']],
       ['zif_x', 'intf', false, ['zif_x.intf.abap', 'zif_x.intf.xml']],
+      ['zmcp_note', 'tabl', false, ['zmcp_note.tabl.xml']],
+      ['zmcp_note_text', 'dtel', false, ['zmcp_note_text.dtel.xml']],
     ]);
+    fs.rmSync(path.join(root, 'src', 'zmcp_note.tabl.xml'));
+    fs.rmSync(path.join(root, 'src', 'sub', 'zmcp_note_text.dtel.xml'));
 
     // written under the sandbox's name gate: a namespaced object or one that is there twice is refused, the rest copied as it is
     fs.writeFileSync(path.join(root, 'src', '#ns#cl_y.clas.abap'), 'CLASS /ns/cl_y');

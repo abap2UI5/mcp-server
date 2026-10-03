@@ -244,6 +244,31 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
   modules in the transpiler's own order) that the runner and the host both
   import. apps/ is swapped in whole, which is what prunes a removed app, and
   a failed build leaves the last good one served.
+- **Database tables** (TABL, with their DTELs): a sandbox may hold them -
+  `migrate_report { deploy: true }` brings abap-cloud-gui's variant and
+  layout stores (`z2ui5_cgui_var`, `z2ui5_cgui_lay`, the default stores
+  since its PR #8), and `abap2ui5-unit` brings a project's tables
+  (`<name>.tabl.xml` / `<name>.dtel.xml`, their XML alone). They are
+  transpiler input (`transpileConfig` input_filter `clas|intf|tabl|dtel`),
+  their `*.tabl.mjs` / `*.dtel.mjs` (the `abap.DDIC` registrations) are dev
+  modules, and the transpiler's init.mjs - thrown away with the staging -
+  holds their `sqlite.push(\`CREATE TABLE ...\`)`: `tableSchema` takes the
+  statements of the sandbox's own transparent tables out of it
+  (`transparentTables`: `<TABCLASS>TRANSP</TABCLASS>` - a structure is a
+  TABL too and has none), and `apps/init.mjs` runs them on the runtime's
+  `DEFAULT` connection after `initialize()`, before the dev modules (`IF
+  NOT EXISTS`: a table the package already has is left alone). A
+  transparent table without a statement fails the build - the transpiler's
+  output shape changed. The tables are empty at every boot, like the
+  package's own. A sandbox without tables builds and boots byte for byte as
+  before. The recipe is abap-cloud-gui's runtime test
+  (`tools/report2cloud/test/runtime/backend.mjs`). On a checkout (and the
+  clone `build_backend` mode prebuilt makes, which is one) nothing is
+  needed: the incremental build copies every file of the sandbox into
+  `node/downport`, and the framework's `node/setup/setup.mjs` creates every
+  table the transpile found. With `A2UI5_MCP_BACKEND=clone` and no clone yet
+  there is no sandbox at all, and the deploy says so (run `build_backend`
+  first).
 - **The host** (`lib/npm-host.mjs`, spawned by `startBackend` in place of
   `node/srv/express.mjs`): resolves the package from the runtime directory,
   imports `apps/init.mjs`, puts a `compress` export in front of the handler
@@ -340,10 +365,20 @@ sends them), keeps per session what the frontend keeps per component (the
 views in their five slots, the models and who owns them, the draft id, the
 unsent edits - `applyResponse` in `lib/snapshot.mjs`), and answers with the
 **agent snapshot v1** `analyzeScreen` derives from the view XML and the
-model. `docs/agent-snapshot.md` is the specification - the VS Code
-extension and the ABAP agent addon implement the same shape from it, so a
-change to the snapshot is a change to that page in the same commit, and the
-shape test in `test/snapshot.test.mjs` is where it shows. Three rules:
+model. The normative snapshot v1 is the semantic profile of
+abap2UI5/protocol (`profiles/semantic.md`, moved there from
+`docs/agent-snapshot.md`, which points to it and stays the reference for
+this implementation) - the VS Code extension and the ABAP agent addon
+implement the same shape, so a change to the snapshot is a change to that
+page in the same commit (and to the profile), and the shape test in
+`test/snapshot.test.mjs` is where it shows. The client follows the
+protocol's frontend rules - the `PROTOCOL` check, `sap-contextid` per
+session, the CSRF token handshake, one roundtrip at a time per session
+(a second `act` with an event queues), the error body verbatim, the
+popup/popover teardown on an `APP` change; the protocol's frontend suite
+checks them (`abap2ui5-conformance frontend --adapter agent` in an
+abap2UI5/protocol checkout, with `MCP_SERVER_HOME` pointing here), and
+`test/appclient.test.mjs` has a unit test for each. Three rules:
 **validate before sending** (an event that is not an action of the current
 snapshot, a field that is not on it or not editable, a choice outside its
 values is an error result naming what IS allowed, and a refused act changes
@@ -683,10 +718,13 @@ agent) find these artifacts in a dirty sibling worktree, mcp-server caused them:
   Deleting any of it is safe: it is installed, fetched or built again.
 - the dev sandbox (any of its three homes) after `migrate_report { deploy:
   true }`: the converted class's files and, beside it, every
-  `z2ui5_cl_cgui_*` class of abap-cloud-gui's `src/01` and the popups it
+  `z2ui5_cl_cgui_*` class, interface, table and data element of
+  abap-cloud-gui's `src/01` (the variant and layout stores' `z2ui5_cgui_var`,
+  `z2ui5_cgui_lay` and their DTELs) and the popups it
   calls (`z2ui5_cl_popup_context`, `z2ui5_cx_popup_error`, `_get_range`,
   `_to_confirm`, `_to_select`, `_input_val`) with all their files - what the
-  class needs to transpile; `remove_app` takes them out one by one.
+  class needs to transpile and run; `remove_app` takes the classes out one
+  by one (the tables' XML stays until deleted by hand).
 - `<tmp>/abap2ui5-mcp-remote/<repo>/` — the read-only GitHub mirrors (not a
   sibling worktree, but the same question "where did this come from": a
   directory that carries `.abap2ui5-mirror.json` is one, and deleting it is

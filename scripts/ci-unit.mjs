@@ -30,7 +30,8 @@
  *                           release (older than 1.145.0);
  *   2. every class and interface under the paths (default src) - each with
  *      all of its files as the repository carries them: the source, the XML,
- *      the test include, the local-class includes - is deployed and
+ *      the test include, the local-class includes - and every table (TABL)
+ *      and data element (DTEL) is deployed and
  *      transpiled. On the npm backend into a sandbox and a build of this
  *      run's own (the workspace's unit-* and the runtime's apps-unit-*), the
  *      classes alone against the package, seconds; on a checkout into its
@@ -94,12 +95,17 @@ export function frameworkPinOf(abaplintJsonc) {
 
 /* A file of an ABAP object the way abapGit names it:
  * `<name>.<clas|intf>[.<include>].<abap|xml>` - the source, the XML sidecar
- * and a class's includes (testclasses, locals_imp, locals_def, macros). */
-const OBJECT_FILE = /^([^.\s]+)\.(clas|intf)(?:\.([a-z_]+))?\.(abap|xml)$/i;
+ * and a class's includes (testclasses, locals_imp, locals_def, macros) - or
+ * `<name>.<tabl|dtel>.xml`, a database table (or structure) and a data
+ * element, which are their XML alone. The backend creates a deployed
+ * transparent table at boot, so a class under test can read and write it. */
+const OBJECT_FILE = /^([^.\s]+)\.(clas|intf|tabl|dtel)(?:\.([a-z_]+))?\.(abap|xml)$/i;
+const XML_ONLY = new Set(['tabl', 'dtel']);
 
-/** Every class and interface under the paths, each with all of its files:
- *  `{ name, type, files: [{ path, name }], testclasses, conflict? }`. An
- *  object is there when its source (`<name>.<type>.abap`) is; `conflict`
+/** Every class, interface, table and data element under the paths, each
+ *  with all of its files: `{ name, type, files: [{ path, name }],
+ *  testclasses, conflict? }`. An object is there when its source
+ *  (`<name>.<type>.abap`; `<name>.<tabl|dtel>.xml`) is; `conflict`
  *  says it is there twice. */
 export function collectObjects(paths) {
   const objects = new Map();
@@ -125,7 +131,7 @@ export function collectObjects(paths) {
     if (type === 'clas' && include === 'testclasses' && ext === 'abap') o.testclasses = true;
   };
   for (const p of paths) walk(path.resolve(p));
-  return [...objects.values()].filter((o) => o.files.some((f) => f.name === `${o.name}.${o.type}.abap`));
+  return [...objects.values()].filter((o) => o.files.some((f) => f.name === `${o.name}.${o.type}.${XML_ONLY.has(o.type) ? 'xml' : 'abap'}`));
 }
 
 /** Copy the objects' files into `dir`, each object under the sandbox's name
