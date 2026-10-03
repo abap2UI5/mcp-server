@@ -84,7 +84,7 @@ JSON, lower-camel keys. Keys in this order; `pending` only when non-empty.
 | `snapshotVersion` | `1` |
 | `session` | the draft id to continue with (the last response's `S_FRONT.ID`) — the `session` argument of `app_describe`/`app_act` |
 | `app` | the class that answered last (`S_FRONT.APP`), upper case |
-| `title` | the title of the topmost layer: a Dialog/Popover `title`, else the Page `title`, else a `sap.f.DynamicPageTitle` heading |
+| `title` | the title of the topmost layer: a Dialog/SelectDialog/TableSelectDialog/Popover `title`, else the Page `title`, else a `sap.f.DynamicPageTitle` heading |
 | `layer` | the topmost active layer: `popover` when one is open, else `popup`, else `main` |
 | `fields`, `actions`, `tables`, `messages`, `texts`, `unsupported` | below |
 | `pending` | *(extension)* model paths changed by `app_act` without an event, not sent yet |
@@ -97,6 +97,19 @@ Every field, action and table carries its own `layer`.
 
 Ids (`f1…`, `a1…`, `t1…`) are assigned in document order and are stable
 **within one snapshot** only — re-read them after every act.
+
+**Versioning.** `snapshotVersion` stays `1` for additive changes: a new
+optional key, a new enum value, a control described that was not before.
+Consumers ignore keys they do not know and treat an unknown enum value as
+text. A renamed or removed key, a changed type or a changed meaning of an
+existing value bumps the version (and is listed here). The additions to v1
+so far, all additive:
+
+| Added | What |
+| --- | --- |
+| `tables[].control` `sap.m.SelectDialog`, `sap.m.TableSelectDialog` | selection dialogs are tables; their `confirm` is a row action (the pick, see [the pick](#the-pick-a-selection-dialogs-confirm)) |
+| `messages[].source` `popover`, `messageview` | the items of a `sap.m.MessagePopover` / `sap.m.MessageView` |
+| `messages[].subtitle`, `messages[].description` | optional, on those items |
 
 ### fields
 
@@ -158,7 +171,7 @@ One per abap2UI5 event wire in a visible control's attribute —
 | `control` | the control the wire sits on |
 | `trigger` | the UI5 event (`press`, `change`, `valueHelpRequest`, `selectionChange`, …) |
 | `enabled` | the control's `enabled` (literal, bound, expression) |
-| `scope` | `row` when the wire sits in a table's row template (`items`/`rows` template, `rowActionTemplate`, `rowSettingsTemplate`) or is a row event on the table itself (`itemPress`, `selectionChange`, `rowSelectionChange`, `cellClick`, `rowPress`, `delete`, `beforeOpenContextMenu`); else `screen` |
+| `scope` | `row` when the wire sits in a table's row template (`items`/`rows` template, `rowActionTemplate`, `rowSettingsTemplate`) or is a row event on the table itself (`itemPress`, `selectionChange`, `rowSelectionChange`, `cellClick`, `rowPress`, `delete`, `beforeOpenContextMenu`, and a selection dialog's `confirm`); else `screen` |
 | `table` | the table id, only when `scope` is `row` |
 | `layer` | the layer of the control |
 
@@ -174,9 +187,9 @@ client at act time, or passed explicitly in `args`):
 | `$row:<PATH>` | `${PATH}` (relative) | the row given as `row` |
 | `$model:/<PATH>` | `${/PATH}` | the model at act time |
 | `$source:<prop>` | `${$source>/prop}` | the control's property (resolved in the row for a row action) |
-| `$parameters:<path>` | `${$parameters>/path}` | must be passed in `args` |
+| `$parameters:<path>` | `${$parameters>/path}` | for a row event, the row given as `row` ([row event parameters](#row-event-parameters)); else must be passed in `args` |
 | `$event` | `$event` | must be passed in `args` |
-| `$expr:<raw>` | any other expression (`${QTY} * 10`, an object literal, a formatter call) | must be passed in `args` |
+| `$expr:<raw>` | any other expression (`${QTY} * 10`, an object literal, a formatter call) | for a row event, the [call shapes](#row-event-parameters) on a row-valued parameter; else must be passed in `args` |
 | `$action` | the pressed action of a message box with `onClose` | `args`, default: its first choice |
 
 **Actions that are not view wires** (from the last response's `T_CUSTOM`):
@@ -195,19 +208,20 @@ unsent edits; nothing goes to the backend, the draft id stays. Every other
 ### tables
 
 One per `sap.m.Table`, `List`, `Tree`, `GridList` (and below `ListBase`),
-`sap.ui.table.Table`, `TreeTable`, `AnalyticalTable` whose `items`/`rows` is
-bound to an absolute default-model path:
+`sap.m.SelectDialog`, `sap.m.TableSelectDialog`, `sap.ui.table.Table`,
+`TreeTable`, `AnalyticalTable` whose `items`/`rows` is bound to an absolute
+default-model path:
 
 | Key | Derivation |
 | --- | --- |
 | `id`, `path`, `name` | as for fields (`t<n>`) |
 | `label` | `headerText`, `title`, the first `Title` in `headerToolbar`/`extension`/`infoToolbar`, else `name` |
 | `control` | the table control |
-| `columns` | `[{ name, label }]`: sap.m.Table — the cells of the `ColumnListItem` template in order, the label from the column header; list items (`StandardListItem`, …) — their bound properties (label = property name); sap.ui.table — each column's `template`, the label from `label` or the column's label control. `name` is the cell's relative binding path (`TITLE`), else `COL<n>` |
+| `columns` | `[{ name, label }]`: sap.m.Table and TableSelectDialog — the cells of the `ColumnListItem` template in order, the label from the column header; list items (`StandardListItem`, …, the SelectDialog's) — their bound properties (label = property name); sap.ui.table — each column's `template`, the label from `label` or the column's label control. `name` is the cell's relative binding path (`TITLE`), else `COL<n>` |
 | `rowCount` | length of the bound array |
 | `rows` | the first `maxRows` rows (default 20, max 200): per column the cell's main property resolved in the row (`text`, `value`, `selected`, …); plus `selectionField` when there is one |
 | `truncated` | `rowCount > rows.length` |
-| `selectionMode` | `None`/`Single`/`Multi` from `mode` (sap.m) or `selectionMode` (sap.ui.table, default `MultiToggle` → `Multi`) |
+| `selectionMode` | `None`/`Single`/`Multi` from `mode` (sap.m) or `selectionMode` (sap.ui.table, default `MultiToggle` → `Multi`); a selection dialog is `Multi` when `multiSelect` is true, else `Single` |
 | `editableCells` | columns whose cell is an input-like control bound to a row property and not disabled in every row; plus `selectionField` |
 | `layer` | as above |
 | `selectionField` | *(extension)* the row property the template's `selected` is bound to (`SELKZ`), when the table selects at all — selecting a row is setting it: `"/T_TAB/2/SELKZ": true` |
@@ -215,9 +229,19 @@ bound to an absolute default-model path:
 Header controls that are more than text (a select-all CheckBox, a sort
 Button) and toolbars are described like any control on the screen.
 
+**Selection dialogs** (`SelectDialog`, `TableSelectDialog`) are tables of the
+layer they are in — usually `popup` (`popup_display` of a fragment with the
+dialog), or `main` for one in a view's `dependents` that a frontend action
+opens. Their wires are actions of the dialog: `confirm` is a **row action**
+(`scope: "row"`, `table` its id) — the pick — and `search`, `liveChange`,
+`cancel` are screen actions (`${$parameters>/value}`, the search term, is an
+`args` value). A value help built as a `Dialog` with a `Table` is an ordinary
+table with a `selectionField`.
+
 ### messages
 
-`{ type, text, source, field? }`, `type` one of `success`, `info`,
+`{ type, text, source, field?, subtitle?, description? }` (keys in this
+order, the optional ones only when set), `type` one of `success`, `info`,
 `warning`, `error`:
 
 | source | From |
@@ -227,6 +251,22 @@ Button) and toolbars are described like any control on the screen.
 | `strip` | a visible `sap.m.MessageStrip` (its `type`) |
 | `field` | a field's `valueState` (`Error`/`Warning`/`Success`/`Information`) with `valueStateText`; `field` is the field id. Also a row of the app's message table (`z2ui5.cc.MessageManager items`) whose `TARGET` is a path: `field` is the field id when a field has that path, else the target path |
 | `model` | *(extension)* a row of the app's message table without a target |
+| `popover` | *(extension)* a `MessageItem` (or `MessagePopoverItem`) of a `sap.m.MessagePopover` — whether it is open or not: one in a view's `dependents` opens through a frontend action the client does not perform, and its items are the messages the app shows there |
+| `messageview` | *(extension)* a `MessageItem` of a `sap.m.MessageView` (on the page, or in a dialog) |
+
+A message list's items are static `MessageItem`s, or the one template of a
+bound `items` resolved per row of an absolute default-model path (a list bound
+to a named model — the `message` model — is noted in `unsupported`). Per item:
+`type` from the item's `type` (`Error`/`Warning`/`Success`/`Information`;
+`None` and any other value → `info`; absent or empty → `error`, UI5's
+default), `text` its `title`, `subtitle` and `description` when not empty
+(`description` with the tags stripped when `markupDescription` is true); an
+item whose title, subtitle and description are all empty is skipped. `text`,
+`subtitle` and `description` are clipped at 1000 characters. At most 50
+messages per list (the cut is noted in `unsupported` as `<MessagePopover |
+MessageView> (<layer>): <n> messages, the first 50 listed`). The list's own
+wires (`activeTitlePress`, `beforeClose`, …) are actions like any other; its
+`items` are not walked further (a MessageItem's link is not described).
 
 ### texts
 
@@ -287,9 +327,11 @@ The current state from the last response kept — no roundtrip.
      the event name, the first enabled one wins (the row-scope one when `row`
      is given) — use the id to pick another.
    - A row action whose arguments read the row needs `row` (0-based, within
-     `rowCount`); a `$parameters`/`$event`/`$expr` argument needs its value in
-     `args` (positional, `null` where the client fills in); a static argument
-     cannot be overridden.
+     `rowCount`); a `$parameters`/`$expr` argument the row does not fill (see
+     [row event parameters](#row-event-parameters)) and every `$event`
+     argument needs its value in `args` (positional, `null` where the client
+     fills in); a static argument cannot be overridden.
+   - A selection dialog's `confirm` is [the pick](#the-pick-a-selection-dialogs-confirm).
    - While a popup is open, the page's fields and actions are refused with
      that reason.
 2. **Apply** the values to the client's model.
@@ -301,6 +343,90 @@ The current state from the last response kept — no roundtrip.
    another slot's model stay pending, as in the browser.
 5. A backend error (HTTP status, no JSON) → error with the backend's text;
    the session stays at its draft id and the edits are rolled back.
+
+### The pick: a selection dialog's confirm
+
+In the browser a `SelectDialog`/`TableSelectDialog` confirms when a row is
+clicked (single select) or when OK is pressed after rows were ticked (multi
+select); the row items' `selected` is two-way bound (`selected="{ZZSELKZ}"`,
+the table's `selectionField`), so the selection travels with the confirm as
+the model delta, and the confirm's event parameters are the selected rows.
+`app_act({ event: <the confirm>, row })` does the same, in this order, after
+`values` are applied:
+
+1. `row` must be within `rowCount` (else *table t1 has N row(s) - row R does
+   not exist (rows are 0-based)*).
+2. With a `selectionField` and `row`: single select sets every other row's
+   field that is truthy to `false`, then the row's to `true` unless it is
+   already `true`; multi select sets the row's to `true` unless it is already
+   `true` (a pick adds to the selection; untick a row through `values`). Each
+   write is a pending edit of the dialog's model and goes out with the
+   confirm as its delta — only what changed, as the browser's two-way
+   binding writes only changes. (The model path of a data reference ends in
+   `*`, `/MR_TAB_POPUP/*/0/ZZSELKZ`; the delta then ships the whole
+   attribute, as the frontend's `buildDeltaFromPaths` does.)
+3. The selected rows: with a `selectionField`, every row whose field is
+   truthy, in model order (a sorter of the items binding is not applied);
+   without one, the row given. In single select it is the row given.
+4. Single select with no row selected (no `row`, nothing truthy) is refused:
+   *action aN (EVENT) picks a row of table tN (N rows) - pass `row` (0-M)*.
+   Multi select without `row` confirms what is selected — possibly nothing.
+5. The arguments are filled from the selected rows (below); one the client
+   cannot compute is refused naming `args[i]`, and the refusal rolls the
+   pick back with everything else.
+
+### Row event parameters
+
+`${$parameters>/…}` arguments are the UI5 event's parameters. For the events
+whose parameters ARE the row, the client fills them from the row(s) — the
+row given as `row`, or the selected rows of a pick:
+
+| Event | Parameters |
+| --- | --- |
+| selection dialog `confirm` | `selectedItem` (the first selected row's item, `null` with none), `selectedItems` (one item per selected row), `selectedContexts` (one binding context per selected row) |
+| `sap.m` list/table `itemPress`, `selectionChange`, `delete`, `beforeOpenContextMenu` (on the table) | `listItem` |
+| `sap.ui.table` `rowSelectionChange` | `rowIndex` (the row), `rowContext` |
+| `sap.ui.table` `cellClick` | `rowIndex`, `rowBindingContext` |
+| `sap.ui.table` `beforeOpenContextMenu` | `rowIndex` |
+| a wire in a grid table's `rowActionTemplate` (RowActionItem `press`) | `row` |
+
+Any other parameter of these events (`selected`, `listItems`,
+`columnIndex`, `srcControl`, …) and every parameter of other events must be
+passed in `args`. A table row event never selects the row by itself — only
+the pick does.
+
+`$parameters:<path>` is resolved the way UI5 resolves it: the parameters sit
+in a `JSONModel` (`EventHandlerResolver`), whose path is split at `/` and
+walked key by key (`JSONModel._getObject`). So a segment with `[` or `]` reads
+`undefined` (checked before anything else) — `${$parameters>/selectedContexts[0]/sPath}`, the wire of
+abap2UI5's `z2ui5_cl_pop_to_select` and the popups addon's
+`z2ui5_cl_popup_to_select`, is `undefined` in the browser and is sent as
+`null` (the JSON of `undefined` in the argument array); write
+`${$parameters>/selectedContexts/0/sPath}` to get the path. A binding context
+answers `sPath` (`<table path>/<row>`, e.g. `/T_TAB/2`), an array its index
+and `length`; a path that ends at an item or a context (the browser sends the
+control marshalled with all its properties) or goes into one any further, or
+names a parameter outside the table above, is refused naming `args[i]`.
+
+`$expr:` arguments are filled for these shapes on a row-valued parameter `P`
+(whitespace around `.` and inside `()` is allowed), and refused naming
+`args[i]` otherwise:
+
+| Shape | Value |
+| --- | --- |
+| `${$parameters>/P}.getBindingContext().getPath()`, `${$parameters>/P}.getPath()` (`P` a context) | `<table path>/<row>` |
+| `${$parameters>/P}.getBindingContext().getProperty('X')`, `${$parameters>/P}.getProperty('X')` (`P` a context) | the row's `X` as the model holds it, `null` when absent |
+| `${$parameters>/P}.get<Prop>()` (`P` an item of a sap.m list or table) | the item template's `<prop>` attribute (first letter lower case) resolved in the row like a cell value; a number becomes its string; not set or unresolvable → refused. `getId()` is refused (control ids are generated) |
+| `${$parameters>/P}.getCells()[n].get<Prop>()` | the same on the n-th cell: every cell of a `ColumnListItem`, the visible columns' templates of a grid table row |
+| `${$parameters>/P} ? <one of the above> : <literal>` | the shape when `P` is an item or a context (or truthy), else the literal (`'…'`, `"…"`, `null` or a number) |
+
+Example — the abap-cloud-gui F4 popup (`z2ui5_cl_popup_to_select`, single
+select, `selected="{ZZSELKZ}"`): `app_act({ event: "CONFIRM", row: 0 })`
+sends `T_EVENT_ARG: [null]` and `MODEL: { "MR_TAB_POPUP": { "*": [ … the
+filtered rows, row 0 with "ZZSELKZ": true … ] } }`; the popup reads
+`ZZSELKZ` and hands the row back. A `SelectDialog` with
+`confirm=".eB(['VH_CONFIRM'], ${$parameters>/selectedItem}.getTitle())"`
+and `<StandardListItem title="{NAME}"/>` sends the picked row's `NAME`.
 
 ### Sessions
 
@@ -382,6 +508,14 @@ What differs from Contract B as first written, and why:
 - **A modal popup hides the page** — only the topmost modal layer is
   described (the contract defined `layer` but not which layers to list).
 - **`event` also takes an action id**, and **`max_rows`** is an extra input.
+- **Selection dialogs are tables and their `confirm` is the pick** — the
+  contract described table controls only; without the dialogs an agent could
+  open a value help and read the model, but not choose a row.
+- **`$parameters` of row events are filled from the row**, with UI5's
+  JSONModel path semantics (a `[n]` segment is `null`, as in the browser).
+- **`source: "popover"` / `"messageview"`** with the optional `subtitle` and
+  `description` — the message lists of sap.m (abap-cloud-gui collects every
+  message of a run in a MessagePopover).
 - **Actions from `T_CUSTOM`** (toast/box `onClose`, `START_TIMER`) are
   actions with triggers `close` and `timer`.
 
@@ -390,7 +524,10 @@ What differs from Contract B as first written, and why:
 - Anything computed in the browser: formatters, composite and `parts`
   bindings (resolved as text where possible, never editable), expression
   bindings beyond the simple operators (treated as unknown), the values of
-  `$parameters`/`$event`/`$expr` arguments.
+  `$parameters`/`$event`/`$expr` arguments beyond the row event shapes above
+  (a control-valued parameter such as a MessagePopover's
+  `${$parameters>/item}` is marshalled by the browser with all its
+  properties - pass what the app reads).
 - Client-only state: a table's selection without a `selected` binding, a
   growing table's loaded page, the open tab of an IconTabBar (all tabs'
   content is described), scroll position, focus.

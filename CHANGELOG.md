@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- **Agent snapshot: selection dialogs and message lists.** `SelectDialog`
+  and `TableSelectDialog` are tables now (`control` names them,
+  `selectionMode` from `multiSelect`, the dialog's `title` titles its layer),
+  and their `confirm` is a row action: `app_act({ event, row })` picks the row
+  as a click does - its `selectionField` (`selected="{ZZSELKZ}"`) set, the
+  other rows' cleared in single select, all sent as the model delta - and
+  fills the confirm's `$parameters` from the selected rows
+  (`selectedItem`, `selectedItems`, `selectedContexts`). The row-valued
+  parameters of table row events (`listItem`, `rowIndex`, `rowContext`,
+  `rowBindingContext`, a row action item's `row`) are filled from `row` too,
+  for the shapes views write (`.getBindingContext().getProperty('X')`,
+  `.getPath()`, `.get<Prop>()`, `.getCells()[n].get<Prop>()`, the `? :`
+  guard); paths follow UI5's JSONModel, so `selectedContexts[0]/sPath` is
+  `null` as in the browser. Anything else is refused naming `args[i]`. The
+  items of a `MessagePopover` / `MessageView` are messages with `source`
+  `popover` / `messageview` and the optional `subtitle` and `description`.
+  All additive - `snapshotVersion` stays 1, and `docs/agent-snapshot.md` now
+  says what may change within a version. New recorded sessions: samples-
+  controls 623 (SelectDialog), samples 452 (MessageView, MessagePopover) and
+  two abap-cloud-gui report2cloud reports (the F4 TableSelectDialog of the
+  popups, the message popover); the agent integration test picks a row
+  through `app_act` on `@abap2ui5/node-runtime`.
 - **`migrate_report`: a classic ABAP report as an abap2UI5 app.** The source
   of a report (and optionally its `.prog.xml` text pool and the class name)
   in; the class of the abap-cloud-gui addon out - `INHERITING FROM

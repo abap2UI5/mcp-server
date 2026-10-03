@@ -362,10 +362,17 @@ The snapshot module is pure and takes the linter's UI5 metadata
 (`./properties` `loadSnapshot`) only as an optional refinement for controls
 its own table lacks: the tools need a backend, never the linter.
 `test/fixtures/agent/*.json` are real request/response pairs of
-abap2UI5/samples apps (recorded by driving the client against
-`@abap2ui5/node-runtime`); `test/appclient.test.mjs` replays them and fails
+abap2UI5/samples and samples-controls apps and of abap-cloud-gui's
+report2cloud runtime harness (recorded by driving the client against
+`@abap2ui5/node-runtime`; the `cgui-*` ones through that harness, with the
+popups addon); `test/appclient.test.mjs` replays them and fails
 on any request that differs from the recorded one. Re-record them when the
-protocol moves (the fixture's `note` says against which release).
+protocol moves (the fixture's `note` says against which release). Values the
+browser computes are filled only where the browser's own rule is known and
+ported - a selection dialog's pick, the row-valued event parameters, read
+with UI5's JSONModel path semantics (`selectedContexts[0]/sPath` is `null`
+there, so it is `null` here) - and refused naming `args[i]` everywhere else;
+docs/agent-snapshot.md "Row event parameters" is the list.
 
 ### The CI runner — `scripts/ci-unit.mjs`, `action.yml`, the `abap2ui5-unit` bin
 
@@ -739,7 +746,8 @@ build, unit tests, boot, GET and a POST roundtrip), about 30 s cold, skipped
 by itself when the registry or GitHub cannot be reached and with
 `A2UI5_MCP_SKIP_NETWORK_TESTS=1`. `test/agent-integration.test.mjs` sits
 behind the same gate: it builds `test/fixtures/agent-app/zcl_agent_mcp`
-(a form, a table with a row action and selection, a popup) on the published
+(a form, a table with a row action and selection, a popup) and
+`zcl_agent_mcp_pick` (a SelectDialog value help, a MessagePopover) on the published
 package and operates it through `lib/appclient.mjs` and through the server's
 app tools over stdio (about 25 s). The agent snapshot's pure halves are
 `test/snapshot.test.mjs` (the parsers, the slot bookkeeping, the snapshot on

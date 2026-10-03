@@ -224,8 +224,10 @@ against the local backend, and answer with an **agent snapshot** derived from
 the response's view XML and model: the fields an agent may fill (model path,
 label, kind, current value, choice values, editable), the actions it may fire
 (event name, static and row-dependent arguments), the tables (columns, the
-first rows, selection), the messages (toast, message box, MessageStrip, field
-value states) and some static text. An act is validated against the snapshot
+first rows, selection - a SelectDialog/TableSelectDialog is a table too, and
+`app_act` with `row` picks from it), the messages (toast, message box,
+MessageStrip, field value states, MessagePopover and MessageView items) and
+some static text. An act is validated against the snapshot
 before anything is sent: an unknown event, a field that is not on the screen
 or not editable, a choice outside its values is refused with the list of what
 is allowed. A short session against `z2ui5_cl_smp_app_009` of

@@ -1,7 +1,8 @@
 // The app_* tools against a REAL transpiled backend: @abap2ui5/node-runtime
 // from the registry (the npm backend, the way a fresh machine gets it), an
 // app class with a form, a table with a row action and a selection, and a
-// popup (test/fixtures/agent-app/zcl_agent_mcp.clas.abap) deployed and built,
+// popup (test/fixtures/agent-app/zcl_agent_mcp.clas.abap), and one with a
+// SelectDialog value help and a MessagePopover (zcl_agent_mcp_pick) deployed and built,
 // then operated through the wire protocol - first through lib/appclient.mjs,
 // then through the server itself over stdio (app_list, app_start, app_act,
 // app_describe), so the tool wiring is proven on the same build.
@@ -21,6 +22,7 @@ import { fileURLToPath } from 'node:url';
 const PORT = 4451;
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const APP_FILE = path.join(ROOT, 'test', 'fixtures', 'agent-app', 'zcl_agent_mcp.clas.abap');
+const PICK_FILE = path.join(ROOT, 'test', 'fixtures', 'agent-app', 'zcl_agent_mcp_pick.clas.abap');
 
 function reachable() {
   if (process.env.A2UI5_MCP_SKIP_NETWORK_TESTS) return 'A2UI5_MCP_SKIP_NETWORK_TESTS is set';
@@ -85,6 +87,7 @@ test('app_start / app_act / app_describe operate a real app on @abap2ui5/node-ru
   const log = [];
   try {
     rt.deployApp({ className: 'zcl_agent_mcp', source: fs.readFileSync(APP_FILE, 'utf8') });
+    rt.deployApp({ className: 'zcl_agent_mcp_pick', source: fs.readFileSync(PICK_FILE, 'utf8') });
     const built = await rt.buildBackend({ mode: 'auto', withLint: false, onLine: (l) => log.push(l) });
     assert.equal(built.ok, true, `build:\n${built.tail}\n${log.slice(-20).join('\n')}`);
     assert.ok(rt.builtAppClasses().some((a) => a.app === 'ZCL_AGENT_MCP' && a.source === 'dev'), 'app_list sees the dev app');
@@ -124,6 +127,22 @@ test('app_start / app_act / app_describe operate a real app on @abap2ui5/node-ru
     assert.equal(s.layer, 'main');
     assert.ok(s.texts.includes('Result: confirmed'), JSON.stringify(s.texts));
 
+    // a SelectDialog value help: search through args, pick a row with `row`
+    let p = await client.start('zcl_agent_mcp_pick');
+    assert.deepEqual(p.messages, [{ type: 'warning', text: 'pick a customer', source: 'popover' }], 'the MessagePopover in dependents');
+    p = await client.act(p.session, { event: 'VH' });
+    assert.equal(p.layer, 'popup');
+    assert.equal(p.title, 'Customers');
+    assert.deepEqual([p.tables[0].control, p.tables[0].selectionMode, p.tables[0].selectionField, p.tables[0].rowCount], ['sap.m.SelectDialog', 'Single', 'SELKZ', 3]);
+    assert.deepEqual(p.actions.map((a) => `${a.event}:${a.scope}`), ['SEARCH:screen', 'PICKED:row', 'CANCEL:screen']);
+    await assert.rejects(client.act(p.session, { event: 'PICKED' }), /picks a row of table t1 \(3 rows\) - pass `row` \(0-2\)/);
+    p = await client.act(p.session, { event: 'SEARCH', args: ['mm'] });
+    assert.deepEqual(p.tables[0].rows.map((r) => r.TITLE), ['gamma']);
+    p = await client.act(p.session, { event: 'PICKED', row: 0 });
+    assert.equal(p.layer, 'main');
+    assert.equal(p.fields[0].value, 'gamma', 'selectedItem.getTitle() of the picked row');
+    assert.deepEqual(p.messages, [{ type: 'success', text: 'picked gamma selected gamma', source: 'popover' }], 'the pick selected SELKZ of that row');
+
     // the same app through the server's tools, on the build above - the
     // server starts a backend of its own, so this process's goes first (and
     // a session of it is gone with it, which the client says)
@@ -133,7 +152,7 @@ test('app_start / app_act / app_describe operate a real app on @abap2ui5/node-ru
     try {
       await srv.rpc('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'agent-it', version: '0' } });
       const list = await srv.call('app_list', { filter: 'agent' });
-      assert.deepEqual(JSON.parse(list.content[0].text).apps, [{ app: 'ZCL_AGENT_MCP', source: 'dev' }]);
+      assert.deepEqual(JSON.parse(list.content[0].text).apps, [{ app: 'ZCL_AGENT_MCP', source: 'dev' }, { app: 'ZCL_AGENT_MCP_PICK', source: 'dev' }]);
       const started = await srv.call('app_start', { app: 'zcl_agent_mcp', values: { f1: 'Tool' } });
       assert.ok(!started.isError, started.content[0].text);
       const snap = JSON.parse(started.content[0].text);
@@ -145,6 +164,15 @@ test('app_start / app_act / app_describe operate a real app on @abap2ui5/node-ru
       assert.ok(saved2.messages.some((m) => m.source === 'toast' && m.text === 'saved Tool express= priority=B'), JSON.stringify(saved2.messages));
       const described = JSON.parse((await srv.call('app_describe', { session: saved2.session })).content[0].text);
       assert.equal(described.session, saved2.session);
+      // the pick through app_act
+      const pick0 = JSON.parse((await srv.call('app_start', { app: 'zcl_agent_mcp_pick' })).content[0].text);
+      const pick1 = JSON.parse((await srv.call('app_act', { session: pick0.session, event: 'VH' })).content[0].text);
+      const noRow = await srv.call('app_act', { session: pick1.session, event: 'PICKED' });
+      assert.equal(noRow.isError, true);
+      assert.match(noRow.content[0].text, /picks a row of table t1 \(3 rows\) - pass `row` \(0-2\)/);
+      const pick2 = JSON.parse((await srv.call('app_act', { session: pick1.session, event: 'PICKED', row: 1 })).content[0].text);
+      assert.equal(pick2.fields[0].value, 'beta');
+      assert.deepEqual(pick2.messages.map((m) => m.text), ['picked beta selected beta']);
     } finally {
       srv.close();
     }

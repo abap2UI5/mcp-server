@@ -116,6 +116,26 @@ test('nested views and popovers replay as recorded', async () => {
   await run('popover-026');
   await run('messages-467');
   await run('box-382');
+  await run('messages-452');
+  await run('cgui-popover-07');
+});
+
+test('SelectDialog (samples-controls 623): confirm with `row` sends the picked item\'s title, search takes its value in args', async () => {
+  const { snaps, sent } = await run('select-623');
+  assert.deepEqual(sent[2].S_FRONT.T_EVENT_ARG, ['17']);
+  assert.deepEqual(sent[3].S_FRONT, { ID: sent[3].S_FRONT.ID, EVENT: 'VH_CONFIRM', T_EVENT_ARG: ['Notebook Basic 17'] }, '${$parameters>/selectedItem}.getTitle() of row 0');
+  assert.equal(sent[3].MODEL, undefined, 'no selection binding: nothing to send but the event');
+  assert.equal(snaps[3].fields[0].value, 'Notebook Basic 17');
+});
+
+test('TableSelectDialog (abap-cloud-gui F4): the pick selects ZZSELKZ, and selectedContexts[0]/sPath is null as in the browser', async () => {
+  const { snaps, sent } = await run('cgui-f4-06');
+  assert.deepEqual(sent[3].S_FRONT.T_EVENT_ARG, ['Ber', false]);
+  // a JSONModel path has no [n] syntax: UI5 reads undefined there, JSON sends null
+  assert.deepEqual(sent[4].S_FRONT.T_EVENT_ARG, [null]);
+  // the '*' segment of a data reference is no row: the frontend ships the whole attribute
+  assert.deepEqual(sent[4].MODEL, { MR_TAB_POPUP: { '*': [{ NAME: 'Berlin', WERKS: '3000', ZZSELKZ: true }] } });
+  assert.equal(snaps[4].fields.find((f) => f.name === 'P_PLANT').value, '3000');
 });
 
 // ------------------------------------------------------------ validation ----
@@ -315,4 +335,120 @@ test('the default transport hands fetch the same request as before: POST to base
   assert.equal(seen.method, 'POST');
   assert.deepEqual(seen.headers, { 'content-type': 'application/json', 'sap-contextid-accept': 'header' });
   assert.deepEqual(JSON.parse(seen.body), { value: { S_FRONT: { ORIGIN: 'http://127.0.0.1:4471', PATHNAME: '/', SEARCH: '?app_start=z_x' } } });
+});
+
+// ------------------------------------------- selection dialogs: the pick ----
+
+test('a selection dialog\'s confirm: `row` is needed to pick one, it must exist, a search value comes from args', async () => {
+  const r = replay('select-623');
+  const c2 = createAppClient({ baseUrl: BASE, fetchImpl: r.fetchImpl });
+  let s = await c2.start('z2ui5_cl_smpc_app_623');
+  s = await c2.act(s.session, { event: 'VALUE_HELP' });
+  await rejects(c2.act(s.session, { event: 'VH_CONFIRM' }), /^action a2 \(VH_CONFIRM\) picks a row of table t1 \(123 rows\) - pass `row` \(0-122\)$/);
+  await rejects(c2.act(s.session, { event: 'VH_CONFIRM', row: 123 }), /^table t1 has 123 row\(s\) - row 123 does not exist \(rows are 0-based\)$/);
+  await rejects(c2.act(s.session, { event: 'VH_SEARCH' }), /^argument 0 of VH_SEARCH \(\$parameters:value\) is computed in the browser - pass its value in args\[0\]$/);
+  await rejects(c2.act(s.session, { event: 'VH_CANCEL', row: 1 }), /`row` is for row actions - a3 \(VH_CANCEL\) is a screen action/);
+  assert.equal(r.sent.length, 2, 'refusals send nothing');
+  assert.equal(c2.describe(s.session).pending, undefined);
+});
+
+/** A one-screen app: the start answers `xml` with `model`, every event an
+ *  answer without MODEL; the event requests are kept. */
+function fakeApp(xml, model) {
+  const bodies = [];
+  const transport = async ({ body }) => {
+    const value = JSON.parse(body).value;
+    bodies.push(value);
+    const response = bodies.length === 1
+      ? { S_FRONT: { ID: 'D1', APP: 'Z_T', S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'display', 'MAIN', xml]] } }, MODEL: model }
+      : { S_FRONT: { ID: `D${bodies.length}`, APP: 'Z_T' } };
+    return { status: 200, body: JSON.stringify(response) };
+  };
+  const client = createAppClient({ transport, location: (app) => ({ origin: 'x', pathname: '/', search: `?app_start=${app}` }) });
+  return { client, bodies };
+}
+const page = (body) => `<mvc:View xmlns="sap.m" xmlns:mvc="sap.ui.core.mvc" xmlns:t="sap.ui.table"><Page title="T">${body}</Page></mvc:View>`;
+
+const DIALOG = (multi, confirmArgs) => page(
+  `<TableSelectDialog title="Pick" multiSelect="${multi}" items="{/T}" confirm=".eB(['OK']${confirmArgs})">`
+  + '<ColumnListItem selected="{SEL}" type="Active"><cells><Text text="{A}"/><ObjectIdentifier title="{B}" text="{N}"/></cells></ColumnListItem>'
+  + '<columns><Column><header><Text text="A"/></header></Column><Column><header><Text text="B"/></header></Column></columns></TableSelectDialog>',
+);
+const ROWS = () => ({ T: [{ A: 'a0', B: 'b0', N: 0, SEL: false }, { A: 'a1', B: 'b1', N: 10, SEL: true }, { A: 'a2', B: 'b2', N: 20, SEL: false }] });
+
+test('the pick, single select: the picked row selected, the previous selection cleared, both sent; item arguments from the row', async () => {
+  const args = ", ${$parameters>/selectedContexts/0/sPath}, ${$parameters>/selectedItem}.getCells()[1].getTitle(), ${$parameters>/selectedItem}.getCells()[1].getText()"
+    + ", ${$parameters>/selectedItem}.getBindingContext().getProperty('A'), ${$parameters>/selectedItem}.getBindingContext().getPath()"
+    + ", ${$parameters>/selectedItem} ? ${$parameters>/selectedItem}.getCells()[0].getText() : ''"
+    + ", ${$parameters>/selectedItem}.getType(), ${$parameters>/selectedContexts/length}, ${$parameters>/selectedContexts[0]/sPath}";
+  const { client, bodies } = fakeApp(DIALOG('false', args), ROWS());
+  const s = await client.start('z_t');
+  assert.deepEqual(s.actions[0].args.length, 9);
+  await client.act(s.session, { event: 'OK', row: 2 });
+  assert.deepEqual(bodies[1].S_FRONT.T_EVENT_ARG, ['/T/2', 'b2', '20', 'a2', '/T/2', 'a2', 'Active', 1, null]);
+  assert.deepEqual(bodies[1].MODEL, { T: { __delta: { 1: { SEL: false }, 2: { SEL: true } } } });
+});
+
+test('the pick, multi select: the row joins the selection, selectedItem is the first selected row in model order', async () => {
+  const { client, bodies } = fakeApp(DIALOG('true', ', ${$parameters>/selectedContexts/1/sPath}, ${$parameters>/selectedItem}.getCells()[0].getText()'), ROWS());
+  const s = await client.start('z_t');
+  await client.act(s.session, { event: 'OK', row: 2 });
+  assert.deepEqual(bodies[1].S_FRONT.T_EVENT_ARG, ['/T/2', 'a1']);
+  assert.deepEqual(bodies[1].MODEL, { T: { __delta: { 2: { SEL: true } } } });
+});
+
+test('the pick without `row`: multi select confirms what is ticked, and an item argument with nothing ticked is refused', async () => {
+  const none = ROWS();
+  none.T[1].SEL = false;
+  const { client, bodies } = fakeApp(DIALOG('true', ', ${$parameters>/selectedContexts/0/sPath}'), none);
+  let s = await client.start('z_t');
+  s = await client.act(s.session, { values: { 't1/0/SEL': true } });
+  await client.act(s.session, { event: 'OK' });
+  assert.deepEqual(bodies[1].S_FRONT.T_EVENT_ARG, ['/T/0']);
+  assert.deepEqual(bodies[1].MODEL, { T: { __delta: { 0: { SEL: true } } } });
+  const empty = fakeApp(DIALOG('true', ', ${$parameters>/selectedItem}.getCells()[0].getText()'), none);
+  const e = await empty.client.start('z_t');
+  await rejects(empty.client.act(e.session, { event: 'OK' }), /^argument 0 of OK \(\$expr:\$\{\$parameters>\/selectedItem\}\.getCells\(\)\[0\]\.getText\(\)\) reads the picked row and none is selected - pass `row`, or the value in args\[0\]$/);
+  assert.equal(empty.bodies.length, 1);
+});
+
+test('the pick: a marshalled control, an id or an unknown call is asked for in args, and the refused pick leaves the selection alone', async () => {
+  for (const [arg, describe] of [
+    ['${$parameters>/selectedItems}', '$parameters:selectedItems'],
+    ['${$parameters>/selectedItem}.getId()', '$expr:${$parameters>/selectedItem}.getId()'],
+    ['${$parameters>/selectedItem}.getCells()[5].getText()', '$expr:${$parameters>/selectedItem}.getCells()[5].getText()'],
+    ['${$parameters>/selectedItem}.getHighlight()', '$expr:${$parameters>/selectedItem}.getHighlight()'],
+  ]) {
+    const { client, bodies } = fakeApp(DIALOG('false', `, ${arg}`), ROWS());
+    const s = await client.start('z_t');
+    const esc = describe.replace(/[$.*+?^{}()|[\]\\/]/g, '\\$&');
+    await rejects(client.act(s.session, { event: 'OK', row: 0 }), new RegExp(`^argument 0 of OK \\(${esc}\\) is computed in the browser - pass its value in args\\[0\\]$`));
+    assert.equal(bodies.length, 1);
+    const after = client.describe(s.session);
+    assert.equal(after.pending, undefined, 'the pick was rolled back');
+    assert.deepEqual(after.tables[0].rows.map((r) => r.SEL), [false, true, false]);
+    await client.act(s.session, { event: 'OK', row: 0, args: ['given'] });
+    assert.deepEqual(bodies[1].S_FRONT.T_EVENT_ARG, ['given']);
+  }
+});
+
+test('row events of tables: listItem, rowIndex/rowContext and a row action item\'s row are filled from `row`', async () => {
+  const xml = page(
+    '<Table items="{/T}" itemPress=".eB([\'PRESS\'], ${$parameters>/listItem}.getBindingContext().getProperty(\'B\'), ${$parameters>/listItem}.getCells()[0].getText())">'
+    + '<columns><Column/></columns><items><ColumnListItem type="Active"><cells><Text text="{A}"/></cells></ColumnListItem></items></Table>'
+    + '<t:Table rows="{/T}" rowSelectionChange=".eB([\'SEL\'], ${$parameters>/rowIndex}, ${$parameters>/rowContext}.getPath(), ${$parameters>/rowContext/sPath})"'
+    + ' cellClick=".eB([\'CELL\'], ${$parameters>/rowBindingContext}.getProperty(\'A\'), ${$parameters>/columnIndex})">'
+    + '<t:columns><t:Column><Label text="A"/><t:template><Text text="{A}"/></t:template></t:Column></t:columns>'
+    + '<t:rowActionTemplate><t:RowAction><t:RowActionItem type="Navigation" press=".eB([\'NAV\'], ${$parameters>/row}.getBindingContext().getProperty(\'B\'))"/></t:RowAction></t:rowActionTemplate></t:Table>',
+  );
+  const { client, bodies } = fakeApp(xml, ROWS());
+  let s = await client.start('z_t');
+  await rejects(client.act(s.session, { event: 'PRESS' }), /^action a1 \(PRESS\) is a row action of table t1 \(3 rows\) - pass `row` \(0-2\)$/);
+  s = await client.act(s.session, { event: 'PRESS', row: 1 });
+  s = await client.act(s.session, { event: 'SEL', row: 2 });
+  await rejects(client.act(s.session, { event: 'CELL', row: 0 }), /^argument 1 of CELL \(\$parameters:columnIndex\) is computed in the browser - pass its value in args\[1\]$/);
+  s = await client.act(s.session, { event: 'CELL', row: 0, args: [null, 0] });
+  s = await client.act(s.session, { event: 'NAV', row: 0 });
+  assert.deepEqual(bodies.slice(1).map((b) => b.S_FRONT.T_EVENT_ARG), [['b1', 'a1'], [2, '/T/2', '/T/2'], ['a0', 0], ['b0']]);
+  assert.ok(bodies.slice(1).every((b) => b.MODEL === undefined), 'a table row event selects nothing by itself');
 });

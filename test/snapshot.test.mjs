@@ -1,7 +1,8 @@
 // The agent snapshot (lib/snapshot.mjs) and its parsers (lib/viewxml.mjs),
 // sibling-free: the parsers on literal input, the snapshot on RECORDED backend
 // responses - test/fixtures/agent/*.json, real request/response pairs of
-// abap2UI5/samples apps driven through lib/appclient.mjs against
+// abap2UI5/samples and samples-controls apps and of abap-cloud-gui's
+// report2cloud runtime harness (cgui-*) driven through lib/appclient.mjs against
 // @abap2ui5/node-runtime 1.146.0 (each fixture says so). A shape change of the
 // snapshot is a contract change for the VS Code extension and the ABAP addon
 // (docs/agent-snapshot.md); the shape test below is where it shows.
@@ -142,6 +143,8 @@ const CONTRACT_KEYS = ['snapshotVersion', 'session', 'app', 'title', 'layer', 'f
 const FIELD_KEYS = ['id', 'path', 'name', 'label', 'control', 'kind', 'value', 'required', 'editable', 'layer'];
 const ACTION_KEYS = ['id', 'event', 'args', 'label', 'control', 'trigger', 'enabled', 'scope', 'layer'];
 const TABLE_KEYS = ['id', 'path', 'name', 'label', 'control', 'columns', 'rowCount', 'rows', 'truncated', 'selectionMode', 'editableCells', 'layer'];
+// type, text and source always; the others optional, in this order
+const MESSAGE_KEYS = ['type', 'text', 'source', 'field', 'subtitle', 'description'];
 
 test('every fixture snapshot has exactly the contract\'s shape (Contract B, snapshot v1)', () => {
   for (const file of fs.readdirSync(FIX).filter((f) => f.endsWith('.json'))) {
@@ -167,7 +170,9 @@ test('every fixture snapshot has exactly the contract\'s shape (Contract B, snap
     }
     for (const m of s.messages) {
       assert.ok(['success', 'info', 'warning', 'error'].includes(m.type), `${where}${m.type}`);
-      assert.ok(['toast', 'box', 'strip', 'field', 'model'].includes(m.source), `${where}${m.source}`);
+      assert.ok(['toast', 'box', 'strip', 'field', 'model', 'popover', 'messageview'].includes(m.source), `${where}${m.source}`);
+      assert.deepEqual(Object.keys(m), MESSAGE_KEYS.filter((k) => k in m), `${where}message keys`);
+      assert.ok(['type', 'text', 'source'].every((k) => k in m), `${where}message keys`);
     }
     assert.ok(s.texts.length <= 30);
     // ids are f1.., a1.., t1.. in order
@@ -330,6 +335,82 @@ test('message box (samples 382): the box text, typed by method', () => {
   assert.deepEqual(s.messages.filter((m) => m.source === 'box'), [{ type: 'info', text: 'Really?', source: 'box' }]);
 });
 
+test('SelectDialog (samples-controls 623): its items are a table, confirm is the row pick, search a screen action', () => {
+  const s = snapOf('select-623', 2, { maxRows: 2 });
+  assert.equal(s.layer, 'popup');
+  assert.equal(s.title, 'Products', 'a selection dialog titles its layer');
+  const [t] = s.tables;
+  assert.deepEqual({ ...t, rows: undefined }, {
+    id: 't1', path: '/T_PRODUCTS', name: 'T_PRODUCTS', label: 'Products', control: 'sap.m.SelectDialog',
+    columns: [{ name: 'PICURL', label: 'icon' }, { name: 'NAME', label: 'title' }, { name: 'PRODUCTID', label: 'description' }],
+    rowCount: 123, rows: undefined, truncated: true, selectionMode: 'Single', editableCells: [], layer: 'popup',
+  });
+  assert.deepEqual(t.rows[1], { PICURL: 'https://sdk.openui5.org/test-resources/sap/ui/documentation/sdk/images/HT-1001.jpg', NAME: 'Notebook Basic 17', PRODUCTID: 'HT-1001' });
+  assert.deepEqual(s.actions.map((a) => `${a.id}:${a.event}:${a.trigger}:${a.scope}:${a.table || ''}`), [
+    'a1:VH_SEARCH:search:screen:', 'a2:VH_CONFIRM:confirm:row:t1', 'a3:VH_CANCEL:cancel:screen:',
+  ]);
+  assert.deepEqual(byEvent(s, 'VH_CONFIRM').args, ['$expr:${$parameters>/selectedItem}.getTitle()']);
+  assert.equal(byEvent(s, 'VH_CONFIRM').label, 'Products: confirm');
+  assert.deepEqual(byEvent(s, 'VH_SEARCH').args, ['$parameters:value']);
+  assert.equal(snapOf('select-623', 3).tables[0].rowCount, 2, 'the search filtered the rows');
+  const back = snapOf('select-623', 4);
+  assert.equal(back.layer, 'main');
+  assert.equal(back.fields[0].value, 'Notebook Basic 17', 'the title of the picked row');
+});
+
+test('TableSelectDialog (abap-cloud-gui F4 through the popups): cells and column headers, ZZSELKZ the selection field', () => {
+  const s = snapOf('cgui-f4-06', 3);
+  assert.equal(s.app, 'Z2UI5_CL_POPUP_TO_SELECT');
+  assert.equal(s.layer, 'popup');
+  assert.equal(s.title, 'Single Select');
+  const [t] = s.tables;
+  assert.equal(t.control, 'sap.m.TableSelectDialog');
+  assert.equal(t.path, '/MR_TAB_POPUP/*');
+  assert.deepEqual(t.columns, [{ name: 'WERKS', label: 'WERKS' }, { name: 'NAME', label: 'NAME' }]);
+  assert.deepEqual(t.rows.map((r) => `${r.WERKS} ${r.NAME} ${r.ZZSELKZ}`), ['1000 Hamburg false', '2000 Walldorf false', '3000 Berlin false']);
+  assert.equal(t.selectionMode, 'Single');
+  assert.equal(t.selectionField, 'ZZSELKZ');
+  assert.deepEqual(t.editableCells, ['ZZSELKZ']);
+  assert.deepEqual(s.actions.map((a) => `${a.event}:${a.scope}:${JSON.stringify(a.args)}`), [
+    'CANCEL:screen:[]', 'SEARCH:screen:["$parameters:value","$parameters:clearButtonPressed"]', 'CONFIRM:row:["$parameters:selectedContexts[0]/sPath"]',
+  ]);
+  const back = snapOf('cgui-f4-06', 5);
+  assert.equal(back.app, 'Z2UI5_CL_CGUI_R2C_06');
+  assert.equal(back.fields.find((f) => f.name === 'P_PLANT').value, '3000', 'the plant picked in the popup');
+});
+
+test('MessageView and MessagePopover items are messages (samples 452): type, title, subtitle, description', () => {
+  const main = snapOf('messages-452', 1);
+  const view = main.messages.filter((m) => m.source === 'messageview');
+  assert.equal(view.length, 11);
+  assert.deepEqual({ ...view[0], description: view[0].description.slice(0, 32) }, {
+    type: 'error', text: 'Account 801 requires an assignment', source: 'messageview', subtitle: 'Role is invalid', description: 'First Error message description.',
+  });
+  assert.deepEqual(view[2].subtitle, undefined, 'an empty subtitle is left out');
+  assert.deepEqual(view.map((m) => m.type).join(','), 'error,warning,warning,warning,error,info,error,warning,error,error,warning');
+  assert.ok(view.every((m) => m.description.length <= 1000));
+  const pop = snapOf('messages-452', 2);
+  assert.equal(pop.layer, 'popover');
+  assert.equal(pop.messages.filter((m) => m.source === 'popover').length, 11);
+  assert.equal(pop.messages.filter((m) => m.source === 'messageview').length, 11, 'the page stays described beside a popover');
+  assert.ok(pop.actions.some((a) => a.event === 'POPOVER_CLOSE' && a.control === 'sap.m.MessagePopover' && a.layer === 'popover'));
+  const dlg = snapOf('messages-452', 4);
+  assert.equal(dlg.layer, 'popup');
+  assert.deepEqual([...new Set(dlg.messages.map((m) => m.source))], ['messageview'], 'a dialog hides the page and its messages');
+  assert.deepEqual(dlg.texts, [], 'message items are not repeated as texts');
+});
+
+test('a MessagePopover in dependents (abap-cloud-gui): the run\'s messages, while the popover opens in the browser only', () => {
+  const s = snapOf('cgui-popover-07', 2);
+  assert.deepEqual(s.messages, [
+    { type: 'warning', text: 'Number 42 is a warning', source: 'popover' },
+    { type: 'info', text: 'Number 42 processed', source: 'toast' },
+  ]);
+  const focus = byEvent(s, 'CGUI_MESSAGE_FOCUS');
+  assert.deepEqual([focus.trigger, focus.control, focus.args], ['activeTitlePress', 'sap.m.MessagePopover', ['$parameters:item']]);
+  assert.ok(s.unsupported.some((u) => /CONTROL_BY_ID\("cgui_message_popover", "", "toggleBy"/.test(u)), 'the toggle is a browser-only action');
+});
+
 // ----------------------------------------------- snapshot: synthetic ----
 
 const view = (body, extra = '') => `<mvc:View xmlns="sap.m" xmlns:mvc="sap.ui.core.mvc" xmlns:core="sap.ui.core" xmlns:form="sap.ui.layout.form" ${extra}><Page title="T">${body}</Page></mvc:View>`;
@@ -420,4 +501,41 @@ test('analyzeScreen hands the client its index, and pending paths ride along', (
   assert.deepEqual(snapshot.pending, ['/S_SCREEN/NAME']);
   assert.equal(index.fields.get('f4').modelKey, 'MAIN');
   assert.equal(index.actions.get('a1').wire.event, 'POPUP_TABLE_VALUE');
+});
+
+test('message lists: static items, UI5\'s default type Error, None as info, markup stripped, the 50-item cut, a named model noted', () => {
+  const items = Array.from({ length: 52 }, (_, i) => ({ T: `m${i}` }));
+  const s = buildSnapshot({
+    response: respond(view(
+      '<MessagePopover><items><MessageItem title="no type"/><MessageItem type="None" title="none"/>'
+      + '<MessageItem type="Success" title="ok" description="&lt;b&gt;bold&lt;/b&gt; text" markupDescription="true"/>'
+      + '<MessageItem type="Warning"/></items></MessagePopover>'
+      + '<MessageView items="{/T_M}"><MessageItem type="Information" title="{T}"/></MessageView>'
+      + '<MessageView items="{message>/}"><MessageItem title="{message}"/></MessageView>',
+    ), { T_M: items }),
+  });
+  assert.deepEqual(s.messages.slice(0, 4), [
+    { type: 'error', text: 'no type', source: 'popover' },
+    { type: 'info', text: 'none', source: 'popover' },
+    { type: 'success', text: 'ok', source: 'popover', description: 'bold text' },
+    { type: 'info', text: 'm0', source: 'messageview' },
+  ], 'an item without title, subtitle and description is no message');
+  assert.equal(s.messages.filter((m) => m.source === 'messageview').length, 50);
+  assert.ok(s.unsupported.includes('MessageView (main): 52 messages, the first 50 listed'));
+  assert.ok(s.unsupported.includes("MessageView bound to the named model 'message' (main) - messages not described"));
+});
+
+test('selection dialogs: multiSelect is Multi, a bound selected is the selectionField, confirm is a row action', () => {
+  const s = buildSnapshot({
+    response: respond(view(
+      '<TableSelectDialog title="Pick" multiSelect="true" items="{/T}" confirm=".eB([\'OK\'], ${$parameters>/selectedContexts/0/sPath})" cancel=".eB([\'NO\'])">'
+      + '<ColumnListItem selected="{SEL}"><cells><Text text="{A}"/><ObjectIdentifier title="{B}"/></cells></ColumnListItem>'
+      + '<columns><Column><header><Text text="Col A"/></header></Column><Column><header><Text text="Col B"/></header></Column></columns></TableSelectDialog>',
+    ), { T: [{ A: 'a1', B: 'b1', SEL: false }, { A: 'a2', B: 'b2', SEL: true }] }),
+  });
+  const [t] = s.tables;
+  assert.deepEqual([t.control, t.label, t.selectionMode, t.selectionField, t.editableCells], ['sap.m.TableSelectDialog', 'Pick', 'Multi', 'SEL', ['SEL']]);
+  assert.deepEqual(t.columns, [{ name: 'A', label: 'Col A' }, { name: 'B', label: 'Col B' }]);
+  assert.deepEqual(s.actions.map((a) => `${a.event}:${a.scope}:${a.table || ''}:${a.label}`), ['OK:row:t1:Pick: confirm', 'NO:screen::Pick: cancel']);
+  assert.equal(s.title, 'T', 'on the page, the page titles the layer');
 });
