@@ -1,0 +1,8 @@
+{
+  "level": 1,
+  "classes": ["zcl_bench_01"],
+  "controls": ["sap.m.Input", "sap.m.Button"],
+  "events": ["sap.m.Button.press"],
+  "bindings": ["sap.m.Input.value"],
+  "calls": ["message_toast_display"]
+}

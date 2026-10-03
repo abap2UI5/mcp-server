@@ -1,0 +1,7 @@
+{
+  "level": 3,
+  "classes": ["zcl_bench_13"],
+  "controls": [["sap.m.Table", "sap.ui.table.Table"], ["sap.m.Popover", "sap.m.ResponsivePopover"]],
+  "events": [["sap.m.Button.press", "sap.m.Link.press"]],
+  "calls": ["popover_display"]
+}

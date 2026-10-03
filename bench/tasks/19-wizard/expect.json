@@ -1,0 +1,11 @@
+{
+  "level": 3,
+  "classes": ["zcl_bench_19"],
+  "controls": [
+    "sap.m.Wizard",
+    { "any": ["sap.m.WizardStep"], "min": 3 },
+    ["sap.m.DatePicker", "sap.m.DateRangeSelection"]
+  ],
+  "events": ["sap.m.Button.press"],
+  "calls": ["message_toast_display", "message_box_display"]
+}

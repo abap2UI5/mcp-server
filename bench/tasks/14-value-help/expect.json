@@ -1,0 +1,11 @@
+{
+  "level": 3,
+  "classes": ["zcl_bench_14"],
+  "controls": [
+    "sap.m.Input",
+    ["sap.m.Dialog", "sap.m.SelectDialog", "sap.m.TableSelectDialog"]
+  ],
+  "events": ["sap.m.Input.valueHelpRequest"],
+  "bindings": ["sap.m.Input.value"],
+  "calls": ["popup_display"]
+}

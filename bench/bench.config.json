@@ -1,0 +1,6 @@
+{
+  "//": "The pins that make a bench run reproducible. The grader judges against the app-template at templateRef (its abaplint.jsonc, its abap2ui5lint.jsonc, and through the former the abap2UI5 release it pins); the template and full conditions hand the agent that same checkout. Move a pin deliberately, re-run `npm run verify`, and say so in the report - results across different pins are different experiments.",
+  "templateRepo": "https://github.com/abap2UI5/app-template",
+  "templateRef": "3f24a3a5758c0aa0fcdb02cf5966952693b97335",
+  "frameworkRepo": "https://github.com/abap2UI5/abap2UI5"
+}

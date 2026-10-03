@@ -1,0 +1,8 @@
+{
+  "task": "01-hello-toast",
+  "mustFail": [
+    "render",
+    "expect"
+  ],
+  "why": "the view as a hand-written XML string: nothing can be reconstructed, so nothing is rendered or checked"
+}
