@@ -16,7 +16,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { BENCH_DIR, run } from '../lib/util.mjs';
 
-const BIN = process.env.CLAUDE_BIN || 'claude';
+/* A relative path (CLAUDE_BIN=verify/fake-claude.mjs) is resolved against the
+ * directory run.mjs was started in: the trial spawns it with the WORKSPACE as
+ * its cwd, where the relative path names nothing. A bare name stays a PATH
+ * lookup. */
+const BIN = (() => {
+  const b = process.env.CLAUDE_BIN || 'claude';
+  return b.includes('/') || b.includes(path.sep) ? path.resolve(b) : b;
+})();
 
 /* The same tools in every condition; the MCP server's tools are added only
  * where it is registered. dontAsk denies anything else instead of hanging
