@@ -1,0 +1,7 @@
+{
+  "task": "02-counter",
+  "mustFail": [
+    "abaplint"
+  ],
+  "why": "no .clas.xml at all: abaplint description_empty"
+}

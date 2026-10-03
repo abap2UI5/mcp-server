@@ -393,3 +393,7 @@ npm test
 
 `AGENTS.md` carries the conventions, `CONTRIBUTING.md` and `RELEASING.md` the
 rest of the workflow.
+
+`bench/` is [abap2UI5-bench](bench/README.md): how often an AI agent's
+abap2UI5 app passes the template's gates, with and without this server. It is
+a package of its own and not part of the published server.

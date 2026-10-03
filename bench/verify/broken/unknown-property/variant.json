@@ -1,0 +1,9 @@
+{
+  "task": "01-hello-toast",
+  "mustFail": [
+    "expect",
+    "lint",
+    "render"
+  ],
+  "why": "a property sap.m.Input does not have (valu): the static gate reports it, XMLView.create refuses it, and the input's value binding the task needs is gone"
+}

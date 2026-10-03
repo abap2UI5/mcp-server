@@ -1,0 +1,7 @@
+{
+  "task": "02-counter",
+  "mustFail": [
+    "abaplint"
+  ],
+  "why": "the .clas.xml saved without the UTF-8 BOM abapGit writes: abaplint xml_bom (a metadata rule - abaplint code-only still passes)"
+}

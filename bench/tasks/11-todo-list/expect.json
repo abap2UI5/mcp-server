@@ -1,0 +1,18 @@
+{
+  "level": 2,
+  "classes": ["zcl_bench_11"],
+  "controls": [
+    ["sap.m.List", "sap.m.Table", "sap.ui.table.Table"],
+    "sap.m.Input",
+    ["sap.m.SegmentedButton", "sap.m.Select", "sap.m.RadioButtonGroup", "sap.m.IconTabHeader", "sap.m.IconTabBar", "sap.m.ComboBox", "sap.m.ToggleButton"]
+  ],
+  "events": [{ "any": ["sap.m.Button.press"], "min": 2 }],
+  "bindings": [
+    "sap.m.Input.value",
+    [
+      "sap.m.CheckBox.selected", "sap.m.StandardListItem.selected", "sap.m.CustomListItem.selected",
+      "sap.m.ColumnListItem.selected", "sap.m.Switch.state", "sap.m.InputListItem.selected"
+    ]
+  ],
+  "calls": ["message_toast_display"]
+}

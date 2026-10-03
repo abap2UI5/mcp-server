@@ -674,7 +674,10 @@ whole loop against the published package (install, open-abap-core, lint,
 build, unit tests, boot, GET and a POST roundtrip), about 30 s cold, skipped
 by itself when the registry or GitHub cannot be reached and with
 `A2UI5_MCP_SKIP_NETWORK_TESTS=1`. CI (`.github/workflows/ci.yml`) runs `npm test`
-on every push/PR. Manual stdio driving, when a test is not enough:
+on every push/PR. **`bench/`** is abap2UI5-bench, a separate package (own
+`package.json`, not shipped, not in `npm test`) that measures agents with and
+without this server; [bench/README.md](bench/README.md) is its contract, and
+`bench-verify.yml` gates changes to it. Manual stdio driving, when a test is not enough:
 
 ```bash
 node -e '

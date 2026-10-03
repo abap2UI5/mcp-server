@@ -1,0 +1,7 @@
+{
+  "level": 1,
+  "classes": ["zcl_bench_03"],
+  "controls": ["sap.m.Button"],
+  "events": ["sap.m.Button.press"],
+  "calls": ["message_box_display", "message_toast_display"]
+}

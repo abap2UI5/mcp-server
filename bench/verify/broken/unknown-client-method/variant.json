@@ -1,0 +1,7 @@
+{
+  "task": "04-stock-check",
+  "mustFail": [
+    "abaplint"
+  ],
+  "why": "a client method that does not exist in abap2UI5 1.145.0 (message_show): abaplint check_syntax against the pinned framework"
+}

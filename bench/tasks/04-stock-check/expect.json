@@ -1,0 +1,8 @@
+{
+  "level": 1,
+  "classes": ["zcl_bench_04"],
+  "controls": [["sap.m.Input", "sap.m.StepInput"], "sap.m.Button"],
+  "events": ["sap.m.Button.press"],
+  "bindings": [["sap.m.Input.value", "sap.m.StepInput.value"]],
+  "calls": ["message_box_display"]
+}

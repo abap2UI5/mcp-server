@@ -1,0 +1,7 @@
+{
+  "task": "01-hello-toast",
+  "mustFail": [
+    "expect"
+  ],
+  "why": "lint- and render-clean, but the button only re-renders: the task asked for a message toast"
+}
