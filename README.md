@@ -232,8 +232,13 @@ fix it.
 | `build_log` | Page through the last build's full output — the error the result's short tail cut off | nothing (reads the record the last build left) |
 | `run_app` | Boot an app headless: status, real page errors, and a **screenshot** | a build (npm backend or abap2UI5 checkout); samples-controls serves UI5 locally when present, the CDN otherwise |
 | `interact_app` | Boot an app, then click, fill, press and wait through a short script — the **event branch**, photographed | a build (same as run_app) |
+| `app_list` | The app classes the built backend can start — the deployed dev apps and the framework's own | a build (npm backend or abap2UI5 checkout) |
+| `app_start` | Start an app and get its **agent snapshot**: fields (path, label, kind, value), actions (event + arguments), tables, messages — over the abap2UI5 JSON protocol, no browser | a build (same as run_app) |
+| `app_describe` | The current agent snapshot of a session, from memory — no roundtrip | a session from app_start |
+| `app_act` | Fill fields and fire an event by name — validated against the snapshot, sent as the real model delta — and get the next snapshot | a session from app_start |
 | `run_unit_tests` | Run the deployed apps' test classes (on a checkout: or the whole transpiled tree) in the open-abap runtime: assertions, not pictures | a build (npm backend or abap2UI5 checkout) |
 | `verify_app` | The whole loop in one call — validate, deploy, build, unit, boot — stopping at the first stage that fails | what the stages need |
+| `migrate_report` | Convert a **classic ABAP report** into an abap-cloud-gui app class (report2cloud): the class files, the migration report (TODOs, unreleased tables with successors), the refusals with `file:row:col`; `deploy: true` builds it here and answers its selection screen's agent snapshot | abap-cloud-gui (with `npm ci`); `deploy` also the popups and a build |
 | `backend` | `status` / `start` / `stop` / `restart` of the local express backend | a build (start/restart; status and stop always work) |
 | `remove_app` | Delete a dev app from the sandbox, or list the deployed ones | the sandbox (as deploy_app) |
 
@@ -257,6 +262,69 @@ before that file existed. `screenshot_view` and `run_app` answer the
 same question at three orders of magnitude apart: the first photographs the
 reconstructed **view** with no backend, the second the **running app** after a
 build. Most iterations should end at the first.
+
+### Operating an app without a browser
+
+`app_start`, `app_act` and `app_describe` make every abap2UI5 app
+agent-operable: they speak the JSON protocol the UI5 frontend speaks — the
+app start, the event with its arguments, the model delta of what was typed —
+against the local backend, and answer with an **agent snapshot** derived from
+the response's view XML and model: the fields an agent may fill (model path,
+label, kind, current value, choice values, editable), the actions it may fire
+(event name, static and row-dependent arguments), the tables (columns, the
+first rows, selection - a SelectDialog/TableSelectDialog is a table too, and
+`app_act` with `row` picks from it), the messages (toast, message box,
+MessageStrip, field value states, MessagePopover and MessageView items) and
+some static text. An act is validated against the snapshot
+before anything is sent: an unknown event, a field that is not on the screen
+or not editable, a choice outside its values is refused with the list of what
+is allowed. A short session against `z2ui5_cl_smp_app_009` of
+abap2UI5/samples:
+
+```text
+app_start { app: "z2ui5_cl_smp_app_009" }
+  -> fields f1..f5 (f3 "Input with value", /S_SCREEN/COLOR_02, text, ""),
+     actions a1 POPUP_TABLE_VALUE (valueHelpRequest of f3), ..., a5 BUTTON_SEND
+app_act { session, values: { f4: "Smith" }, event: "POPUP_TABLE_VALUE" }
+  -> layer "popup", table t1 /T_SUGGESTION_SEL (6 rows, Single, editableCells [SELKZ]),
+     action a1 POPUP_TABLE_VALUE_CONTINUE
+app_act { session, values: { "/T_SUGGESTION_SEL/2/SELKZ": true }, event: "POPUP_TABLE_VALUE_CONTINUE" }
+  -> layer "main", f3 = "BLACK", f4 = "Smith", message { toast, "value selected" }
+```
+
+The snapshot shape is shared with the VS Code extension and the ABAP agent
+addon; [docs/agent-snapshot.md](docs/agent-snapshot.md) is its reference —
+the derivation rules, the operations, the deviations from the original
+contract and what the snapshot cannot see yet. `interact_app` stays the tool
+for what only a browser shows (the rendered page, client-side behaviour).
+
+### Migrating a classic report
+
+`migrate_report` takes the source of a classic report (`REPORT`,
+`PARAMETERS`, `SELECT-OPTIONS`, the event blocks, a `WRITE` list, an ALV) and
+its `.prog.xml` text pool, and answers the class of the
+[abap-cloud-gui](https://github.com/abap2UI5-addons/abap-cloud-gui) addon
+that keeps its programming model — `selection_screen( )`,
+`start_of_selection( )`, `write( )`, `alv( )`, `message( )` — together with
+the migration report (the TODOs, the tables and APIs not released on ABAP
+Cloud with their successors, what the list does not carry over) and the
+statements it refused with `file:row:col` (dynpros, batch input, `SUBMIT`,
+native SQL). The converter is the addon's own `report2cloud`, run from a
+checkout of the addon — it is not on npm:
+
+```sh
+git clone https://github.com/abap2UI5-addons/abap-cloud-gui   # ABAP_CLOUD_GUI_HOME
+cd abap-cloud-gui && npm ci
+```
+
+With `deploy: true` the class is also written into the dev sandbox together
+with the addon's runtime (`src/01`) and the popups it calls (a checkout of
+[popups](https://github.com/abap2UI5-addons/popups) at `POPUPS_HOME`, the
+addon's `.deps/popups` or `build/popups`, or `../popups`), the backend is
+built, and the answer carries `app_start`'s snapshot of the selection screen —
+`app_act` with `CGUI_EXECUTE` runs the report. The database tables a report
+reads are not in the local backend: the screen runs, a run that reads them
+does not.
 
 ## Unit tests in CI, without a system
 

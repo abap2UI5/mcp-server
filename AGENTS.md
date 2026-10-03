@@ -53,6 +53,7 @@ reads it live like a checkout.
 | `SAMPLES_STACK_HOME` | `../samples-stack`, `../abap2UI5-samples-stack` | `catalogue.json` (preferred) + `SAMPLES.md` (fallback) — the stack-dependent catalogue (OData, RAP, APC, launchpad) |
 | `APP_TEMPLATE_HOME` | `../app-template`, `../abap2UI5-app-template` | `template.json` and the files it lists — what `scaffold_app` serves and renames (the tool is dead without this checkout) |
 | `DOCS_HOME` | `../docs` | `docs/**/*.md` — the documentation site's sources, searched live by `docs_search` |
+| `ABAP_CLOUD_GUI_HOME` | `../abap-cloud-gui` | `tools/report2cloud/lib/{convert,textpool,report}.mjs` — the report converter `migrate_report` imports in-process, with the checkout's own `node_modules` (`npm ci` there; LOCAL only, no mirror - `resolveCloudGui`, not in `RESOLVERS`); with `deploy: true` also its `src/01`, and the popups beside it (`POPUPS_HOME`, `.deps/popups` or `build/popups` of the checkout, `../popups`) |
 | `AI_VIEW_CHECK_HOME` | `../linter` (legacy aliases: `../abap2UI5-linter`, `../ai-view-check`) — which for an npm/npx install is ALSO where npm hoists the declared peer `@abap2ui5/linter` (`node_modules/@abap2ui5/{mcp-server,linter}`), then an INSTALLED one elsewhere: `<cwd>/node_modules/…` (app-template's devDependency), the server's own `node_modules/…`, then wherever Node's resolver finds the package from `lib/repos.mjs` (`viewCheckCandidates`, `nodeResolvedViewCheck`) | `validate_view` + `fix_view` + `screenshot_view`: dynamic import of the linter's package `exports` entries `.`, `./findings`, `./config`, `./rule-docs` (via `importViewCheck`) |
 
 One more checkout is read but not by this server: **`OPENUI5_SRC`** (default
@@ -83,8 +84,8 @@ because the backend hands its paths to children running elsewhere), `A2UI5_MCP_B
 framework clone as the answer to "no checkout", the default before the npm
 backend), `A2UI5_MCP_RUNTIME_VERSION` (the `@abap2ui5/node-runtime` release,
 X.Y.Z; default the registry's latest - `A2UI5_MCP_OFFLINE` also stops that
-question), `A2UI5_MCP_SKIP_NETWORK_TESTS` (the one `npm test` file that
-reaches the registry skips itself), and the child-process timeouts `A2UI5_MCP_LINT_TIMEOUT_MS` /
+question), `A2UI5_MCP_SKIP_NETWORK_TESTS` (the two `npm test` files that
+reach the registry - npm-integration and agent-integration - skip themselves), and the child-process timeouts `A2UI5_MCP_LINT_TIMEOUT_MS` /
 `A2UI5_MCP_SCOPE_TIMEOUT_MS` (default 5 min), `A2UI5_MCP_BUILD_TIMEOUT_MS`
 (default 30 min, also the prebuilt download and the npm install) and
 `A2UI5_MCP_UNIT_TIMEOUT_MS` (default 10 min, the test runner).
@@ -331,6 +332,48 @@ test classes were given), boot; the first failing stage stops it, everything
 before it stays in `stages`, `stoppedAt` names it, and a missing linter skips
 the validate stage rather than failing it.
 
+**`app_start` / `app_act` / `app_describe` / `app_list`** operate a running
+app without a browser: `lib/appclient.mjs` speaks the abap2UI5 JSON protocol
+to the backend `startBackend` serves (the app start, then `S_FRONT.ID` /
+`EVENT` / `T_EVENT_ARG` plus the model delta, exactly as the UI5 frontend
+sends them), keeps per session what the frontend keeps per component (the
+views in their five slots, the models and who owns them, the draft id, the
+unsent edits - `applyResponse` in `lib/snapshot.mjs`), and answers with the
+**agent snapshot v1** `analyzeScreen` derives from the view XML and the
+model. `docs/agent-snapshot.md` is the specification - the VS Code
+extension and the ABAP agent addon implement the same shape from it, so a
+change to the snapshot is a change to that page in the same commit, and the
+shape test in `test/snapshot.test.mjs` is where it shows. Three rules:
+**validate before sending** (an event that is not an action of the current
+snapshot, a field that is not on it or not editable, a choice outside its
+values is an error result naming what IS allowed, and a refused act changes
+nothing - no blind wiring); **values without an event stay pending**, as
+typing does in the browser (the frontend never sends a roundtrip without an
+event, and apps branch on `check_on_event`); **a session is bound to the
+backend process** that wrote its drafts (`backendGeneration`) - after a
+restart it is refused with the reason, never answered with a backend error.
+Every local-backend assumption of the client is an option of
+`createAppClient` (`transport`, `location`, `generation`, `backendHint` -
+docs/agent-snapshot.md "Embedding the client") because the VS Code extension
+vendors the three modules unchanged and runs them against a real system: a
+new assumption about the local backend goes behind an option with today's
+behaviour as the default, never into a code path the extension has to wrap.
+The snapshot module is pure and takes the linter's UI5 metadata
+(`./properties` `loadSnapshot`) only as an optional refinement for controls
+its own table lacks: the tools need a backend, never the linter.
+`test/fixtures/agent/*.json` are real request/response pairs of
+abap2UI5/samples and samples-controls apps and of abap-cloud-gui's
+report2cloud runtime harness (recorded by driving the client against
+`@abap2ui5/node-runtime`; the `cgui-*` ones through that harness, with the
+popups addon); `test/appclient.test.mjs` replays them and fails
+on any request that differs from the recorded one. Re-record them when the
+protocol moves (the fixture's `note` says against which release). Values the
+browser computes are filled only where the browser's own rule is known and
+ported - a selection dialog's pick, the row-valued event parameters, read
+with UI5's JSONModel path semantics (`selectedContexts[0]/sPath` is `null`
+there, so it is `null` here) - and refused naming `args[i]` everywhere else;
+docs/agent-snapshot.md "Row event parameters" is the list.
+
 ### The CI runner — `scripts/ci-unit.mjs`, `action.yml`, the `abap2ui5-unit` bin
 
 The same code as the tools, for a repository's CI and for a terminal: the
@@ -504,6 +547,19 @@ changes upstream, this repo must change in the same breath:
   methods, `cs_*` constants, types, the ABAP-Doc and inline notes), relying on
   the abaplint-pinned formatting; a move of the file is reported by path, and
   a formatting change upstream is a parser change here.
+- abap2UI5 core: **the frontend wire protocol** the app tools speak
+  (`lib/appclient.mjs`, `lib/snapshot.mjs`, `lib/viewxml.mjs`) - the request
+  and response format documented at the top of `app/webapp/core/Server.js`
+  (`{ value: { S_FRONT: { ID, EVENT, T_EVENT_ARG, ORIGIN, PATHNAME, SEARCH },
+  MODEL } }`, `PROTOCOL` 2), the delta format of `core/Lib.js`
+  `buildDeltaFromPaths` (ported as `buildDelta`), the `VIEW_SLOTS`
+  display/destroy actions and the per-slot model ownership of
+  `core/actions/Slots.js`, the toast/box options of
+  `core/actions/ControlCall.js` (`onClose`, `actions`), and the event wire
+  grammar `z2ui5_cl_ui5_srv_event` writes into view XML (`.eB(['EVENT',
+  flags], args)`, `.eBP($event, cond, [...])`, `.eF(...)`, the quoting rule
+  for static arguments). A protocol bump upstream is a change here and a
+  re-recording of `test/fixtures/agent/`.
 - **@abap2ui5/node-runtime** (npm; packed by abap2UI5's
   `node/setup/pack-npm.mjs`): the `.` export's `initialize` and `serve` (and
   `createApp`, for the compress path); the OPTIONAL `accelerate` and
@@ -522,6 +578,15 @@ changes upstream, this repo must change in the same breath:
   `"./init.mjs"` (without it the build fails - the runner would boot nothing)
   and lists only non-dependency tests, `init.mjs`'s import order (the boot
   order; sorted when unreadable), and `RUNNER_LOOP`.
+- abap-cloud-gui: **`tools/report2cloud/lib/convert.mjs`** (`convert(source,
+  { file, className, textpool })` answering `{ ok, className, programName,
+  files, draft, refusals, todos, release, notes }`), `textpool.mjs`
+  (`parseTextpool`) and `report.mjs` (`migrationReport(result, { source,
+  texts })`) - imported by `lib/migrate.mjs`, which checks the three exports
+  and answers a checkout without them (or without `npm ci`) as a setup
+  message. With `deploy: true` also the layout `src/01` and the popup set of
+  the addon's `unit.yaml` (`POPUP_FILES`). A renamed export or a moved file
+  over there is a broken `migrate_report` here, said by path.
 - docs: the `docs/` markdown tree (everything but `.vitepress`, `public` and
   `node_modules` is a page) and the **published URL scheme** its
   `scripts/generate-llms.mjs` derives — `https://abap2ui5.github.io/docs/<path>`
@@ -616,6 +681,12 @@ agent) find these artifacts in a dirty sibling worktree, mcp-server caused them:
   them, and the next build removes those whose process is gone
   (`sweepLeftovers`; ten minutes' grace, a day at most whatever the pid).
   Deleting any of it is safe: it is installed, fetched or built again.
+- the dev sandbox (any of its three homes) after `migrate_report { deploy:
+  true }`: the converted class's files and, beside it, every
+  `z2ui5_cl_cgui_*` class of abap-cloud-gui's `src/01` and the popups it
+  calls (`z2ui5_cl_popup_context`, `z2ui5_cx_popup_error`, `_get_range`,
+  `_to_confirm`, `_to_select`, `_input_val`) with all their files - what the
+  class needs to transpile; `remove_app` takes them out one by one.
 - `<tmp>/abap2ui5-mcp-remote/<repo>/` — the read-only GitHub mirrors (not a
   sibling worktree, but the same question "where did this come from": a
   directory that carries `.abap2ui5-mirror.json` is one, and deleting it is
@@ -669,11 +740,20 @@ injected registry and npm/git/transpiler stand-ins), `test/npm-runtime.test.mjs`
 build/unit/status - against the fake workspace of `test/helpers/npm-fixture.mjs`),
 `test/npm-host.test.mjs` (the host through `startBackend`, accelerate and
 compress detected, and the server's gates over stdio; ports 4431-4432) and
-`test/npm-integration.test.mjs` - the ONE test that reaches the network: the
+`test/npm-integration.test.mjs` - the test that reaches the network: the
 whole loop against the published package (install, open-abap-core, lint,
 build, unit tests, boot, GET and a POST roundtrip), about 30 s cold, skipped
 by itself when the registry or GitHub cannot be reached and with
-`A2UI5_MCP_SKIP_NETWORK_TESTS=1`. CI (`.github/workflows/ci.yml`) runs `npm test`
+`A2UI5_MCP_SKIP_NETWORK_TESTS=1`. `test/agent-integration.test.mjs` sits
+behind the same gate: it builds `test/fixtures/agent-app/zcl_agent_mcp`
+(a form, a table with a row action and selection, a popup) and
+`zcl_agent_mcp_pick` (a SelectDialog value help, a MessagePopover) on the published
+package and operates it through `lib/appclient.mjs` and through the server's
+app tools over stdio (about 25 s). The agent snapshot's pure halves are
+`test/snapshot.test.mjs` (the parsers, the slot bookkeeping, the snapshot on
+the recorded sample sessions of `test/fixtures/agent/`, the contract shape)
+and `test/appclient.test.mjs` (the replay of those sessions, every
+validation path). CI (`.github/workflows/ci.yml`) runs `npm test`
 on every push/PR. **`bench/`** is abap2UI5-bench, a separate package (own
 `package.json`, not shipped, not in `npm test`) that measures agents with and
 without this server; [bench/README.md](bench/README.md) is its contract, and

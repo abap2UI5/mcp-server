@@ -2,6 +2,93 @@
 
 ## Unreleased
 
+- **Agent snapshot: selection dialogs and message lists.** `SelectDialog`
+  and `TableSelectDialog` are tables now (`control` names them,
+  `selectionMode` from `multiSelect`, the dialog's `title` titles its layer),
+  and their `confirm` is a row action: `app_act({ event, row })` picks the row
+  as a click does - its `selectionField` (`selected="{ZZSELKZ}"`) set, the
+  other rows' cleared in single select, all sent as the model delta - and
+  fills the confirm's `$parameters` from the selected rows
+  (`selectedItem`, `selectedItems`, `selectedContexts`). The row-valued
+  parameters of table row events (`listItem`, `rowIndex`, `rowContext`,
+  `rowBindingContext`, a row action item's `row`) are filled from `row` too,
+  for the shapes views write (`.getBindingContext().getProperty('X')`,
+  `.getPath()`, `.get<Prop>()`, `.getCells()[n].get<Prop>()`, the `? :`
+  guard); paths follow UI5's JSONModel, so `selectedContexts[0]/sPath` is
+  `null` as in the browser. Anything else is refused naming `args[i]`. The
+  items of a `MessagePopover` / `MessageView` are messages with `source`
+  `popover` / `messageview` and the optional `subtitle` and `description`.
+  All additive - `snapshotVersion` stays 1, and `docs/agent-snapshot.md` now
+  says what may change within a version. New recorded sessions: samples-
+  controls 623 (SelectDialog), samples 452 (MessageView, MessagePopover) and
+  two abap-cloud-gui report2cloud reports (the F4 TableSelectDialog of the
+  popups, the message popover); the agent integration test picks a row
+  through `app_act` on `@abap2ui5/node-runtime`.
+- **`migrate_report`: a classic ABAP report as an abap2UI5 app.** The source
+  of a report (and optionally its `.prog.xml` text pool and the class name)
+  in; the class of the abap-cloud-gui addon out - `INHERITING FROM
+  z2ui5_cl_cgui_report`, the selection screen as `selection_screen( )`, the
+  event blocks as its methods, the list as `write( )`, the ALV as `alv( )` -
+  with the migration report (TODOs, unreleased tables and APIs with their
+  successors, what was not carried over, every mapped construct) and the
+  refusals (`file:row:col` and the reason; no class unless `partial`). The
+  converter is the addon's `report2cloud`, imported from an abap-cloud-gui
+  checkout (`ABAP_CLOUD_GUI_HOME` or `../abap-cloud-gui`, `npm ci` done) -
+  not bundled, not on npm, and reported with the clone command when it is
+  missing (`lib/siblings.mjs`, `setup_status` lists it). `deploy: true`
+  writes the class with the addon's `src/01` and the popups it calls into the
+  dev sandbox, builds the backend and answers `app_start`'s snapshot of the
+  selection screen, stage by stage like `verify_app`. `lib/migrate.mjs`;
+  `test/migrate.test.mjs` converts a fixture report and a refused one (skipped
+  without the checkout) and runs the deploy on `@abap2ui5/node-runtime`
+  through Execute (behind the network gate).
+- **The app client embeds without wrappers.** `createAppClient` takes
+  `transport` (one roundtrip: the serialized request with its headers,
+  timeout signal and the draft id it continues in, `{ status, headers?,
+  body }` out), `location` (the app start's ORIGIN/PATHNAME/SEARCH),
+  an optional `generation` (absent: no restart detection) and `backendHint`
+  (the words after "the backend did not answer (...)"). The defaults are the
+  local backend's, so the MCP server's requests and refusals are unchanged
+  (the recorded sessions replay as before); the VS Code extension, which
+  vendors the client for a real SAP system, drops the request rewriting and
+  message patching it needed. `docs/agent-snapshot.md` "Embedding the
+  client" is the reference; `test/appclient.test.mjs` covers every option.
+- **Every abap2UI5 app is agent-operable: `app_list`, `app_start`,
+  `app_describe`, `app_act`.** `interact_app` drives an app with CSS
+  selectors in a headless Chromium and answers with a picture; the new tools
+  speak the abap2UI5 JSON protocol itself against the local backend - the app
+  start, the event with its arguments, the model delta of what was typed,
+  exactly as the UI5 frontend sends them - and answer with an **agent
+  snapshot v1**: the fields an agent may fill (model path, label, kind,
+  value, choice values, required, editable), the actions it may fire (event
+  name, static arguments, row-dependent ones as `$row:FIELD`), the tables
+  (columns, the first rows, selection mode, editable cells), the messages
+  (toast, message box, MessageStrip, value states, the app's message table)
+  and some static text, from the view XML of every open slot (main, nested,
+  popup, popover) and the model. An act is validated against the snapshot
+  before anything is sent - an unknown event, a field that is not on the
+  screen or not editable, a choice outside its values is refused naming what
+  is allowed; values without an event stay pending, as typing does in the
+  browser; the popup close the browser performs alone is `@CLOSE_POPUP`.
+  `app_describe` answers from the last response kept, no roundtrip.
+  `lib/snapshot.mjs` (pure: the frontend's slot and model bookkeeping, and
+  the snapshot), `lib/viewxml.mjs` (the view, binding, expression and
+  event-wire parsers) and `lib/appclient.mjs` (the roundtrips, sessions and
+  validation); the linter's UI5 metadata, when it resolves, classifies
+  controls the snapshot has no entry for. The shape is shared with the VS
+  Code extension and the ABAP agent addon: `docs/agent-snapshot.md` is its
+  reference, including where it deviates from the contract it started from
+  (no `/XX/` two-way prefix in the current protocol, pending values,
+  `selectionField`, `@CLOSE_POPUP`) and what it cannot see yet.
+  `test/snapshot.test.mjs` and `test/appclient.test.mjs` run on eleven
+  recorded sample sessions (`test/fixtures/agent/`, real request/response
+  pairs of abap2UI5/samples apps on `@abap2ui5/node-runtime` 1.146.0) - the
+  replay insists on the exact request the real run sent;
+  `test/agent-integration.test.mjs` operates a form, a table with a row
+  action and selection, and a popup on the published runtime, through the
+  client and through the server over stdio (network-gated like
+  `test/npm-integration.test.mjs`).
+
 ## 1.0.0 - 2026-10-03
 
 **1.0 is a stability promise, not a feature release.** This server's tool

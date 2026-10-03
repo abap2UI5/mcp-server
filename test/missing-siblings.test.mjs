@@ -32,6 +32,7 @@ test('every sibling-dependent tool degrades with an actionable error when the ch
       AI_VIEW_CHECK_HOME: path.join(NOWHERE, 'linter'),
       APP_TEMPLATE_HOME: path.join(NOWHERE, 'app-template'),
       DOCS_HOME: path.join(NOWHERE, 'docs'),
+      ABAP_CLOUD_GUI_HOME: path.join(NOWHERE, 'abap-cloud-gui'),
     },
   });
   let buf = '';
@@ -167,6 +168,15 @@ test('every sibling-dependent tool degrades with an actionable error when the ch
     const A2 = /abap2UI5 checkout not found/;
     expectMissing(await call('run_app', { class_name: 'z2ui5_cl_demo' }), A2, 'A2UI5_HOME');
     expectMissing(await call('interact_app', { class_name: 'z2ui5_cl_demo', actions: [{ action: 'click', text: 'Save' }] }), A2, 'A2UI5_HOME');
+    // the agent tools: listing and starting need the backend; describe and
+    // act answer from the sessions in memory, of which there are none
+    expectMissing(await call('app_list', {}), A2, 'A2UI5_HOME');
+    expectMissing(await call('app_start', { app: 'z2ui5_cl_demo' }), A2, 'A2UI5_HOME');
+    for (const [tool, toolArgs] of [['app_describe', { session: 'D1' }], ['app_act', { session: 'D1', event: 'SAVE' }]]) {
+      const r = await call(tool, toolArgs);
+      assert.equal(r.isError, true, `${tool} without a session must be an error result`);
+      assert.match(r.content[0].text, /unknown session 'D1' - start one with app_start/);
+    }
     expectMissing(await call('run_unit_tests', {}), A2, 'A2UI5_HOME');
     expectMissing(await call('run_unit_tests', { class_name: 'z2ui5_cl_demo' }), A2, 'A2UI5_HOME');
     expectMissing(await call('build_backend', { mode: 'prebuilt' }), A2, 'A2UI5_HOME');
@@ -189,6 +199,11 @@ test('every sibling-dependent tool degrades with an actionable error when the ch
     expectMissing(await call('app_guide', { section: '5' }), /abap2UI5 checkout not found/, 'A2UI5_HOME');
     // the client API is an interface in the framework sources
     expectMissing(await call('api_reference', {}), /abap2UI5 checkout not found/, 'A2UI5_HOME');
+    /* migrate_report runs report2cloud from the abap-cloud-gui checkout - with
+     * its node_modules, so a local one: no mirror, and the hint says npm ci */
+    const migrate = await call('migrate_report', { source: 'REPORT zt.\nWRITE / 1.' });
+    expectMissing(migrate, /abap-cloud-gui checkout not found/, 'ABAP_CLOUD_GUI_HOME');
+    assert.match(migrate.content[0].text, /npm ci/);
     expectMissing(await call('api_reference', { query: 'toast' }), /abap2UI5 checkout not found/, 'A2UI5_HOME');
     // the documentation site has a checkout of its own
     expectMissing(await call('docs_search', { query: 'value help' }), /docs checkout not found/, 'DOCS_HOME');

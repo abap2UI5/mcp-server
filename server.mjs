@@ -84,7 +84,13 @@ import {
   backendKind,
   npmModeProblem,
   npmPreferenceProblem,
+  backendBaseUrl,
+  backendGeneration,
+  builtAppClasses,
+  classNameOf,
 } from './lib/runtime.mjs';
+import { createAppClient, AgentError } from './lib/appclient.mjs';
+import { migrateReport, deployFiles, resolvePopups, validTargetClass, SetupError } from './lib/migrate.mjs';
 import { explicitEnv } from './lib/repos.mjs';
 
 function text(s) {
@@ -235,6 +241,86 @@ async function flagFixable(findings) {
   }
   if (typeof isFixable !== 'function') return findings;
   return findings.map((f) => (isFixable(f) ? { ...f, fixable: true } : f));
+}
+
+/* The app_* tools' protocol client (lib/appclient.mjs): one per server, its
+ * sessions in memory - app_describe answers from them without a roundtrip.
+ * The linter's UI5 control snapshot, when a linter resolves, refines how an
+ * unmapped control is classified; without one the snapshot's own table is
+ * the whole knowledge (it never needs the linter). */
+let appClient = null;
+let uiMetadata;
+async function agentClient() {
+  if (uiMetadata === undefined) {
+    try {
+      const { loadSnapshot } = await importViewCheck('./properties');
+      uiMetadata = typeof loadSnapshot === 'function' ? loadSnapshot() : null;
+    } catch {
+      uiMetadata = null;
+    }
+  }
+  if (!appClient) {
+    appClient = createAppClient({ baseUrl: backendBaseUrl(), generation: backendGeneration, metadata: () => uiMetadata });
+  }
+  return appClient;
+}
+
+/* A snapshot as the tool answer: compact JSON - the shape is the token
+ * budget's friend, indentation is not. A refusal (AgentError) is an error
+ * result naming what is allowed; anything else propagates to the handler's
+ * catch like every other tool's failure. */
+async function snapshotAnswer(run) {
+  try {
+    return text(JSON.stringify(await run()));
+  } catch (e) {
+    if (e instanceof AgentError) return toolError(e.message);
+    throw e;
+  }
+}
+
+/* migrate_report { deploy: true }: the converted class, z2ui5_cl_cgui_* of the
+ * checkout and the popups they call into the dev sandbox, then build_backend
+ * and app_start - composed out of those tools' handlers, as verify_app is,
+ * each stage reported; the first that fails stops it. */
+async function deployMigrated(res, ctx) {
+  if (!res.ok) return { ok: false, stoppedAt: 'deploy', stages: { deploy: { ok: false, text: 'the report was refused - there is no class to deploy' } } };
+  const stages = {};
+  const stage = (label, r) => {
+    const t = r.content && r.content.find((c) => c.type === 'text');
+    let parsed;
+    try {
+      parsed = t ? JSON.parse(t.text) : null;
+    } catch {
+      parsed = t ? { text: t.text } : null;
+    }
+    stages[label] = { ok: !r.isError, ...(parsed && typeof parsed === 'object' ? parsed : { text: parsed }) };
+    return !r.isError;
+  };
+  const stop = (at) => ({ ok: !at, ...(at ? { stoppedAt: at } : {}), stages });
+  const box = missingSandbox();
+  if (box) return (stage('deploy', box), stop('deploy'));
+  const popups = resolvePopups(res.converter);
+  if (!popups) {
+    stage('deploy', toolError('popups checkout not found - the report runtime calls abap2UI5-addons/popups: clone https://github.com/abap2UI5-addons/popups '
+      + `into ${path.join(res.converter, '.deps', 'popups')} (as abap-cloud-gui's unit.yaml does) or beside it, or point POPUPS_HOME at a checkout`));
+    return stop('deploy');
+  }
+  try {
+    const dir = sandbox().dir;
+    const { support } = deployFiles({ files: res.files, dir, cloudGui: res.converter, popups, classNameOf });
+    stages.deploy = { ok: true, deployed: res.className, with: support, dir };
+  } catch (e) {
+    stage('deploy', toolError(String(e.message)));
+    return stop('deploy');
+  }
+  const tables = res.release.filter((x) => x.kind === 'database table').map((x) => x.name);
+  if (tables.length) {
+    stages.deploy.note = `the local backend has no table ${tables.join(', ')}: the selection screen runs, a run that reads them fails - `
+      + 'and a class typed with their fields may not start at all';
+  }
+  if (!stage('build', await handle('build_backend', { mode: 'auto' }, ctx))) return stop('build');
+  if (!stage('start', await handle('app_start', { app: res.className }, ctx))) return stop('start');
+  return stop(null);
 }
 
 async function handle(name, args = {}, ctx = {}) {
@@ -1043,6 +1129,42 @@ async function handle(name, args = {}, ctx = {}) {
       if (res.base64) content.push({ type: 'image', data: res.base64, mimeType: 'image/png' });
       return { content, isError: !res.booted };
     }
+    case 'app_list': {
+      const miss = missingBackend();
+      if (miss) return miss;
+      const apps = builtAppClasses();
+      if (!apps) return toolError('backend not built — call build_backend first; app_list reads the transpiled output it makes');
+      const want = String(args.filter || '').toUpperCase();
+      const hits = want ? apps.filter((a) => a.app.includes(want)) : apps;
+      return text({
+        count: hits.length,
+        apps: hits,
+        ...(hits.length ? { hint: 'app_start { app } starts one and answers with its agent snapshot' } : { hint: want ? `no built app class contains '${args.filter}'` : 'nothing built that implements z2ui5_if_app - deploy_app, then build_backend' }),
+      });
+    }
+    case 'app_start': {
+      const miss = missingBackend();
+      if (miss) return miss;
+      const cls = classNameOf(args.app);
+      if (!backendBuilt()) return toolError('backend not built — call build_backend first (then app_start; app_list names what the build carries)');
+      const maxRows = boundedInt(args.max_rows, { name: 'max_rows', dflt: 20, min: 0, max: 200 });
+      await startBackend();
+      const client = await agentClient();
+      return snapshotAnswer(() => client.start(cls, { values: args.values, maxRows }));
+    }
+    case 'app_describe': {
+      const maxRows = boundedInt(args.max_rows, { name: 'max_rows', dflt: undefined, min: 0, max: 200 });
+      const client = await agentClient();
+      return snapshotAnswer(async () => client.describe(args.session, { maxRows }));
+    }
+    case 'app_act': {
+      const maxRows = boundedInt(args.max_rows, { name: 'max_rows', dflt: undefined, min: 0, max: 200 });
+      const row = args.row === undefined || args.row === null ? undefined : Number(args.row);
+      const client = await agentClient();
+      return snapshotAnswer(() => client.act(args.session, {
+        values: args.values, event: args.event, args: args.args, row, maxRows,
+      }));
+    }
     case 'run_unit_tests': {
       const miss = missingBackend();
       if (miss) return miss;
@@ -1089,6 +1211,45 @@ async function handle(name, args = {}, ctx = {}) {
         return text(await startBackend());
       }
       return text(backendStatus());
+    }
+    case 'migrate_report': {
+      if (typeof args.source !== 'string' || !args.source.trim()) return toolError('source is required: the text of the report, as in <report>.prog.abap');
+      /* report2cloud runs in-process from the abap-cloud-gui checkout - with
+       * that checkout's node_modules, so a local one with npm ci done; there
+       * is no mirror of it (lib/migrate.mjs). */
+      const miss = missingLocalSibling('abap-cloud-gui');
+      if (miss) return miss;
+      if (args.class_name !== undefined && args.class_name !== null && !validTargetClass(args.class_name)) {
+        return toolError(`class_name '${args.class_name}' is no ABAP class name - letters, digits, _ and /, at most 30 characters, e.g. zcl_flights`);
+      }
+      let res;
+      try {
+        res = await migrateReport({ source: args.source, textsXml: args.texts_xml, className: args.class_name || undefined, partial: args.partial === true });
+      } catch (e) {
+        if (e instanceof SetupError) return toolError(e.message);
+        throw e;
+      }
+      const reply = {
+        ok: res.ok,
+        class_name: res.className,
+        program: res.program,
+        files: res.ok ? res.files : (res.draft || {}),
+        ...(res.ok ? {} : { files_are: res.draft ? 'the draft (partial): refused statements are marked, it does not compile as it is' : 'none - the report was refused; pass partial: true for the draft' }),
+        refusals: res.refusals,
+        todos: res.todos.length,
+        release: res.release.map((x) => `${x.kind} ${x.name}${x.successor ? ` (successor: ${x.successor})` : ''}`),
+        migration_report: res.report,
+        next: res.ok
+          ? 'save the files (abapGit format) next to z2ui5_cl_cgui_report, then work the migration report: replace the unreleased objects, settle the TODOs - deploy: true runs it here first'
+          : 'every refusal is a place the report does something a browser app does not do - rewrite those statements in the report (or decide on a design) and convert again',
+      };
+      // a big report is a big class: the mapped table goes first, never the class
+      if (JSON.stringify(reply).length > ANSWER_BUDGET) {
+        const cut = reply.migration_report.indexOf('\n## Mapped');
+        if (cut > 0) reply.migration_report = `${reply.migration_report.slice(0, cut)}\n\n## Mapped\n\n(left out - the answer would pass the client's size limit; convert with the report2cloud CLI for the full table)\n`;
+      }
+      if (args.deploy === true) reply.deploy = await deployMigrated(res, ctx);
+      return text(reply);
     }
     case 'remove_app': {
       const miss = missingSandbox();

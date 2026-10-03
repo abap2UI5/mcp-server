@@ -63,6 +63,12 @@
           "isRequired": false
         },
         {
+          "name": "ABAP_CLOUD_GUI_HOME",
+          "description": "abap2UI5-addons/abap-cloud-gui checkout (with npm ci done) whose report2cloud converter migrate_report runs. Default: ../abap-cloud-gui; no mirror.",
+          "format": "filepath",
+          "isRequired": false
+        },
+        {
           "name": "OPENUI5_SRC",
           "description": "OpenUI5 source checkout scope_of reads the JSDoc from (via samples-controls). Default: ../fork-openui5 next to samples-controls.",
           "format": "filepath",
