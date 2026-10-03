@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **`migrate_report`: a classic ABAP report as an abap2UI5 app.** The source
+  of a report (and optionally its `.prog.xml` text pool and the class name)
+  in; the class of the abap-cloud-gui addon out - `INHERITING FROM
+  z2ui5_cl_cgui_report`, the selection screen as `selection_screen( )`, the
+  event blocks as its methods, the list as `write( )`, the ALV as `alv( )` -
+  with the migration report (TODOs, unreleased tables and APIs with their
+  successors, what was not carried over, every mapped construct) and the
+  refusals (`file:row:col` and the reason; no class unless `partial`). The
+  converter is the addon's `report2cloud`, imported from an abap-cloud-gui
+  checkout (`ABAP_CLOUD_GUI_HOME` or `../abap-cloud-gui`, `npm ci` done) -
+  not bundled, not on npm, and reported with the clone command when it is
+  missing (`lib/siblings.mjs`, `setup_status` lists it). `deploy: true`
+  writes the class with the addon's `src/01` and the popups it calls into the
+  dev sandbox, builds the backend and answers `app_start`'s snapshot of the
+  selection screen, stage by stage like `verify_app`. `lib/migrate.mjs`;
+  `test/migrate.test.mjs` converts a fixture report and a refused one (skipped
+  without the checkout) and runs the deploy on `@abap2ui5/node-runtime`
+  through Execute (behind the network gate).
 - **The app client embeds without wrappers.** `createAppClient` takes
   `transport` (one roundtrip: the serialized request with its headers,
   timeout signal and the draft id it continues in, `{ status, headers?,

@@ -129,6 +129,17 @@
         }
       ]
     },
+    "cloudGui": {
+      "repository": "abap2UI5-addons/abap-cloud-gui",
+      "why": "The report addon: an app written like a classic report (selection screen, event blocks, WRITE list, ALV). migrate_report runs its converter report2cloud (tools/report2cloud), a Node tool that parses with the @abaplint/core of the checkout's node_modules - so it needs a LOCAL checkout with npm ci done, and there is no mirror. Its src/01 and the popups beside it are what migrate_report deploys with a converted class.",
+      "dirs": [
+        "abap-cloud-gui"
+      ],
+      "env": [
+        "ABAP_CLOUD_GUI_HOME"
+      ],
+      "probe": "tools/report2cloud/lib/convert.mjs"
+    },
     "server": {
       "repository": "abap2UI5/mcp-server",
       "why": "This server. Listed so a consumer looking for a local checkout of it - the VS Code extension does, before falling back to npx - finds one under either name.",

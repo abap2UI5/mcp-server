@@ -190,6 +190,7 @@ fix it.
 | `app_act` | Fill fields and fire an event by name — validated against the snapshot, sent as the real model delta — and get the next snapshot | a session from app_start |
 | `run_unit_tests` | Run the deployed apps' test classes (on a checkout: or the whole transpiled tree) in the open-abap runtime: assertions, not pictures | a build (npm backend or abap2UI5 checkout) |
 | `verify_app` | The whole loop in one call — validate, deploy, build, unit, boot — stopping at the first stage that fails | what the stages need |
+| `migrate_report` | Convert a **classic ABAP report** into an abap-cloud-gui app class (report2cloud): the class files, the migration report (TODOs, unreleased tables with successors), the refusals with `file:row:col`; `deploy: true` builds it here and answers its selection screen's agent snapshot | abap-cloud-gui (with `npm ci`); `deploy` also the popups and a build |
 | `backend` | `status` / `start` / `stop` / `restart` of the local express backend | a build (start/restart; status and stop always work) |
 | `remove_app` | Delete a dev app from the sandbox, or list the deployed ones | the sandbox (as deploy_app) |
 
@@ -246,6 +247,34 @@ addon; [docs/agent-snapshot.md](docs/agent-snapshot.md) is its reference —
 the derivation rules, the operations, the deviations from the original
 contract and what the snapshot cannot see yet. `interact_app` stays the tool
 for what only a browser shows (the rendered page, client-side behaviour).
+
+### Migrating a classic report
+
+`migrate_report` takes the source of a classic report (`REPORT`,
+`PARAMETERS`, `SELECT-OPTIONS`, the event blocks, a `WRITE` list, an ALV) and
+its `.prog.xml` text pool, and answers the class of the
+[abap-cloud-gui](https://github.com/abap2UI5-addons/abap-cloud-gui) addon
+that keeps its programming model — `selection_screen( )`,
+`start_of_selection( )`, `write( )`, `alv( )`, `message( )` — together with
+the migration report (the TODOs, the tables and APIs not released on ABAP
+Cloud with their successors, what the list does not carry over) and the
+statements it refused with `file:row:col` (dynpros, batch input, `SUBMIT`,
+native SQL). The converter is the addon's own `report2cloud`, run from a
+checkout of the addon — it is not on npm:
+
+```sh
+git clone https://github.com/abap2UI5-addons/abap-cloud-gui   # ABAP_CLOUD_GUI_HOME
+cd abap-cloud-gui && npm ci
+```
+
+With `deploy: true` the class is also written into the dev sandbox together
+with the addon's runtime (`src/01`) and the popups it calls (a checkout of
+[popups](https://github.com/abap2UI5-addons/popups) at `POPUPS_HOME`, the
+addon's `.deps/popups` or `build/popups`, or `../popups`), the backend is
+built, and the answer carries `app_start`'s snapshot of the selection screen —
+`app_act` with `CGUI_EXECUTE` runs the report. The database tables a report
+reads are not in the local backend: the screen runs, a run that reads them
+does not.
 
 ## Unit tests in CI, without a system
 

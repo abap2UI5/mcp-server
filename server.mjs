@@ -90,6 +90,7 @@ import {
   classNameOf,
 } from './lib/runtime.mjs';
 import { createAppClient, AgentError } from './lib/appclient.mjs';
+import { migrateReport, deployFiles, resolvePopups, validTargetClass, SetupError } from './lib/migrate.mjs';
 import { explicitEnv } from './lib/repos.mjs';
 
 function text(s) {
@@ -275,6 +276,51 @@ async function snapshotAnswer(run) {
     if (e instanceof AgentError) return toolError(e.message);
     throw e;
   }
+}
+
+/* migrate_report { deploy: true }: the converted class, z2ui5_cl_cgui_* of the
+ * checkout and the popups they call into the dev sandbox, then build_backend
+ * and app_start - composed out of those tools' handlers, as verify_app is,
+ * each stage reported; the first that fails stops it. */
+async function deployMigrated(res, ctx) {
+  if (!res.ok) return { ok: false, stoppedAt: 'deploy', stages: { deploy: { ok: false, text: 'the report was refused - there is no class to deploy' } } };
+  const stages = {};
+  const stage = (label, r) => {
+    const t = r.content && r.content.find((c) => c.type === 'text');
+    let parsed;
+    try {
+      parsed = t ? JSON.parse(t.text) : null;
+    } catch {
+      parsed = t ? { text: t.text } : null;
+    }
+    stages[label] = { ok: !r.isError, ...(parsed && typeof parsed === 'object' ? parsed : { text: parsed }) };
+    return !r.isError;
+  };
+  const stop = (at) => ({ ok: !at, ...(at ? { stoppedAt: at } : {}), stages });
+  const box = missingSandbox();
+  if (box) return (stage('deploy', box), stop('deploy'));
+  const popups = resolvePopups(res.converter);
+  if (!popups) {
+    stage('deploy', toolError('popups checkout not found - the report runtime calls abap2UI5-addons/popups: clone https://github.com/abap2UI5-addons/popups '
+      + `into ${path.join(res.converter, '.deps', 'popups')} (as abap-cloud-gui's unit.yaml does) or beside it, or point POPUPS_HOME at a checkout`));
+    return stop('deploy');
+  }
+  try {
+    const dir = sandbox().dir;
+    const { support } = deployFiles({ files: res.files, dir, cloudGui: res.converter, popups, classNameOf });
+    stages.deploy = { ok: true, deployed: res.className, with: support, dir };
+  } catch (e) {
+    stage('deploy', toolError(String(e.message)));
+    return stop('deploy');
+  }
+  const tables = res.release.filter((x) => x.kind === 'database table').map((x) => x.name);
+  if (tables.length) {
+    stages.deploy.note = `the local backend has no table ${tables.join(', ')}: the selection screen runs, a run that reads them fails - `
+      + 'and a class typed with their fields may not start at all';
+  }
+  if (!stage('build', await handle('build_backend', { mode: 'auto' }, ctx))) return stop('build');
+  if (!stage('start', await handle('app_start', { app: res.className }, ctx))) return stop('start');
+  return stop(null);
 }
 
 async function handle(name, args = {}, ctx = {}) {
@@ -1165,6 +1211,45 @@ async function handle(name, args = {}, ctx = {}) {
         return text(await startBackend());
       }
       return text(backendStatus());
+    }
+    case 'migrate_report': {
+      if (typeof args.source !== 'string' || !args.source.trim()) return toolError('source is required: the text of the report, as in <report>.prog.abap');
+      /* report2cloud runs in-process from the abap-cloud-gui checkout - with
+       * that checkout's node_modules, so a local one with npm ci done; there
+       * is no mirror of it (lib/migrate.mjs). */
+      const miss = missingLocalSibling('abap-cloud-gui');
+      if (miss) return miss;
+      if (args.class_name !== undefined && args.class_name !== null && !validTargetClass(args.class_name)) {
+        return toolError(`class_name '${args.class_name}' is no ABAP class name - letters, digits, _ and /, at most 30 characters, e.g. zcl_flights`);
+      }
+      let res;
+      try {
+        res = await migrateReport({ source: args.source, textsXml: args.texts_xml, className: args.class_name || undefined, partial: args.partial === true });
+      } catch (e) {
+        if (e instanceof SetupError) return toolError(e.message);
+        throw e;
+      }
+      const reply = {
+        ok: res.ok,
+        class_name: res.className,
+        program: res.program,
+        files: res.ok ? res.files : (res.draft || {}),
+        ...(res.ok ? {} : { files_are: res.draft ? 'the draft (partial): refused statements are marked, it does not compile as it is' : 'none - the report was refused; pass partial: true for the draft' }),
+        refusals: res.refusals,
+        todos: res.todos.length,
+        release: res.release.map((x) => `${x.kind} ${x.name}${x.successor ? ` (successor: ${x.successor})` : ''}`),
+        migration_report: res.report,
+        next: res.ok
+          ? 'save the files (abapGit format) next to z2ui5_cl_cgui_report, then work the migration report: replace the unreleased objects, settle the TODOs - deploy: true runs it here first'
+          : 'every refusal is a place the report does something a browser app does not do - rewrite those statements in the report (or decide on a design) and convert again',
+      };
+      // a big report is a big class: the mapped table goes first, never the class
+      if (JSON.stringify(reply).length > ANSWER_BUDGET) {
+        const cut = reply.migration_report.indexOf('\n## Mapped');
+        if (cut > 0) reply.migration_report = `${reply.migration_report.slice(0, cut)}\n\n## Mapped\n\n(left out - the answer would pass the client's size limit; convert with the report2cloud CLI for the full table)\n`;
+      }
+      if (args.deploy === true) reply.deploy = await deployMigrated(res, ctx);
+      return text(reply);
     }
     case 'remove_app': {
       const miss = missingSandbox();

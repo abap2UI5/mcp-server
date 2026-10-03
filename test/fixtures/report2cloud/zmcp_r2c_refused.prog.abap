@@ -1,0 +1,5 @@
+REPORT zmcp_r2c_refused.
+
+START-OF-SELECTION.
+  CALL SCREEN 100.
+  SUBMIT zother AND RETURN.

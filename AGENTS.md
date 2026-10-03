@@ -53,6 +53,7 @@ reads it live like a checkout.
 | `SAMPLES_STACK_HOME` | `../samples-stack`, `../abap2UI5-samples-stack` | `catalogue.json` (preferred) + `SAMPLES.md` (fallback) — the stack-dependent catalogue (OData, RAP, APC, launchpad) |
 | `APP_TEMPLATE_HOME` | `../app-template`, `../abap2UI5-app-template` | `template.json` and the files it lists — what `scaffold_app` serves and renames (the tool is dead without this checkout) |
 | `DOCS_HOME` | `../docs` | `docs/**/*.md` — the documentation site's sources, searched live by `docs_search` |
+| `ABAP_CLOUD_GUI_HOME` | `../abap-cloud-gui` | `tools/report2cloud/lib/{convert,textpool,report}.mjs` — the report converter `migrate_report` imports in-process, with the checkout's own `node_modules` (`npm ci` there; LOCAL only, no mirror - `resolveCloudGui`, not in `RESOLVERS`); with `deploy: true` also its `src/01`, and the popups beside it (`POPUPS_HOME`, `.deps/popups` or `build/popups` of the checkout, `../popups`) |
 | `AI_VIEW_CHECK_HOME` | `../linter` (legacy aliases: `../abap2UI5-linter`, `../ai-view-check`) — which for an npm/npx install is ALSO where npm hoists the declared peer `@abap2ui5/linter` (`node_modules/@abap2ui5/{mcp-server,linter}`), then an INSTALLED one elsewhere: `<cwd>/node_modules/…` (app-template's devDependency), the server's own `node_modules/…`, then wherever Node's resolver finds the package from `lib/repos.mjs` (`viewCheckCandidates`, `nodeResolvedViewCheck`) | `validate_view` + `fix_view` + `screenshot_view`: dynamic import of the linter's package `exports` entries `.`, `./findings`, `./config`, `./rule-docs` (via `importViewCheck`) |
 
 One more checkout is read but not by this server: **`OPENUI5_SRC`** (default
@@ -570,6 +571,15 @@ changes upstream, this repo must change in the same breath:
   `"./init.mjs"` (without it the build fails - the runner would boot nothing)
   and lists only non-dependency tests, `init.mjs`'s import order (the boot
   order; sorted when unreadable), and `RUNNER_LOOP`.
+- abap-cloud-gui: **`tools/report2cloud/lib/convert.mjs`** (`convert(source,
+  { file, className, textpool })` answering `{ ok, className, programName,
+  files, draft, refusals, todos, release, notes }`), `textpool.mjs`
+  (`parseTextpool`) and `report.mjs` (`migrationReport(result, { source,
+  texts })`) - imported by `lib/migrate.mjs`, which checks the three exports
+  and answers a checkout without them (or without `npm ci`) as a setup
+  message. With `deploy: true` also the layout `src/01` and the popup set of
+  the addon's `unit.yaml` (`POPUP_FILES`). A renamed export or a moved file
+  over there is a broken `migrate_report` here, said by path.
 - docs: the `docs/` markdown tree (everything but `.vitepress`, `public` and
   `node_modules` is a page) and the **published URL scheme** its
   `scripts/generate-llms.mjs` derives — `https://abap2ui5.github.io/docs/<path>`
@@ -664,6 +674,12 @@ agent) find these artifacts in a dirty sibling worktree, mcp-server caused them:
   them, and the next build removes those whose process is gone
   (`sweepLeftovers`; ten minutes' grace, a day at most whatever the pid).
   Deleting any of it is safe: it is installed, fetched or built again.
+- the dev sandbox (any of its three homes) after `migrate_report { deploy:
+  true }`: the converted class's files and, beside it, every
+  `z2ui5_cl_cgui_*` class of abap-cloud-gui's `src/01` and the popups it
+  calls (`z2ui5_cl_popup_context`, `z2ui5_cx_popup_error`, `_get_range`,
+  `_to_confirm`, `_to_select`, `_input_val`) with all their files - what the
+  class needs to transpile; `remove_app` takes them out one by one.
 - `<tmp>/abap2ui5-mcp-remote/<repo>/` — the read-only GitHub mirrors (not a
   sibling worktree, but the same question "where did this come from": a
   directory that carries `.abap2ui5-mirror.json` is one, and deleting it is
