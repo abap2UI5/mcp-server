@@ -8,13 +8,13 @@
     "url": "https://github.com/abap2UI5/mcp-server",
     "source": "github"
   },
-  "version": "0.3.0",
+  "version": "1.0.0",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@abap2ui5/mcp-server",
-      "version": "0.3.0",
+      "version": "1.0.0",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"

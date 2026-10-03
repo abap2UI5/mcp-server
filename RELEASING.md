@@ -240,12 +240,15 @@ the framework publishes, not only before this server does.
 ## After a release
 
 **The floating major tag.** The composite action is used as
-`abap2UI5/mcp-server@v0`; the workflow's `move-major-tag` job points `v0` at
-each release it publishes (it needs `contents: write`, and nothing else in the
-workflow does). 0.2.0 was released before that job existed, so `v0` did not
-exist until the next release — the README pins `@v0.2.0` until then. Creating
-it once by hand is the other way:
-`git tag -f v0 v0.2.0^{} && git push -f origin refs/tags/v0`.
+`abap2UI5/mcp-server@v1`; the workflow's `move-major-tag` job points the
+major of each release it publishes (`v1` for 1.x) at it (it needs `contents:
+write`, and nothing in the publishing jobs does). A new major creates a new
+tag and leaves the previous one where it was: `v0` stays at 0.3.0, so a
+workflow pinned to `@v0` keeps working and keeps 0.3.0 until somebody moves
+it to `@v1`. **After 1.0.0**: app-template's `check.yml` and any other
+`@v0` consumer move to `@v1` — a change in those repositories. Should a run
+ever fail before the job, the tag is set by hand:
+`git tag -f v1 v1.0.0^{} && git push -f origin refs/tags/v1`.
 
 Both of these were done when 0.1.0 landed; they are here as the checklist for
 the release after a **rename**, which is when they come back:

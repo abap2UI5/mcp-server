@@ -1,6 +1,6 @@
 {
   "name": "@abap2ui5/mcp-server",
-  "version": "0.3.0",
+  "version": "1.0.0",
   "mcpName": "io.github.abap2UI5/mcp-server",
   "description": "MCP server for abap2UI5: capability queries, view validation, deploy, headless run + screenshot — the AI agent dev loop, no SAP system needed.",
   "type": "module",

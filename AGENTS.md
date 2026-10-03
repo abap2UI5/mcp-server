@@ -369,9 +369,9 @@ branch gets, both said in the log.
 
 It imports NONE of this package's dependencies (no playwright, no MCP SDK on
 this path), which is what lets `action.yml` - a composite GitHub Action at
-the repository root (`abap2UI5/mcp-server@v0`, a floating tag the release
-workflow's `move-major-tag` job moves to each release; it did not exist for
-0.2.0, so the README pins `@v0.2.0` until one has) - run it without an
+the repository root (`abap2UI5/mcp-server@v1`, a floating tag the release
+workflow's `move-major-tag` job moves to each release of its major; `@v0`
+stays at 0.3.0, the last 0.x) - run it without an
 `npm ci`. The action caches `~/.abap2ui5-mcp` per backend and pin (weekly
 for an unpinned project, so a new release is picked up) and deliberately
 without restore-keys: a restored cache of another pin carries that

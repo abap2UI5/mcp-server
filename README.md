@@ -271,7 +271,7 @@ with the cache, where the clone of 0.2.0 took 30 s and 23 s and left a
 231 MB workspace instead of 67 MB.
 
 ```yaml
-- uses: abap2UI5/mcp-server@v0.2.0
+- uses: abap2UI5/mcp-server@v1
   with:
     paths: src
 ```
@@ -281,10 +281,11 @@ clone` takes the old path (the release cloned, its backend downloaded or
 built) — which is also what a pin older than the package (1.145.0) gets by
 itself.
 
-Pin a release tag. The release workflow moves a floating major tag (`@v0`)
-to every release it publishes; until the first release after 0.2.0 has done
-that, `@v0` does not exist and a workflow naming it fails to resolve the
-action.
+`@v1` is a floating major tag: the release workflow moves it to every 1.x
+release it publishes, so a workflow naming it picks up fixes without
+picking up a breaking change. It is created by the 1.0.0 release; until that
+release is out, pin `@v0` (0.3.0, where it stays) or a release tag such as
+`@v0.3.0`.
 
 ```sh
 npx -p @abap2ui5/mcp-server abap2ui5-unit src     # the same, locally
