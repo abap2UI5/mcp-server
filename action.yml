@@ -10,13 +10,12 @@
 # devDependencies - the classes are transpiled against it and their tests
 # run. The result is the job's verdict and a step summary.
 #
-#   - uses: abap2UI5/mcp-server@v0.2.0
+#   - uses: abap2UI5/mcp-server@v1
 #     with:
 #       paths: src
 #
-# (`@v0`, the floating major tag, is moved to each release by release.yml -
-# it exists from the first release after 0.2.0 on; pin a release tag until
-# then.)
+# (`@v1`, the floating major tag, is moved to each 1.x release by
+# release.yml - it exists from 1.0.0 on; `@v0` stays at 0.3.0.)
 #
 # `backend: clone` takes the path from before the package: the release cloned
 # and its backend downloaded or built. It is also what a pin older than the
