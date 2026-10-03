@@ -308,7 +308,52 @@ The client keeps the last response per session in memory (Node: the 20 most
 recent sessions). Only the **current** draft id of a session is accepted: an
 earlier one is refused naming the current one. A session started on a backend
 process that has since stopped or restarted is refused (its drafts lived in
-that process).
+that process) — on the local backend; an embedder without a process to watch
+leaves the check out (see below).
+
+## Embedding the client
+
+`lib/appclient.mjs` is written to be copied: the VS Code extension vendors it
+with `lib/snapshot.mjs` and `lib/viewxml.mjs`, unchanged, and runs it against
+a real SAP system. Every assumption about the local backend is therefore an
+option of `createAppClient`, with the local backend's behaviour as the
+default:
+
+| Option | Default (local backend) | On a real system |
+| --- | --- | --- |
+| `transport({ body, headers, signal, draftId })` → `{ status, headers?, body }` | one `fetch` POST of `body` to `baseUrl` (`fetchImpl`) | the embedder's own roundtrip: auth, CSRF token, cookies, `sap-contextid` |
+| `location(app)` → `{ origin, pathname, search }` (may be async) | `baseUrl` without the trailing slash, `/`, `?app_start=<app>` | the system's launch URL, never a proxy's |
+| `generation()` | absent: no restart detection (the MCP server passes its backend process id) | absent |
+| `backendHint` | `is it running? backend { action: "status" } says` | the embedder's own pointer, or `''` |
+
+- **`transport`** performs ONE roundtrip. `body` is the serialized request
+  (`{"value":{"S_FRONT":…,"MODEL":…}}`), `headers` the two the frontend sends
+  (`content-type: application/json`, `sap-contextid-accept: header`),
+  `signal` the client's timeout (`timeoutMs`, 120 s), `draftId` the
+  `S_FRONT.ID` the request continues — `null` for an app start — so a
+  transport can keep per-session state (a stateful app's `sap-contextid`)
+  without parsing the body. Its answer is `{ status, body }` (plus
+  `headers`, which the client does not read); a status outside 2xx is the
+  backend's refusal (its text extracted as from the error page), and a throw
+  is *the backend did not answer (…)*. A transport that resends (a CSRF
+  `Required` → fetch → resend) does so inside the one call. With a
+  transport, `baseUrl` and `fetchImpl` are unused (unless the default
+  `location` needs `baseUrl`).
+- **`location`** builds the app start's `ORIGIN`/`PATHNAME`/`SEARCH`. The
+  backend builds URLs out of them and keeps them with the app's session, so
+  they must be what a browser would send; `search` has to name the class
+  (`app_start=<app>`, next to whatever else the launch URL carries). A throw
+  reaches the caller unchanged and sends nothing — throw an `AgentError` to
+  refuse (a launch URL with the class in its path).
+- **`generation`** names the backend process: a session started under
+  another generation is refused (*started on a backend that has since stopped
+  or restarted*). Absent, sessions are never orphaned — a real system keeps
+  its drafts across the embedder's restarts of anything.
+- **`backendHint`** is the pointer appended to *the backend did not answer
+  (…)* after a dash; the empty string appends nothing. No other message names a
+  local-backend tool.
+
+`metadata()`, `maxSessions` and `timeoutMs` are the same for every embedder.
 
 ## Deviations and extensions
 

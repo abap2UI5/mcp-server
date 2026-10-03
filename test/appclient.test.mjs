@@ -221,3 +221,98 @@ test('a backend error is a refusal with the backend\'s text, and the session is 
   await rejects(down.start('z_x'), /the backend did not answer \(ECONNREFUSED\)/);
   await rejects(down.start(''), /pass `app`/);
 });
+
+// ------------------------------------------- embedding: the options ----
+
+/** The replay as a `transport`: the same insistence on the recorded request,
+ *  except for the start request's location, which the test names itself. */
+function replayTransport(name, { location } = {}) {
+  const exchanges = fixture(name).steps.filter((s) => s.exchange).map((s) => s.exchange);
+  const calls = [];
+  const transport = async (req) => {
+    const body = JSON.parse(req.body).value;
+    calls.push({ ...req, value: body });
+    const next = exchanges[calls.length - 1];
+    assert.ok(next, `request ${calls.length} was not in the recording`);
+    const expected = structuredClone(next.request);
+    if (location && expected.S_FRONT.ORIGIN !== undefined) {
+      Object.assign(expected.S_FRONT, location);
+    }
+    assert.deepEqual(body, expected, `request ${calls.length} differs from the recorded one`);
+    return { status: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify(next.response) };
+  };
+  return { transport, calls, exchanges };
+}
+
+test('transport + location: one roundtrip per call, the start request carries the given location', async () => {
+  const where = { ORIGIN: 'https://sap.example.com:44300', PATHNAME: '/sap/bc/z2ui5', SEARCH: '?sap-client=100&app_start=z2ui5_cl_smp_app_009' };
+  const r = replayTransport('popup-009', { location: where });
+  const asked = [];
+  const client = createAppClient({
+    transport: r.transport,
+    location: async (app) => {
+      asked.push(app);
+      return { origin: where.ORIGIN, pathname: where.PATHNAME, search: `?sap-client=100&app_start=${app}` };
+    },
+  });
+  const s0 = await client.start('z2ui5_cl_smp_app_009');
+  assert.deepEqual(asked, ['z2ui5_cl_smp_app_009']);
+  const s1 = await client.act(s0.session, { values: { f4: 'Smith', f2: '3' }, event: 'POPUP_TABLE_VALUE' });
+  assert.equal(r.calls[0].draftId, null, 'an app start continues no draft');
+  assert.equal(r.calls[1].draftId, s0.session, 'an event names the draft it continues');
+  assert.deepEqual(r.calls[0].headers, { 'content-type': 'application/json', 'sap-contextid-accept': 'header' });
+  assert.ok(r.calls[0].signal instanceof AbortSignal);
+  assert.equal(typeof r.calls[0].body, 'string');
+  assert.ok(s1.session && s1.session !== s0.session);
+});
+
+test('transport: a status outside 2xx is the backend\'s refusal, a throw is "did not answer" with the backendHint', async () => {
+  const refusing = createAppClient({ transport: async () => ({ status: 403, headers: { 'x-csrf-token': 'Required' }, body: 'CSRF token validation failed' }) });
+  await rejects(refusing.start('z_x'), /^the backend refused the roundtrip - HTTP 403: CSRF token validation failed$/);
+  const noJson = createAppClient({ transport: async () => ({ status: 200, body: '<html>logon</html>' }) });
+  await rejects(noJson.start('z_x'), /^the backend answered no JSON: <html>logon<\/html>$/);
+  const down = (opts) => createAppClient({ transport: async () => { throw new Error('ECONNREFUSED'); }, ...opts });
+  await rejects(down().start('z_x'), /^the backend did not answer \(ECONNREFUSED\) - is it running\? backend \{ action: "status" \} says$/);
+  await rejects(down({ backendHint: 'is the system reachable? "abap2UI5: Check System Connection" says' }).start('z_x'),
+    /^the backend did not answer \(ECONNREFUSED\) - is the system reachable\? "abap2UI5: Check System Connection" says$/);
+  await rejects(down({ backendHint: '' }).start('z_x'), /^the backend did not answer \(ECONNREFUSED\)$/);
+  const fetchDown = createAppClient({ baseUrl: BASE, fetchImpl: async () => { throw new Error('ECONNREFUSED'); }, backendHint: 'check the system' });
+  await rejects(fetchDown.start('z_x'), /^the backend did not answer \(ECONNREFUSED\) - check the system$/);
+});
+
+test('location: a refusal it throws reaches the caller and sends nothing', async () => {
+  let sent = 0;
+  const client = createAppClient({
+    transport: async () => { sent += 1; return { status: 200, body: '{}' }; },
+    location: () => { throw new AgentError('the launch URL puts {class} into the path'); },
+  });
+  await rejects(client.start('z_x'), /^the launch URL puts \{class\} into the path$/);
+  assert.equal(sent, 0);
+});
+
+test('generation absent: no restart detection; present: a session of another generation is refused', async () => {
+  const plain = createAppClient({ transport: replayTransport('table-011', { location: { ORIGIN: 'x', PATHNAME: '/', SEARCH: '?app_start=z2ui5_cl_smp_app_011' } }).transport, location: (app) => ({ origin: 'x', pathname: '/', search: `?app_start=${app}` }) });
+  const s0 = await plain.start('z2ui5_cl_smp_app_011');
+  assert.equal(plain.describe(s0.session).session, s0.session, 'without `generation` a session is never orphaned');
+  let gen = 'a';
+  const watched = createAppClient({ baseUrl: BASE, fetchImpl: replay('table-011').fetchImpl, generation: () => gen });
+  const w0 = await watched.start('z2ui5_cl_smp_app_011');
+  gen = 'b';
+  assert.throws(() => watched.describe(w0.session), /started on a backend that has since stopped or restarted/);
+});
+
+test('the default transport hands fetch the same request as before: POST to baseUrl, JSON, the context header', async () => {
+  let seen;
+  const client = createAppClient({
+    baseUrl: BASE,
+    fetchImpl: async (url, init) => {
+      seen = { url, ...init };
+      return new Response('{"nope":1}', { status: 200 });
+    },
+  });
+  await rejects(client.start('z_x'), /answered without S_FRONT/);
+  assert.equal(seen.url, BASE);
+  assert.equal(seen.method, 'POST');
+  assert.deepEqual(seen.headers, { 'content-type': 'application/json', 'sap-contextid-accept': 'header' });
+  assert.deepEqual(JSON.parse(seen.body), { value: { S_FRONT: { ORIGIN: 'http://127.0.0.1:4471', PATHNAME: '/', SEARCH: '?app_start=z_x' } } });
+});

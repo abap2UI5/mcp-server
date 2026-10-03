@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **The app client embeds without wrappers.** `createAppClient` takes
+  `transport` (one roundtrip: the serialized request with its headers,
+  timeout signal and the draft id it continues in, `{ status, headers?,
+  body }` out), `location` (the app start's ORIGIN/PATHNAME/SEARCH),
+  an optional `generation` (absent: no restart detection) and `backendHint`
+  (the words after "the backend did not answer (...)"). The defaults are the
+  local backend's, so the MCP server's requests and refusals are unchanged
+  (the recorded sessions replay as before); the VS Code extension, which
+  vendors the client for a real SAP system, drops the request rewriting and
+  message patching it needed. `docs/agent-snapshot.md` "Embedding the
+  client" is the reference; `test/appclient.test.mjs` covers every option.
 - **Every abap2UI5 app is agent-operable: `app_list`, `app_start`,
   `app_describe`, `app_act`.** `interact_app` drives an app with CSS
   selectors in a headless Chromium and answers with a picture; the new tools

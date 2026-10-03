@@ -351,6 +351,12 @@ typing does in the browser (the frontend never sends a roundtrip without an
 event, and apps branch on `check_on_event`); **a session is bound to the
 backend process** that wrote its drafts (`backendGeneration`) - after a
 restart it is refused with the reason, never answered with a backend error.
+Every local-backend assumption of the client is an option of
+`createAppClient` (`transport`, `location`, `generation`, `backendHint` -
+docs/agent-snapshot.md "Embedding the client") because the VS Code extension
+vendors the three modules unchanged and runs them against a real system: a
+new assumption about the local backend goes behind an option with today's
+behaviour as the default, never into a code path the extension has to wrap.
 The snapshot module is pure and takes the linter's UI5 metadata
 (`./properties` `loadSnapshot`) only as an optional refinement for controls
 its own table lacks: the tools need a backend, never the linter.
