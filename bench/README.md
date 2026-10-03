@@ -141,6 +141,58 @@ directory. Every tool call in the transcript is scanned for the bench's path
 report excludes it and says how many. Run on a machine (or container) without
 this checkout where you can.
 
+### In GitHub Actions
+
+Two workflows carry the bench, neither of them part of the server's `ci.yml`:
+
+- **`bench-verify`** runs on every push and pull request that touches
+  `bench/` (or the two workflows): `node verify.mjs`, then the whole
+  `run.mjs` -> `report.mjs` pipeline through the Claude Code adapter with
+  `verify/fake-claude.mjs` standing in for the CLI (task 01, all four
+  conditions, `full` against this checkout's `server.mjs`). No API call, no
+  secret, about 5 minutes with the installs. A change under `bench/` that
+  turns it red has broken the grader or the harness, not the agents.
+- **`bench`** is the one-click run, `workflow_dispatch` only - it never starts
+  from a push or a pull request, because every run spends money.
+
+To run `bench`:
+
+1. Add the repository secret **`ANTHROPIC_API_KEY`** (Settings > Secrets and
+   variables > Actions > New repository secret). Use a key of its own with a
+   spend limit set in the Anthropic console: the agent runs with that key in
+   its environment and has a shell.
+2. Actions > **bench** > Run workflow, and fill in the inputs: `reps`
+   (default 1), `tasks` (empty = all 20), `conditions` (default all four),
+   `model` (empty = the CLI's default), `concurrency` (default 4),
+   `max_budget_usd` (per trial, default 5), `seed`, and
+   `claude_code_version` (default `latest`; the version a run used is in its
+   `run.json`, pass it here to repeat the run).
+3. The job checks the secret and the inputs, installs the gates, Chromium and
+   the CLI, runs `node verify.mjs` (a broken grader stops the run before it
+   costs anything), runs `run.mjs` with isolated trials, writes the report
+   table to the job summary and uploads `bench/results/<run-id>/` as the
+   artifact `bench-<run-id>` (90 days) - also when the run fails or hits its
+   time limit, so the trials that finished are kept.
+
+The cost is the one under "Expected cost and time" above: a `reps 1` run over
+everything is 80 trials, roughly USD 16-160, with the per-trial cap bounding it
+at USD 400. Try `tasks: 01` and `conditions: baseline,full` (2 trials) first.
+GitHub-hosted jobs stop after 6 hours, which a `reps 1` run fits at
+concurrency 4; for the three repetitions of the headline dispatch three runs
+with different seeds, download the artifacts and report them together
+(`node report.mjs results/<run1> results/<run2> results/<run3>`).
+
+**The honest limitation.** The runner that runs the agent also holds the
+bench checkout. The workflow removes the reference solutions and `verify/`
+from the working tree before the first trial (a non-dry run never reads them;
+they are marked skip-worktree, so `run.json` still records a clean bench
+commit), the workspaces lie under the runner's temp directory and the checkout
+keeps no token. But the task texts, the expect checks and the git objects
+(`git show` brings the references back) stay on the machine, and an agent with
+a shell can find them. The contamination flag is the only guard against that:
+read the contaminated count in the report before quoting a number, and when it
+is not zero, look at those transcripts.
+
 ### Results
 
 ```

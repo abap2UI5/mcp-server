@@ -85,6 +85,8 @@ jobs:
         run: |
           node run.mjs --tasks 01 --no-isolate --mcp-server local --run-id ci-plumbing
           node report.mjs results/ci-plumbing --out results/ci-plumbing/report.md
+          # the ${...} below are JavaScript template literals, not shell expansions
+          # shellcheck disable=SC2016
           node -e '
             const fs = require("fs");
             const lines = fs.readFileSync("results/ci-plumbing/trials.jsonl", "utf8").trim().split("\n").map(JSON.parse);
