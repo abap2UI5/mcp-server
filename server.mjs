@@ -47,9 +47,10 @@ import { searchPitfalls } from './lib/pitfalls.mjs';
 import { readGuide, sliceGuide, guideChapters, guideFile, GUIDE_PATH } from './lib/guide.mjs';
 import { readApiParsed, searchApi, apiSummary, apiFile, API_PATH } from './lib/api.mjs';
 import { parseSizes, screenshotSource } from './lib/screenshot.mjs';
-import { resolveSamplesControls, resolveAppTemplate, importViewCheck, SERVER_ROOT } from './lib/repos.mjs';
+import { resolveSamplesControls, resolveAppTemplate, importViewCheck, SERVER_ROOT, workspaceRoot } from './lib/repos.mjs';
 import { searchDocs, docsRoot } from './lib/docs.mjs';
 import { scaffold, readSpec, validClassName, classNameRule, templateFiles, SPEC_FILE } from './lib/scaffold.mjs';
+import { agentTargetProblem, planAgentSetup, writePlan, pinProblems, pinWarning, agentSetupNextSteps } from './lib/agent-setup.mjs';
 import { fixSource } from './lib/fixview.mjs';
 import { lintOptionsFor } from './lib/lintopts.mjs';
 import { withRenderFallback, renderSkippedNote } from './lib/validate.mjs';
@@ -59,7 +60,7 @@ import { TOOLS } from './lib/tools.mjs';
 import { RESOURCES, RESOURCE_TEMPLATES, GUIDE_CHAPTER_TEMPLATE, readResource } from './lib/resources.mjs';
 import { PROMPTS, getPrompt } from './lib/prompts.mjs';
 import { missingSiblingMessage, missingLocalSiblingMessage } from './lib/siblings.mjs';
-import { hydrate, REMOTE_TOOLS, resourceRepos, fetchRemoteFile, isRemoteCheckout } from './lib/remote.mjs';
+import { hydrate, REMOTE_TOOLS, resourceRepos, fetchRemoteFile, isRemoteCheckout, remoteBase } from './lib/remote.mjs';
 import { resolveKey, RESOLVERS } from './lib/repos.mjs';
 import { oneOf, boundedInt, stringArray, checkStringArgs } from './lib/args.mjs';
 import {
@@ -545,6 +546,101 @@ async function handle(name, args = {}, ctx = {}) {
         ...(missing.length ? { missing, warning: 'the template no longer has these — the project is incomplete without them' } : {}),
         next: 'write these files, then `npm install` and `npm run check` (abaplint + the abap2UI5-linter). '
           + 'The app class is a working starting point: read app_guide before changing it.',
+      });
+    }
+    case 'add_agent_setup': {
+      /* The template's agentSetup key, executed over the project the agent
+       * names (lib/agent-setup.mjs). The template may be the read-only
+       * mirror - it is only READ; what is written is the project, and only
+       * after every file has been decided. */
+      const miss = missingSibling('app-template');
+      if (miss) return miss;
+      const root = resolveAppTemplate();
+      const mirror = isRemoteCheckout(root);
+      const spec = readSpec(root);
+      if (!spec) {
+        return toolError(`the app-template checkout at ${root} has no ${SPEC_FILE} — `
+          + 'update it (git pull), or point APP_TEMPLATE_HOME at a current checkout');
+      }
+      if (!spec.agentSetup?.files) {
+        return toolError(`the app-template ${mirror ? 'mirror' : 'checkout'} at ${root} has a ${SPEC_FILE} without agentSetup — `
+          + 'it predates the agent setup; update it (git pull), or point APP_TEMPLATE_HOME at a current checkout');
+      }
+      const defaulted = args.project_dir === undefined || args.project_dir === null || args.project_dir === '';
+      const dir = path.resolve(defaulted ? process.cwd() : args.project_dir);
+      const problem = agentTargetProblem(dir, {
+        defaulted,
+        forbidden: [
+          { dir: SERVER_ROOT, what: 'inside this MCP server\'s own installation' },
+          { dir: root, what: 'inside the app-template checkout this setup is read from' },
+          { dir: remoteBase(), what: 'inside the GitHub mirror cache' },
+          { dir: workspaceRoot(), what: 'inside this server\'s workspace (A2UI5_MCP_WORKSPACE)' },
+        ],
+      });
+      if (problem) return toolError(problem);
+
+      const read = async (rel) => {
+        const at = path.join(root, rel);
+        if (!fs.existsSync(at)) {
+          throw new Error(`the app-template ${mirror ? 'mirror' : 'checkout'} at ${root} has no ${rel}, which its ${SPEC_FILE} lists — `
+            + 'update it (git pull), or point APP_TEMPLATE_HOME at a complete checkout');
+        }
+        return fs.readFileSync(at);
+      };
+      let plan;
+      try {
+        plan = await planAgentSetup(spec, read, dir);
+      } catch (err) {
+        return toolError(`${err.message} — nothing was written`);
+      }
+      const dryRun = args.dry_run === true;
+      if (!dryRun) {
+        try {
+          writePlan(dir, plan.actions);
+        } catch (err) {
+          return toolError(`writing into ${dir} failed: ${err.message} — files before it may have been written; `
+            + 'call add_agent_setup again once the cause is fixed (it never overwrites, so a second run only completes the first)');
+        }
+      }
+
+      const warnings = [...plan.warnings];
+      if (!dryRun && !mirror && spec.agentSetup.files['scripts/check-pin.mjs']) {
+        const problems = await pinProblems(dir, root);
+        if (problems.length) {
+          // whose check:pin check.yml's first step runs: the template's, or one the project kept
+          const checkPin = (file) => {
+            try {
+              return JSON.parse(fs.readFileSync(file, 'utf8')).scripts?.['check:pin'];
+            } catch {
+              return undefined;
+            }
+          };
+          const owns = fs.existsSync(path.join(dir, 'package.json'))
+            && checkPin(path.join(dir, 'package.json')) === checkPin(path.join(root, 'package.json'));
+          warnings.push(pinWarning(problems, owns));
+        }
+      }
+      const of = (kind) => plan.actions.filter((a) => a.kind === kind);
+      const written = of('add').map((a) => ({ path: a.path, ...(a.detail ? { detail: a.detail } : {}) }));
+      const merged = of('merge').map((a) => ({ path: a.path, detail: a.detail, added: a.added }));
+      const skipped = of('skip').map((a) => ({ path: a.path, reason: a.detail }));
+      const wroteAgents = plan.actions.some((a) => a.path === 'AGENTS.md' && a.kind === 'add');
+      const changes = written.length + merged.length;
+      return text({
+        source: 'abap2UI5/app-template',
+        template: mirror ? 'the GitHub mirror' : root,
+        project: dir,
+        dryRun,
+        sources: { folder: `${plan.folder}/`, from: plan.from },
+        summary: `${dryRun ? 'would write' : 'wrote'} ${written.length} new, ${dryRun ? 'would merge' : 'merged'} ${merged.length}, `
+          + `skipped ${skipped.length}${changes ? '' : ' - the agent setup was already complete, nothing to do'}`,
+        written,
+        merged,
+        skipped,
+        warnings,
+        next: dryRun
+          ? ['call add_agent_setup again without dry_run to write this', ...agentSetupNextSteps({ folder: plan.folder, wroteAgents })]
+          : agentSetupNextSteps({ folder: plan.folder, wroteAgents }),
       });
     }
     case 'api_reference': {
