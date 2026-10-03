@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+- **Every abap2UI5 app is agent-operable: `app_list`, `app_start`,
+  `app_describe`, `app_act`.** `interact_app` drives an app with CSS
+  selectors in a headless Chromium and answers with a picture; the new tools
+  speak the abap2UI5 JSON protocol itself against the local backend - the app
+  start, the event with its arguments, the model delta of what was typed,
+  exactly as the UI5 frontend sends them - and answer with an **agent
+  snapshot v1**: the fields an agent may fill (model path, label, kind,
+  value, choice values, required, editable), the actions it may fire (event
+  name, static arguments, row-dependent ones as `$row:FIELD`), the tables
+  (columns, the first rows, selection mode, editable cells), the messages
+  (toast, message box, MessageStrip, value states, the app's message table)
+  and some static text, from the view XML of every open slot (main, nested,
+  popup, popover) and the model. An act is validated against the snapshot
+  before anything is sent - an unknown event, a field that is not on the
+  screen or not editable, a choice outside its values is refused naming what
+  is allowed; values without an event stay pending, as typing does in the
+  browser; the popup close the browser performs alone is `@CLOSE_POPUP`.
+  `app_describe` answers from the last response kept, no roundtrip.
+  `lib/snapshot.mjs` (pure: the frontend's slot and model bookkeeping, and
+  the snapshot), `lib/viewxml.mjs` (the view, binding, expression and
+  event-wire parsers) and `lib/appclient.mjs` (the roundtrips, sessions and
+  validation); the linter's UI5 metadata, when it resolves, classifies
+  controls the snapshot has no entry for. The shape is shared with the VS
+  Code extension and the ABAP agent addon: `docs/agent-snapshot.md` is its
+  reference, including where it deviates from the contract it started from
+  (no `/XX/` two-way prefix in the current protocol, pending values,
+  `selectionField`, `@CLOSE_POPUP`) and what it cannot see yet.
+  `test/snapshot.test.mjs` and `test/appclient.test.mjs` run on eleven
+  recorded sample sessions (`test/fixtures/agent/`, real request/response
+  pairs of abap2UI5/samples apps on `@abap2ui5/node-runtime` 1.146.0) - the
+  replay insists on the exact request the real run sent;
+  `test/agent-integration.test.mjs` operates a form, a table with a row
+  action and selection, and a popup on the published runtime, through the
+  client and through the server over stdio (network-gated like
+  `test/npm-integration.test.mjs`).
 - **The linter is a declared peer dependency, and `npx -p @abap2ui5/mcp-server`
   brings it along.** The server had no dependency on `@abap2ui5/linter` at
   all: the registration every document gives installed a server whose

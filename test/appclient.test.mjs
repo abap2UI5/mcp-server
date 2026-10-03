@@ -1,0 +1,223 @@
+// The protocol client behind app_start / app_describe / app_act
+// (lib/appclient.mjs), sibling-free: the recorded sample sessions of
+// test/fixtures/agent are REPLAYED through a fake fetch that insists on
+// receiving exactly the request the real run sent - so the bodies this client
+// builds (draft id, event, arguments, the model delta) are pinned against
+// what @abap2ui5/node-runtime accepted, and every validation path is checked
+// to send nothing at all.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createAppClient, buildDelta, errorText, AgentError } from '../lib/appclient.mjs';
+
+const FIX = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'agent');
+const fixture = (name) => JSON.parse(fs.readFileSync(path.join(FIX, `${name}.json`), 'utf8'));
+const BASE = 'http://127.0.0.1:4471/';
+
+/** A fetch that answers the fixture's exchanges in order and fails the test
+ *  on any request that differs from the recorded one. */
+function replay(name) {
+  const exchanges = fixture(name).steps.filter((s) => s.exchange).map((s) => s.exchange);
+  const sent = [];
+  const fetchImpl = async (url, init) => {
+    assert.equal(url, BASE);
+    assert.equal(init.method, 'POST');
+    const body = JSON.parse(init.body).value;
+    sent.push(body);
+    const next = exchanges[sent.length - 1];
+    assert.ok(next, `request ${sent.length} was not in the recording: ${JSON.stringify(body)}`);
+    assert.deepEqual(body, next.request, `request ${sent.length} differs from the recorded one`);
+    return new Response(JSON.stringify(next.response), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  return { fetchImpl, sent, exchanges };
+}
+
+/** Replays a whole fixture through the client: every step's request must
+ *  match, and the snapshots come back. */
+async function run(name, opts = {}) {
+  const r = replay(name);
+  const client = createAppClient({ baseUrl: BASE, fetchImpl: r.fetchImpl, ...opts });
+  const snaps = [];
+  let snap = null;
+  for (const step of fixture(name).steps) {
+    snap = step.op === 'start' ? await client.start(step.arg) : await client.act(snap.session, step.arg);
+    snaps.push(snap);
+  }
+  assert.equal(r.sent.length, r.exchanges.length, 'every recorded request was sent');
+  return { client, snaps, sent: r.sent };
+}
+
+const rejects = (p, re) => assert.rejects(p, (e) => e instanceof AgentError && re.test(e.message));
+
+// ------------------------------------------------------------ buildDelta ----
+
+test('buildDelta builds the delta the frontend builds (core/Lib.js buildDeltaFromPaths)', () => {
+  const data = { NAME: 'x', S: { A: 1, B: 2 }, T: [{ Q: 1, SUB: [{ Z: 9 }] }, { Q: 2 }] };
+  assert.deepEqual(buildDelta(['/NAME'], data), { NAME: 'x' });
+  assert.deepEqual(buildDelta(['/S/B'], data), { S: { A: 1, B: 2 } }, 'a structure field ships the whole attribute');
+  assert.deepEqual(buildDelta(['/T/1/Q', '/T/0/Q'], data), { T: { __delta: { 1: { Q: 2 }, 0: { Q: 1 } } } });
+  assert.deepEqual(buildDelta(['/T/0/SUB/0/Z'], data), { T: { __delta: { 0: { SUB: { __delta: { 0: { Z: 9 } } } } } } });
+  assert.deepEqual(buildDelta(['/T', '/T/0/Q'], data), { T: data.T }, 'a whole table wins over a cell');
+});
+
+test('errorText reads the backend\'s 500 page', () => {
+  const t = errorText(500, '<html><body><pre>Error: boom<br> &nbsp; at x &lt;y&gt;</pre></body></html>');
+  assert.equal(t, 'HTTP 500: Error: boom\n   at x <y>');
+  assert.equal(errorText(502, ''), 'HTTP 502');
+});
+
+// ---------------------------------------------- replay of real sessions ----
+
+test('form (samples 381): values go out as the model delta of the SHOW roundtrip, the typed values stay on screen', async () => {
+  const { snaps, sent } = await run('form-381');
+  assert.deepEqual(sent[1].MODEL, { MESSAGE: 'hello agent', DOCK_TO_ANCHOR: true, MY: 'left top' });
+  assert.equal(sent[1].S_FRONT.EVENT, 'SHOW');
+  assert.equal(snaps[1].fields[0].value, 'hello agent', 'the client keeps what it sent, as the browser model does');
+  assert.equal(snaps[1].fields.find((f) => f.path === '/MY').value, 'left top');
+  assert.equal(sent[2].MODEL, undefined, 'nothing pending, no MODEL');
+});
+
+test('table (samples 011): cell edits and the row selection travel as one __delta', async () => {
+  const { snaps, sent } = await run('table-011');
+  assert.deepEqual(sent[2].MODEL, { T_TAB: { __delta: { 0: { TITLE: 'changed' }, 1: { SELKZ: true } } } });
+  assert.equal(snaps[2].tables[0].rowCount, 5);
+});
+
+test('popup flow (samples 009): the popup\'s own model is the one its event carries', async () => {
+  const { snaps, sent } = await run('popup-009');
+  assert.deepEqual(sent[1].MODEL, { S_SCREEN: { COLOR_01: '', COLOR_02: '', LASTNAME: '', NAME: 'Smith', QUANTITY: '3' } });
+  assert.deepEqual(sent[2].MODEL, { T_SUGGESTION_SEL: { __delta: { 2: { SELKZ: true } } } });
+  assert.equal(snaps[1].layer, 'popup');
+  assert.equal(snaps[2].fields.find((f) => f.path === '/S_SCREEN/COLOR_02').value, 'BLACK');
+});
+
+test('popup closed in the browser (samples 012): @CLOSE_POPUP sends nothing, the draft id stays', async () => {
+  const { snaps, sent } = await run('popup-012');
+  assert.equal(sent.length, 4, 'start, BUTTON_POPUP_03, BUTTON_POPUP_06, POPUP_DECIDE_CONTINUE - the close is local');
+  assert.equal(snaps[2].layer, 'main');
+  assert.equal(snaps[2].session, snaps[1].session);
+  assert.equal(snaps[3].app, 'Z2UI5_CL_SMP_APP_020');
+  assert.equal(snaps[4].app, 'Z2UI5_CL_SMP_APP_012');
+});
+
+test('row actions: $row arguments read the row, explicit args fill what the browser computes', async () => {
+  const list = await run('list-048');
+  assert.deepEqual(list.sent[1].S_FRONT.T_EVENT_ARG, ['entry_03', 'this is a description3 1234567890 1234567890', 'sap-icon://employee', 'Warning', 'Warning', false]);
+  const args = await run('args-537');
+  assert.deepEqual(args.sent[1].S_FRONT.T_EVENT_ARG, ['Flat Basic', 120, false, 'Wed Aug 05 2026']);
+  const grid = await run('grid-070');
+  assert.deepEqual(grid.sent[1].S_FRONT, { ID: grid.sent[1].S_FRONT.ID, EVENT: 'ROW_ACTION_ITEM_EDIT', T_EVENT_ARG: ['4'] }, 'the action addressed by its id');
+});
+
+test('nested views and popovers replay as recorded', async () => {
+  await run('nested-065');
+  await run('popover-026');
+  await run('messages-467');
+  await run('box-382');
+});
+
+// ------------------------------------------------------------ validation ----
+
+async function started(name) {
+  const r = replay(name);
+  const client = createAppClient({ baseUrl: BASE, fetchImpl: r.fetchImpl });
+  const snap = await client.start(fixture(name).steps[0].arg);
+  return { client, snap, sent: r.sent };
+}
+
+test('refusals name what is allowed, and nothing goes over the wire', async () => {
+  const { client, snap, sent } = await started('popup-009');
+  const s = snap.session;
+  await rejects(client.act(s, { event: 'NOPE' }), /no action 'NOPE' on this screen - allowed events: POPUP_TABLE_VALUE \(a1 /);
+  await rejects(client.act(s, { values: { NOPE: 1 } }), /no field 'NOPE' on this screen - fields you can fill: f1 \(Input with suggestion items, \/S_SCREEN\/COLOR_01\)/);
+  await rejects(client.act(s, { values: 'x' }), /`values` is an object/);
+  await rejects(client.act(s, { row: 1 }), /`row` belongs to an event/);
+  await rejects(client.act(s, { event: 'BUTTON_SEND', args: ['x'] }), /takes 0 argument/);
+  assert.equal(sent.length, 1, 'only the start');
+  const desc = client.describe(s);
+  assert.equal(desc.pending, undefined, 'a refused act left nothing pending');
+});
+
+test('values without an event stay pending, and go out with the next event', async () => {
+  const { client, snap, sent } = await started('popup-009');
+  const p = await client.act(snap.session, { values: { 'S_SCREEN-NAME': 'Smith', '/S_SCREEN/QUANTITY': 3 } });
+  assert.deepEqual(p.pending, ['/S_SCREEN/NAME', '/S_SCREEN/QUANTITY']);
+  assert.equal(p.session, snap.session, 'no roundtrip, no new draft');
+  assert.equal(p.fields.find((f) => f.id === 'f2').value, '3', 'a number for a string attribute stays a string');
+  assert.equal(sent.length, 1);
+  assert.deepEqual(client.describe(snap.session).pending, ['/S_SCREEN/NAME', '/S_SCREEN/QUANTITY']);
+  // the next event carries them: the recorded request had exactly these two
+  const next = await client.act(snap.session, { event: 'POPUP_TABLE_VALUE' });
+  assert.equal(next.layer, 'popup');
+  assert.equal(sent.length, 2);
+  assert.equal(next.pending, undefined);
+});
+
+test('choices, booleans, non-editable fields and table cells are checked against the snapshot', async () => {
+  const form = await started('form-381');
+  const s = form.snap.session;
+  await rejects(form.client.act(s, { values: { f4: 'nowhere' } }), /field f4 \(my\): 'nowhere' is not one of its values - allowed keys: 'begin top'/);
+  await rejects(form.client.act(s, { values: { f6: 'maybe' } }), /is a boolean - pass true or false/);
+  assert.equal((await form.client.act(s, { values: { f6: 'true' } })).fields[5].value, true, '"true" is accepted for a boolean');
+  const table = await started('table-011');
+  const t = table.snap.session;
+  await rejects(table.client.act(t, { values: { '/T_TAB/0/TITLE': 'x' } }), /column TITLE of table t1 is not editable - editable columns: SELKZ/);
+  await rejects(table.client.act(t, { values: { 't1/9/SELKZ': true } }), /table t1 has 6 row\(s\) - row 9 does not exist/);
+  const ok = await table.client.act(t, { values: { 't1/2/SELKZ': true } });
+  assert.deepEqual(ok.pending, ['/T_TAB/2/SELKZ']);
+  assert.equal(ok.tables[0].rows[2].SELKZ, true);
+});
+
+test('a row action without a row says which rows exist; a disabled action is refused', async () => {
+  const { client, snap } = await started('list-048');
+  await rejects(client.act(snap.session, { event: 'EDIT' }), /action a2 \(EDIT\) is a row action of table t1 \(6 rows\) - pass `row` \(0-5\)/);
+  await rejects(client.act(snap.session, { event: 'EDIT', row: 6 }), /row 6 does not exist/);
+  const form = await started('popup-009');
+  await rejects(form.client.act(form.snap.session, { event: 'BUTTON_SEND', row: 0 }), /`row` is for row actions - a5 \(BUTTON_SEND\) is a screen action/);
+  const args = await started('args-537');
+  await rejects(args.client.act(args.snap.session, { event: 'ROW', row: 0 }), /argument 1 of ROW \(\$expr:\$\{QUANTITY\} \* 10\) is computed in the browser - pass its value in args\[1\]/);
+});
+
+test('a popup in front: the page\'s fields are refused with the reason', async () => {
+  const r = replay('popup-009');
+  const client = createAppClient({ baseUrl: BASE, fetchImpl: r.fetchImpl });
+  const s0 = await client.start('z2ui5_cl_smp_app_009');
+  const s1 = await client.act(s0.session, { values: { f4: 'Smith', f2: '3' }, event: 'POPUP_TABLE_VALUE' });
+  await rejects(client.act(s1.session, { values: { f1: 'x' } }), /a popup is open: only its fields and actions count until it closes/);
+  await rejects(client.act(s1.session, { event: 'BUTTON_SEND' }), /allowed events: POPUP_TABLE_VALUE_CONTINUE .*a popup is open/);
+});
+
+test('sessions: unknown, earlier and orphaned (backend restarted) ids are refused', async () => {
+  let gen = 1;
+  const r = replay('table-011');
+  const client = createAppClient({ baseUrl: BASE, fetchImpl: r.fetchImpl, generation: () => gen });
+  const s0 = await client.start('z2ui5_cl_smp_app_011');
+  const s1 = await client.act(s0.session, { event: 'BUTTON_EDIT' });
+  assert.throws(() => client.describe('nope'), /unknown session 'nope' - start one with app_start; open sessions: /);
+  assert.throws(() => client.describe(s0.session), new RegExp(`earlier state of this app session - continue with the current one: '${s1.session}'`));
+  assert.deepEqual(client.sessions(), [{ session: s1.session, app: 'Z2UI5_CL_SMP_APP_011' }]);
+  gen = 2;
+  assert.throws(() => client.describe(s1.session), /started on a backend that has since stopped or restarted - its drafts are gone; app_start Z2UI5_CL_SMP_APP_011 again/);
+  assert.throws(() => client.describe(undefined), /pass `session`/);
+});
+
+test('a backend error is a refusal with the backend\'s text, and the session is unchanged', async () => {
+  let fail = false;
+  const r = replay('popup-009');
+  const fetchImpl = async (url, init) => (fail
+    ? new Response('<pre>Error: Void type: Z_X<br>at y</pre>', { status: 500 })
+    : r.fetchImpl(url, init));
+  const client = createAppClient({ baseUrl: BASE, fetchImpl });
+  const s0 = await client.start('z2ui5_cl_smp_app_009');
+  fail = true;
+  await rejects(client.act(s0.session, { values: { f4: 'Smith' }, event: 'BUTTON_SEND' }), /the backend refused the roundtrip - HTTP 500: Error: Void type: Z_X\nat y/);
+  const after = client.describe(s0.session);
+  assert.equal(after.session, s0.session);
+  assert.equal(after.pending, undefined, 'the refused act rolled its values back');
+  assert.equal(after.fields[3].value, '');
+  const down = createAppClient({ baseUrl: BASE, fetchImpl: async () => { throw new Error('ECONNREFUSED'); } });
+  await rejects(down.start('z_x'), /the backend did not answer \(ECONNREFUSED\)/);
+  await rejects(down.start(''), /pass `app`/);
+});

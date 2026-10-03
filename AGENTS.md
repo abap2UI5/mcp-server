@@ -83,8 +83,8 @@ because the backend hands its paths to children running elsewhere), `A2UI5_MCP_B
 framework clone as the answer to "no checkout", the default before the npm
 backend), `A2UI5_MCP_RUNTIME_VERSION` (the `@abap2ui5/node-runtime` release,
 X.Y.Z; default the registry's latest - `A2UI5_MCP_OFFLINE` also stops that
-question), `A2UI5_MCP_SKIP_NETWORK_TESTS` (the one `npm test` file that
-reaches the registry skips itself), and the child-process timeouts `A2UI5_MCP_LINT_TIMEOUT_MS` /
+question), `A2UI5_MCP_SKIP_NETWORK_TESTS` (the two `npm test` files that
+reach the registry - npm-integration and agent-integration - skip themselves), and the child-process timeouts `A2UI5_MCP_LINT_TIMEOUT_MS` /
 `A2UI5_MCP_SCOPE_TIMEOUT_MS` (default 5 min), `A2UI5_MCP_BUILD_TIMEOUT_MS`
 (default 30 min, also the prebuilt download and the npm install) and
 `A2UI5_MCP_UNIT_TIMEOUT_MS` (default 10 min, the test runner).
@@ -331,6 +331,35 @@ test classes were given), boot; the first failing stage stops it, everything
 before it stays in `stages`, `stoppedAt` names it, and a missing linter skips
 the validate stage rather than failing it.
 
+**`app_start` / `app_act` / `app_describe` / `app_list`** operate a running
+app without a browser: `lib/appclient.mjs` speaks the abap2UI5 JSON protocol
+to the backend `startBackend` serves (the app start, then `S_FRONT.ID` /
+`EVENT` / `T_EVENT_ARG` plus the model delta, exactly as the UI5 frontend
+sends them), keeps per session what the frontend keeps per component (the
+views in their five slots, the models and who owns them, the draft id, the
+unsent edits - `applyResponse` in `lib/snapshot.mjs`), and answers with the
+**agent snapshot v1** `analyzeScreen` derives from the view XML and the
+model. `docs/agent-snapshot.md` is the specification - the VS Code
+extension and the ABAP agent addon implement the same shape from it, so a
+change to the snapshot is a change to that page in the same commit, and the
+shape test in `test/snapshot.test.mjs` is where it shows. Three rules:
+**validate before sending** (an event that is not an action of the current
+snapshot, a field that is not on it or not editable, a choice outside its
+values is an error result naming what IS allowed, and a refused act changes
+nothing - no blind wiring); **values without an event stay pending**, as
+typing does in the browser (the frontend never sends a roundtrip without an
+event, and apps branch on `check_on_event`); **a session is bound to the
+backend process** that wrote its drafts (`backendGeneration`) - after a
+restart it is refused with the reason, never answered with a backend error.
+The snapshot module is pure and takes the linter's UI5 metadata
+(`./properties` `loadSnapshot`) only as an optional refinement for controls
+its own table lacks: the tools need a backend, never the linter.
+`test/fixtures/agent/*.json` are real request/response pairs of
+abap2UI5/samples apps (recorded by driving the client against
+`@abap2ui5/node-runtime`); `test/appclient.test.mjs` replays them and fails
+on any request that differs from the recorded one. Re-record them when the
+protocol moves (the fixture's `note` says against which release).
+
 ### The CI runner — `scripts/ci-unit.mjs`, `action.yml`, the `abap2ui5-unit` bin
 
 The same code as the tools, for a repository's CI and for a terminal: the
@@ -504,6 +533,19 @@ changes upstream, this repo must change in the same breath:
   methods, `cs_*` constants, types, the ABAP-Doc and inline notes), relying on
   the abaplint-pinned formatting; a move of the file is reported by path, and
   a formatting change upstream is a parser change here.
+- abap2UI5 core: **the frontend wire protocol** the app tools speak
+  (`lib/appclient.mjs`, `lib/snapshot.mjs`, `lib/viewxml.mjs`) - the request
+  and response format documented at the top of `app/webapp/core/Server.js`
+  (`{ value: { S_FRONT: { ID, EVENT, T_EVENT_ARG, ORIGIN, PATHNAME, SEARCH },
+  MODEL } }`, `PROTOCOL` 2), the delta format of `core/Lib.js`
+  `buildDeltaFromPaths` (ported as `buildDelta`), the `VIEW_SLOTS`
+  display/destroy actions and the per-slot model ownership of
+  `core/actions/Slots.js`, the toast/box options of
+  `core/actions/ControlCall.js` (`onClose`, `actions`), and the event wire
+  grammar `z2ui5_cl_ui5_srv_event` writes into view XML (`.eB(['EVENT',
+  flags], args)`, `.eBP($event, cond, [...])`, `.eF(...)`, the quoting rule
+  for static arguments). A protocol bump upstream is a change here and a
+  re-recording of `test/fixtures/agent/`.
 - **@abap2ui5/node-runtime** (npm; packed by abap2UI5's
   `node/setup/pack-npm.mjs`): the `.` export's `initialize` and `serve` (and
   `createApp`, for the compress path); the OPTIONAL `accelerate` and
@@ -669,11 +711,19 @@ injected registry and npm/git/transpiler stand-ins), `test/npm-runtime.test.mjs`
 build/unit/status - against the fake workspace of `test/helpers/npm-fixture.mjs`),
 `test/npm-host.test.mjs` (the host through `startBackend`, accelerate and
 compress detected, and the server's gates over stdio; ports 4431-4432) and
-`test/npm-integration.test.mjs` - the ONE test that reaches the network: the
+`test/npm-integration.test.mjs` - the test that reaches the network: the
 whole loop against the published package (install, open-abap-core, lint,
 build, unit tests, boot, GET and a POST roundtrip), about 30 s cold, skipped
 by itself when the registry or GitHub cannot be reached and with
-`A2UI5_MCP_SKIP_NETWORK_TESTS=1`. CI (`.github/workflows/ci.yml`) runs `npm test`
+`A2UI5_MCP_SKIP_NETWORK_TESTS=1`. `test/agent-integration.test.mjs` sits
+behind the same gate: it builds `test/fixtures/agent-app/zcl_agent_mcp`
+(a form, a table with a row action and selection, a popup) on the published
+package and operates it through `lib/appclient.mjs` and through the server's
+app tools over stdio (about 25 s). The agent snapshot's pure halves are
+`test/snapshot.test.mjs` (the parsers, the slot bookkeeping, the snapshot on
+the recorded sample sessions of `test/fixtures/agent/`, the contract shape)
+and `test/appclient.test.mjs` (the replay of those sessions, every
+validation path). CI (`.github/workflows/ci.yml`) runs `npm test`
 on every push/PR. Manual stdio driving, when a test is not enough:
 
 ```bash

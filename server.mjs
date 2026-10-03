@@ -84,7 +84,12 @@ import {
   backendKind,
   npmModeProblem,
   npmPreferenceProblem,
+  backendBaseUrl,
+  backendGeneration,
+  builtAppClasses,
+  classNameOf,
 } from './lib/runtime.mjs';
+import { createAppClient, AgentError } from './lib/appclient.mjs';
 import { explicitEnv } from './lib/repos.mjs';
 
 function text(s) {
@@ -235,6 +240,41 @@ async function flagFixable(findings) {
   }
   if (typeof isFixable !== 'function') return findings;
   return findings.map((f) => (isFixable(f) ? { ...f, fixable: true } : f));
+}
+
+/* The app_* tools' protocol client (lib/appclient.mjs): one per server, its
+ * sessions in memory - app_describe answers from them without a roundtrip.
+ * The linter's UI5 control snapshot, when a linter resolves, refines how an
+ * unmapped control is classified; without one the snapshot's own table is
+ * the whole knowledge (it never needs the linter). */
+let appClient = null;
+let uiMetadata;
+async function agentClient() {
+  if (uiMetadata === undefined) {
+    try {
+      const { loadSnapshot } = await importViewCheck('./properties');
+      uiMetadata = typeof loadSnapshot === 'function' ? loadSnapshot() : null;
+    } catch {
+      uiMetadata = null;
+    }
+  }
+  if (!appClient) {
+    appClient = createAppClient({ baseUrl: backendBaseUrl(), generation: backendGeneration, metadata: () => uiMetadata });
+  }
+  return appClient;
+}
+
+/* A snapshot as the tool answer: compact JSON - the shape is the token
+ * budget's friend, indentation is not. A refusal (AgentError) is an error
+ * result naming what is allowed; anything else propagates to the handler's
+ * catch like every other tool's failure. */
+async function snapshotAnswer(run) {
+  try {
+    return text(JSON.stringify(await run()));
+  } catch (e) {
+    if (e instanceof AgentError) return toolError(e.message);
+    throw e;
+  }
 }
 
 async function handle(name, args = {}, ctx = {}) {
@@ -1042,6 +1082,42 @@ async function handle(name, args = {}, ctx = {}) {
       const content = [{ type: 'text', text: JSON.stringify(report, null, 2) }];
       if (res.base64) content.push({ type: 'image', data: res.base64, mimeType: 'image/png' });
       return { content, isError: !res.booted };
+    }
+    case 'app_list': {
+      const miss = missingBackend();
+      if (miss) return miss;
+      const apps = builtAppClasses();
+      if (!apps) return toolError('backend not built — call build_backend first; app_list reads the transpiled output it makes');
+      const want = String(args.filter || '').toUpperCase();
+      const hits = want ? apps.filter((a) => a.app.includes(want)) : apps;
+      return text({
+        count: hits.length,
+        apps: hits,
+        ...(hits.length ? { hint: 'app_start { app } starts one and answers with its agent snapshot' } : { hint: want ? `no built app class contains '${args.filter}'` : 'nothing built that implements z2ui5_if_app - deploy_app, then build_backend' }),
+      });
+    }
+    case 'app_start': {
+      const miss = missingBackend();
+      if (miss) return miss;
+      const cls = classNameOf(args.app);
+      if (!backendBuilt()) return toolError('backend not built — call build_backend first (then app_start; app_list names what the build carries)');
+      const maxRows = boundedInt(args.max_rows, { name: 'max_rows', dflt: 20, min: 0, max: 200 });
+      await startBackend();
+      const client = await agentClient();
+      return snapshotAnswer(() => client.start(cls, { values: args.values, maxRows }));
+    }
+    case 'app_describe': {
+      const maxRows = boundedInt(args.max_rows, { name: 'max_rows', dflt: undefined, min: 0, max: 200 });
+      const client = await agentClient();
+      return snapshotAnswer(async () => client.describe(args.session, { maxRows }));
+    }
+    case 'app_act': {
+      const maxRows = boundedInt(args.max_rows, { name: 'max_rows', dflt: undefined, min: 0, max: 200 });
+      const row = args.row === undefined || args.row === null ? undefined : Number(args.row);
+      const client = await agentClient();
+      return snapshotAnswer(() => client.act(args.session, {
+        values: args.values, event: args.event, args: args.args, row, maxRows,
+      }));
     }
     case 'run_unit_tests': {
       const miss = missingBackend();

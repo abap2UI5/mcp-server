@@ -167,6 +167,15 @@ test('every sibling-dependent tool degrades with an actionable error when the ch
     const A2 = /abap2UI5 checkout not found/;
     expectMissing(await call('run_app', { class_name: 'z2ui5_cl_demo' }), A2, 'A2UI5_HOME');
     expectMissing(await call('interact_app', { class_name: 'z2ui5_cl_demo', actions: [{ action: 'click', text: 'Save' }] }), A2, 'A2UI5_HOME');
+    // the agent tools: listing and starting need the backend; describe and
+    // act answer from the sessions in memory, of which there are none
+    expectMissing(await call('app_list', {}), A2, 'A2UI5_HOME');
+    expectMissing(await call('app_start', { app: 'z2ui5_cl_demo' }), A2, 'A2UI5_HOME');
+    for (const [tool, toolArgs] of [['app_describe', { session: 'D1' }], ['app_act', { session: 'D1', event: 'SAVE' }]]) {
+      const r = await call(tool, toolArgs);
+      assert.equal(r.isError, true, `${tool} without a session must be an error result`);
+      assert.match(r.content[0].text, /unknown session 'D1' - start one with app_start/);
+    }
     expectMissing(await call('run_unit_tests', {}), A2, 'A2UI5_HOME');
     expectMissing(await call('run_unit_tests', { class_name: 'z2ui5_cl_demo' }), A2, 'A2UI5_HOME');
     expectMissing(await call('build_backend', { mode: 'prebuilt' }), A2, 'A2UI5_HOME');

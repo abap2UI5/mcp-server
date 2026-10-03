@@ -16,7 +16,9 @@
 # The backend half of the expensive loop IS covered, by `npm test` itself:
 # test/npm-integration.test.mjs installs @abap2ui5/node-runtime from the
 # registry and runs deploy, build, unit tests, boot and an HTTP roundtrip
-# (about 30 s; it skips itself without registry or GitHub access). What
+# (about 30 s; it skips itself without registry or GitHub access), and
+# test/agent-integration.test.mjs operates an app through the app_* tools on
+# the same published package, behind the same gate. What
 # neither job covers, and should be said rather than assumed: the BROWSER half
 # of run_app/interact_app and the render half of validate_view. They need UI5
 # (the CDN, or a corpus' @openui5 packages) and a Chromium; the screenshot
