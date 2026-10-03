@@ -1,0 +1,10 @@
+{
+  "level": 2,
+  "classes": ["zcl_bench_07"],
+  "controls": [["sap.m.Table", "sap.ui.table.Table"], ["sap.m.SearchField", "sap.m.Input"]],
+  "events": [
+    ["sap.m.SearchField.search", "sap.m.SearchField.liveChange", "sap.m.Input.submit", "sap.m.Input.liveChange"],
+    { "any": ["sap.m.Button.press", "sap.m.SegmentedButton.selectionChange", "sap.m.Select.change", "sap.m.ToggleButton.press"], "min": 1 }
+  ],
+  "bindings": [["sap.m.Table.items", "sap.ui.table.Table.rows"]]
+}

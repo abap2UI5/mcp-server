@@ -1,0 +1,8 @@
+{
+  "level": 2,
+  "classes": ["zcl_bench_12"],
+  "controls": [["sap.m.Table", "sap.ui.table.Table"], "sap.m.Input"],
+  "events": [{ "any": ["sap.m.Button.press"], "min": 3 }],
+  "bindings": [["sap.m.Table.items", "sap.ui.table.Table.rows"], "sap.m.Input.value"],
+  "calls": ["message_toast_display", "message_box_display"]
+}

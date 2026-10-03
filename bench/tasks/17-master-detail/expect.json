@@ -1,0 +1,21 @@
+{
+  "level": 3,
+  "classes": ["zcl_bench_17", "zcl_bench_17_detail"],
+  "perClass": {
+    "zcl_bench_17": {
+      "controls": [["sap.m.Table", "sap.ui.table.Table", "sap.m.List"]],
+      "events": [[
+        "sap.m.ColumnListItem.press", "sap.m.ColumnListItem.detailPress", "sap.m.Table.itemPress", "sap.m.Table.selectionChange",
+        "sap.m.StandardListItem.press", "sap.m.List.itemPress", "sap.m.List.selectionChange",
+        "sap.ui.table.Table.rowSelectionChange", "sap.ui.table.Table.cellClick", "sap.m.Link.press", "sap.m.Button.press"
+      ]],
+      "calls": ["nav_app_call"]
+    },
+    "zcl_bench_17_detail": {
+      "controls": ["sap.m.Input"],
+      "events": [["sap.m.Page.navButtonPress", "sap.m.Button.press"]],
+      "bindings": ["sap.m.Input.value"],
+      "calls": [["nav_app_leave", "_event_nav_app_leave"]]
+    }
+  }
+}

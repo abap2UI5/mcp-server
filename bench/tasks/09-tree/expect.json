@@ -1,0 +1,12 @@
+{
+  "level": 2,
+  "classes": ["zcl_bench_09"],
+  "controls": [["sap.m.Tree", "sap.ui.table.TreeTable"]],
+  "events": [[
+    "sap.m.Tree.itemPress", "sap.m.Tree.selectionChange",
+    "sap.m.StandardTreeItem.press", "sap.m.StandardTreeItem.detailPress", "sap.m.CustomTreeItem.press",
+    "sap.ui.table.TreeTable.rowSelectionChange", "sap.ui.table.TreeTable.cellClick", "sap.m.Link.press", "sap.m.Button.press"
+  ]],
+  "bindings": [["sap.m.Tree.items", "sap.ui.table.TreeTable.rows"]],
+  "calls": ["message_toast_display"]
+}

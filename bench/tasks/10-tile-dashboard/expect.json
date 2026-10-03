@@ -1,0 +1,8 @@
+{
+  "level": 2,
+  "classes": ["zcl_bench_10"],
+  "controls": ["sap.m.GenericTile", "sap.m.NumericContent"],
+  "events": ["sap.m.GenericTile.press"],
+  "attrs": [["sap.m.NumericContent.valueColor"]],
+  "calls": ["message_toast_display"]
+}

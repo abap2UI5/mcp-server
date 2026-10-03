@@ -1,0 +1,9 @@
+{
+  "task": "01-hello-toast",
+  "mustFail": [
+    "expect",
+    "lint",
+    "render"
+  ],
+  "why": "a control that does not exist (Buton): the linter reports it statically, the render gate fails to load it, and the task's sap.m.Button is missing"
+}

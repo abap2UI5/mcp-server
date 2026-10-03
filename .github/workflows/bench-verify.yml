@@ -1,0 +1,108 @@
+# The abap2UI5-bench grader must not rot (bench/, see bench/README.md).
+#
+# A workflow of its own rather than a job in ci.yml, because it runs only
+# when something under bench/ (or one of the two bench workflows) changes:
+# it installs the template's gates with the ~118 MB UI5 runtime and a
+# Chromium, which every other change to this repository has no reason to pay.
+#
+#   verify    node verify.mjs - the gate versions equal the pinned
+#             app-template's lockfile, all 20 reference solutions pass every
+#             check, the 7 broken variants fail exactly the checks they name,
+#             and the Claude Code adapter reads a recorded transcript.
+#             About 2 minutes of grading on a 4-core machine.
+#   plumbing  the pipeline bench.yml runs - run.mjs through the Claude Code
+#             adapter, then report.mjs - with verify/fake-claude.mjs standing
+#             in for the CLI (it writes the reference solution and prints a
+#             stream-json transcript): one task under all four conditions,
+#             the full condition against this checkout's server.mjs. No API
+#             call, no cost; every trial must pass, or the one-click run
+#             would report the harness instead of the agent.
+#
+# Chromium is installed the way abap2UI5's test.yaml does it (Playwright's
+# own installer, the browser cache keyed by the Playwright version the
+# bench's lockfile resolves, the OS libraries installed on a cache hit).
+name: bench-verify
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'bench/**'
+      - '.github/workflows/bench-verify.yml'
+      - '.github/workflows/bench.yml'
+  pull_request:
+    paths:
+      - 'bench/**'
+      - '.github/workflows/bench-verify.yml'
+      - '.github/workflows/bench.yml'
+
+concurrency:
+  group: bench-verify-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: bench
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: bench/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Get Playwright version
+        id: playwright-version
+        run: echo "version=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-chromium-${{ steps.playwright-version.outputs.version }}
+      - name: Install Playwright browser
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+      - name: Install Playwright OS dependencies
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      - name: Verify the grader (references pass, broken variants fail)
+        run: node verify.mjs --json verify.json
+
+      - name: Pipeline plumbing (run.mjs + report.mjs, fake Claude Code CLI)
+        env:
+          CLAUDE_BIN: verify/fake-claude.mjs
+        run: |
+          node run.mjs --tasks 01 --no-isolate --mcp-server local --run-id ci-plumbing
+          node report.mjs results/ci-plumbing --out results/ci-plumbing/report.md
+          # the ${...} below are JavaScript template literals, not shell expansions
+          # shellcheck disable=SC2016
+          node -e '
+            const fs = require("fs");
+            const lines = fs.readFileSync("results/ci-plumbing/trials.jsonl", "utf8").trim().split("\n").map(JSON.parse);
+            const bad = lines.filter((t) => !t.grade.pass || t.meta.infraError || t.grade.infraError);
+            for (const t of bad) console.error(`${t.task} ${t.condition}: pass=${t.grade.pass} agent=${t.meta.infraError || "-"} grader=${t.grade.infraError || "-"}`);
+            if (lines.length !== 4 || bad.length) { console.error(`expected 4 passing trials, got ${lines.length - bad.length}/${lines.length}`); process.exit(1); }
+            console.log("plumbing: 4/4 trials pass");
+          '
+
+      - name: Upload verify output
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bench-verify
+          path: |
+            bench/verify.json
+            bench/results/ci-plumbing/
+          if-no-files-found: ignore
+          retention-days: 14

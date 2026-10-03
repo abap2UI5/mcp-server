@@ -1,0 +1,11 @@
+{
+  "level": 2,
+  "classes": ["zcl_bench_16"],
+  "controls": [["sap.m.Table", "sap.ui.table.Table"], ["sap.m.DatePicker", "sap.m.DateRangeSelection"]],
+  "events": [{ "any": ["sap.m.Button.press"], "min": 2 }],
+  "bindings": [
+    ["sap.m.Table.items", "sap.ui.table.Table.rows"],
+    ["sap.m.DatePicker.value", "sap.m.DatePicker.dateValue", "sap.m.DateRangeSelection.value", "sap.m.DateRangeSelection.dateValue", "sap.m.DateRangeSelection.secondDateValue"]
+  ],
+  "calls": ["message_box_display"]
+}

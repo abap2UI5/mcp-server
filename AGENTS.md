@@ -412,9 +412,9 @@ branch gets, both said in the log.
 
 It imports NONE of this package's dependencies (no playwright, no MCP SDK on
 this path), which is what lets `action.yml` - a composite GitHub Action at
-the repository root (`abap2UI5/mcp-server@v0`, a floating tag the release
-workflow's `move-major-tag` job moves to each release; it did not exist for
-0.2.0, so the README pins `@v0.2.0` until one has) - run it without an
+the repository root (`abap2UI5/mcp-server@v1`, a floating tag the release
+workflow's `move-major-tag` job moves to each release of its major; `@v0`
+stays at 0.3.0, the last 0.x) - run it without an
 `npm ci`. The action caches `~/.abap2ui5-mcp` per backend and pin (weekly
 for an unpinned project, so a new release is picked up) and deliberately
 without restore-keys: a restored cache of another pin carries that
@@ -754,7 +754,10 @@ app tools over stdio (about 25 s). The agent snapshot's pure halves are
 the recorded sample sessions of `test/fixtures/agent/`, the contract shape)
 and `test/appclient.test.mjs` (the replay of those sessions, every
 validation path). CI (`.github/workflows/ci.yml`) runs `npm test`
-on every push/PR. Manual stdio driving, when a test is not enough:
+on every push/PR. **`bench/`** is abap2UI5-bench, a separate package (own
+`package.json`, not shipped, not in `npm test`) that measures agents with and
+without this server; [bench/README.md](bench/README.md) is its contract, and
+`bench-verify.yml` gates changes to it. Manual stdio driving, when a test is not enough:
 
 ```bash
 node -e '
@@ -803,6 +806,19 @@ legitimately slower.
   README table row — and the gate tells you about every count left behind.
   The server `version` is read from `package.json` at startup and asserted by
   the tests.
+- **`server.json` is the MCP Registry listing, and it repeats `package.json`.**
+  Its `version`, its npm package's `version` and `identifier`, and its `name`
+  (= `package.json`'s `mcpName`, the registry's npm ownership proof) are
+  copies, and the registry only notices a drift after npm holds the version
+  (`release.yml`'s `mcp-registry` job runs after the publish).
+  `scripts/check-server-json.mjs` (`npm run check:server-json`, a CI step,
+  a release step, and `test/server-json.test.mjs`) fails on any of them, and
+  checks the listed environment variables in BOTH directions against what
+  `server.mjs` and `lib/` read (plus `lib/repo-dirs.json`'s overrides): a new
+  env var therefore means a `server.json` entry - optional, no `default`,
+  since a set variable is authoritative here - or an entry in the script's
+  `NOT_LISTED` with the reason. `npm version` syncs the two version fields by
+  itself (the `version` script).
 - **The resource surface has the same one source: `lib/resources.mjs`.** The
   `RESOURCES` array (plus `RESOURCE_TEMPLATES` for the per-chapter guide) is
   what `resources/list` serves, and the same gate file checks the README's

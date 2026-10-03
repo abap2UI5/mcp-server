@@ -1,0 +1,183 @@
+# abap2UI5-bench, one click (bench/, see bench/README.md "Running it in
+# GitHub Actions"). Manual only: a run spends real money on the
+# ANTHROPIC_API_KEY secret, so it never starts from a push or a pull request.
+#
+#   preflight  the secret is there, the inputs are what they claim to be
+#   verify     node verify.mjs - a run against a grader that does not hold
+#              is not worth paying for (about 2 minutes)
+#   hide       the reference solutions and verify/ are removed from the
+#              working tree (marked skip-worktree, so run.json still records
+#              a clean bench commit): a non-dry run never reads them, and an
+#              agent with a shell should not find them lying next to it
+#   run        node run.mjs with the Claude Code CLI, isolated trials
+#   report     node report.mjs -> the job summary and report.md
+#   upload     bench/results/<run-id>/ as an artifact, also after a failure
+#
+# What this cannot do: the runner holds the bench checkout (and its git
+# objects), and the agent has a shell on that runner. The workspaces lie
+# under /tmp, outside the checkout, and every tool call naming the bench's
+# path marks the trial contaminated, which the report excludes and counts -
+# a heuristic, not a wall. Read the contaminated count before quoting a
+# number.
+#
+# GitHub-hosted jobs stop at 6 hours. reps 1 over all 20 tasks and four
+# conditions (80 trials) fits at concurrency 4; for the 3-repetition headline
+# dispatch three runs (different seeds) and report them together:
+# node report.mjs <dir1> <dir2> <dir3>.
+name: bench
+
+on:
+  workflow_dispatch:
+    inputs:
+      reps:
+        description: 'Repetitions per task and condition (1 = 80 trials over everything)'
+        required: true
+        default: '1'
+      tasks:
+        description: 'Tasks, comma-separated ids or numbers (01,05 or 01-hello-toast); empty = all 20'
+        required: false
+        default: ''
+      conditions:
+        description: 'Conditions, comma-separated'
+        required: true
+        default: 'baseline,llms,template,full'
+      model:
+        description: 'Model id passed to the CLI; empty = the CLI default (the model actually used is read from each transcript)'
+        required: false
+        default: ''
+      concurrency:
+        description: 'Trials in parallel'
+        required: true
+        default: '4'
+      max_budget_usd:
+        description: 'Cost cap per trial in USD (hitting it counts as a failure)'
+        required: true
+        default: '5'
+      seed:
+        description: 'Seed of the trial order (use a different one per run you mean to combine)'
+        required: true
+        default: '1'
+      claude_code_version:
+        description: 'npm version of @anthropic-ai/claude-code to install (latest, or x.y.z to repeat a run)'
+        required: true
+        default: 'latest'
+
+# one paid run at a time; a second dispatch waits instead of cancelling the first
+concurrency:
+  group: bench
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    defaults:
+      run:
+        working-directory: bench
+    env:
+      RUN_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Preflight (secret and inputs)
+        working-directory: .
+        env:
+          HAVE_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+          REPS: ${{ inputs.reps }}
+          TASKS: ${{ inputs.tasks }}
+          CONDITIONS: ${{ inputs.conditions }}
+          MODEL: ${{ inputs.model }}
+          CONCURRENCY: ${{ inputs.concurrency }}
+          BUDGET: ${{ inputs.max_budget_usd }}
+          SEED: ${{ inputs.seed }}
+          CC_VERSION: ${{ inputs.claude_code_version }}
+        run: |
+          fail() { echo "::error::$1"; exit 1; }
+          [ "$HAVE_KEY" = "true" ] || fail "the repository secret ANTHROPIC_API_KEY is not set (Settings > Secrets and variables > Actions)"
+          [[ "$REPS" =~ ^[1-9][0-9]?$ ]] || fail "reps must be a number from 1 to 99"
+          [[ "$TASKS" =~ ^[0-9a-z,-]*$ ]] || fail "tasks: ids or numbers, comma-separated"
+          [[ "$CONDITIONS" =~ ^[a-z]+(,[a-z]+)*$ ]] || fail "conditions: names, comma-separated"
+          [[ "$MODEL" =~ ^[A-Za-z0-9._:/@-]*(\[[0-9a-z]+\])?$ ]] || fail "model: not a model id"
+          [[ "$CONCURRENCY" =~ ^[1-9][0-9]?$ ]] || fail "concurrency must be a number from 1 to 99"
+          [[ "$BUDGET" =~ ^[0-9]+(\.[0-9]+)?$ ]] || fail "max_budget_usd must be a number"
+          [[ "$SEED" =~ ^[0-9]+$ ]] || fail "seed must be a number"
+          [[ "$CC_VERSION" =~ ^(latest|[0-9]+\.[0-9]+\.[0-9]+)$ ]] || fail "claude_code_version: latest or x.y.z"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # the agent runs on this machine with a shell: leave it no token
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: bench/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Get Playwright version
+        id: playwright-version
+        run: echo "version=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-chromium-${{ steps.playwright-version.outputs.version }}
+      - name: Install Playwright browser
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+      - name: Install Playwright OS dependencies
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+      - name: Install Claude Code
+        env:
+          CC_VERSION: ${{ inputs.claude_code_version }}
+        run: |
+          npm install -g --no-audit --no-fund "@anthropic-ai/claude-code@${CC_VERSION}"
+          claude --version
+
+      - name: Verify the grader
+        run: node verify.mjs
+
+      - name: Remove the reference solutions from the working tree
+        working-directory: .
+        run: |
+          git ls-files -z -- 'bench/tasks/*/reference/*' bench/verify | xargs -0 git update-index --skip-worktree
+          rm -rf bench/tasks/*/reference bench/verify
+          test -z "$(git status --porcelain)" || { git status --porcelain; echo "::error::the working tree is not clean after hiding the references"; exit 1; }
+
+      - name: Run the benchmark
+        # below the job limit, so the report and the upload still run when it hits
+        timeout-minutes: 335
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          REPS: ${{ inputs.reps }}
+          TASKS: ${{ inputs.tasks }}
+          CONDITIONS: ${{ inputs.conditions }}
+          MODEL: ${{ inputs.model }}
+          CONCURRENCY: ${{ inputs.concurrency }}
+          BUDGET: ${{ inputs.max_budget_usd }}
+          SEED: ${{ inputs.seed }}
+        run: |
+          args=(--run-id "$RUN_ID" --reps "$REPS" --conditions "$CONDITIONS" --concurrency "$CONCURRENCY" --max-budget-usd "$BUDGET" --seed "$SEED")
+          if [ -n "$TASKS" ]; then args+=(--tasks "$TASKS"); fi
+          if [ -n "$MODEL" ]; then args+=(--model "$MODEL"); fi
+          node run.mjs "${args[@]}"
+
+      - name: Report
+        if: always() && hashFiles(format('bench/results/{0}/run.json', env.RUN_ID)) != ''
+        run: |
+          node report.mjs "results/$RUN_ID" --out "results/$RUN_ID/report.md" > /dev/null
+          {
+            echo "Run \`$RUN_ID\` - the transcripts, outputs and grades of every trial are in the artifact \`bench-$RUN_ID\`; regrade any of them with \`node grade.mjs\` (bench/README.md)."
+            echo
+            cat "results/$RUN_ID/report.md"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the run
+        if: always() && hashFiles(format('bench/results/{0}/run.json', env.RUN_ID)) != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bench-${{ env.RUN_ID }}
+          path: bench/results/${{ env.RUN_ID }}/
+          retention-days: 90

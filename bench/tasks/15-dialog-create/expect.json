@@ -1,0 +1,9 @@
+{
+  "level": 3,
+  "classes": ["zcl_bench_15"],
+  "controls": [["sap.m.Table", "sap.ui.table.Table", "sap.m.List"], "sap.m.Dialog", { "any": ["sap.m.Input"], "min": 3 }],
+  "events": [{ "any": ["sap.m.Button.press"], "min": 3 }],
+  "bindings": [{ "any": ["sap.m.Input.value"], "min": 3 }],
+  "attrs": [["sap.m.Input.valueState"]],
+  "calls": ["popup_display"]
+}

@@ -1,0 +1,11 @@
+{
+  "level": 2,
+  "classes": ["zcl_bench_06"],
+  "controls": [{ "any": ["sap.m.Select", "sap.m.ComboBox"], "min": 2 }, "sap.m.Button"],
+  "events": [
+    ["sap.m.Select.change", "sap.m.ComboBox.change", "sap.m.ComboBox.selectionChange"],
+    "sap.m.Button.press"
+  ],
+  "bindings": [{ "any": ["sap.m.Select.items", "sap.m.ComboBox.items"], "min": 1 }],
+  "calls": ["message_toast_display"]
+}

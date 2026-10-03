@@ -1,0 +1,11 @@
+{
+  "level": 3,
+  "classes": ["zcl_bench_20"],
+  "controls": [
+    "sap.uxap.ObjectPageLayout",
+    { "any": ["sap.uxap.ObjectPageSection"], "min": 3 },
+    ["sap.m.Table", "sap.ui.table.Table"],
+    ["sap.m.List", "sap.m.FeedListItem", "sap.m.StandardListItem", "sap.m.Table"]
+  ],
+  "attrs": [["sap.m.ObjectStatus.state", "sap.m.ObjectNumber.state"]]
+}

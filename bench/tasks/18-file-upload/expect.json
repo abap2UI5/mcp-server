@@ -1,0 +1,14 @@
+{
+  "level": 3,
+  "classes": ["zcl_bench_18"],
+  "controls": [
+    ["z2ui5.cc.FileUploader", "sap.ui.unified.FileUploader", "sap.m.upload.UploadSet", "sap.m.UploadCollection"],
+    ["sap.m.Table", "sap.ui.table.Table"]
+  ],
+  "events": [[
+    "z2ui5.cc.FileUploader.upload", "sap.ui.unified.FileUploader.change", "sap.ui.unified.FileUploader.uploadComplete",
+    "sap.m.upload.UploadSet.afterItemAdded", "sap.m.upload.UploadSet.uploadCompleted", "sap.m.UploadCollection.change", "sap.m.Button.press"
+  ]],
+  "bindings": [["sap.m.Table.items", "sap.ui.table.Table.rows"]],
+  "calls": ["message_toast_display"]
+}

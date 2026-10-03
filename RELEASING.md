@@ -1,7 +1,10 @@
 # Releasing
 
 One tag publishes one package: **`@abap2ui5/mcp-server`** on the public npm
-registry. Everything mechanical lives in
+registry — and then lists that version in the
+[official MCP Registry](https://github.com/modelcontextprotocol/registry) as
+**`io.github.abap2UI5/mcp-server`**, from [`server.json`](server.json).
+Everything mechanical lives in
 [`.github/workflows/release.yml`](.github/workflows/release.yml); its header
 comment is the reference. This file is the human checklist.
 
@@ -23,7 +26,9 @@ bug it would remove.
 
 The everyday correction is a new version. What genuinely cannot be taken back
 is the **package name** — `@abap2ui5/mcp-server` — so that is the one thing worth
-getting right the first time.
+getting right the first time. The same holds for the registry name
+`io.github.abap2UI5/mcp-server`: a registry version cannot be edited either
+(`mcp-publisher status` can only mark it deprecated or deleted).
 
 ## One-time setup — what a maintainer still has to do by hand
 
@@ -49,6 +54,22 @@ Then, on npmjs.com → `@abap2ui5/mcp-server` → **Settings → Trusted Publish
 it at this repository and `release.yml`. From the second release on the
 workflow publishes with no token at all.
 
+**The MCP Registry needs no setup.** The `mcp-registry` job logs in with
+`mcp-publisher login github-oidc`: GitHub's OIDC token for this workflow run is
+traded for a registry token that may publish `io.github.<repository owner>/*` —
+no secret, no PAT, nobody's account. The registry proves the npm package
+belongs to the listing by fetching the version `server.json` names from npm and
+comparing its `mcpName` (`package.json`) with `server.json`'s `name`. So the
+first version that can be listed is the first one published WITH `mcpName` —
+1.0.0 — and the listing can only follow the npm publish. Done by hand instead
+(an org **Owner** of abap2UI5 — the registry grants the org namespace to
+owners only), from a checkout at the released tag:
+
+```sh
+mcp-publisher login github     # device flow in the browser
+mcp-publisher publish          # reads ./server.json
+```
+
 Two things follow the first publish, in other repositories. Both were done
 when 0.1.0 landed; what they still are is the checklist for the release after
 a **rename**, and that list is under [After a release](#after-a-release) rather
@@ -70,14 +91,44 @@ past tense there, so the file contradicted itself about work that was finished.
    ```
 
    `npm version` commits and creates an **annotated** tag here — there is no
-   workspace to keep in step, unlike in `abap2UI5/linter`.
+   workspace to keep in step, unlike in `abap2UI5/linter`. The version lives
+   in three files, and the command keeps all three in step: it bumps
+   `package.json` and `package-lock.json` itself, and then runs the
+   `version` script, which writes the new version into both version fields of
+   `server.json` and stages it (`scripts/check-server-json.mjs --sync`), so
+   one commit carries all three.
+
+   **When the bump arrived through a pull request** instead (a release PR,
+   as for 1.0.0, with the version and the changelog section already on
+   `main`), do not run `npm version` — it would bump once more. Tag the merge
+   commit:
+
+   ```sh
+   git tag -a v1.0.0 -m 1.0.0 && git push origin v1.0.0
+   ```
 3. Watch the run. It refuses to publish if the tag and `package.json`
-   disagree or if the changelog is not in the shape step 1 leaves it in, runs
-   the sibling-free test suite on the exact commit, and prints the tarball
-   contents before the publish step.
+   disagree, if `server.json` disagrees with `package.json`
+   (`npm run check:server-json`: both versions, the package name, `mcpName`,
+   and the environment variables against the ones the code reads) or if the
+   changelog is not in the shape step 1 leaves it in, runs the sibling-free
+   test suite on the exact commit, and prints the tarball contents before the
+   publish step.
+4. The `mcp-registry` job then publishes `server.json`. It fails on its own,
+   after npm already holds the version: npm can take a moment to serve a
+   version it just accepted (the job retries for about four minutes), the
+   registry is still a preview service, and an `mcp-publisher` that is too old
+   for the registry deployment answers "invalid audience". The npm release
+   and the major tag stand either way; fix the cause and **re-run the failed
+   job** from the run's page. For "invalid audience", move
+   `MCP_PUBLISHER_VERSION` and `MCP_PUBLISHER_SHA256` in `release.yml` to the
+   newest [registry release](https://github.com/modelcontextprotocol/registry/releases)
+   (the sha256 of `mcp-publisher_linux_amd64.tar.gz` is in its
+   `registry_<version>_checksums.txt`) — on `main`, and publish that one
+   version by hand as above, since a re-run uses the tagged workflow.
 
 To rehearse everything except the publish, dispatch the workflow by hand from
-the Actions tab — same gates, same tarball, no registry write.
+the Actions tab — same gates, same tarball, no registry write (neither npm
+nor the MCP Registry: the `mcp-registry` job runs for tags only).
 
 ## What the first release was checked against
 
@@ -90,8 +141,12 @@ over the npx-installed tarball, which resolved the hoisted linter):
   `version`, `description`, `bin` (`mcp-server` and `abap2ui5-mcp` →
   `server.mjs`, which has its shebang; `abap2ui5-unit` → the CI runner),
   `files`, `engines` (node >= 22), `repository`, `homepage`,
-  `bugs`, `license`, `keywords`, `publishConfig.access: public`. No `main` and
-  no `exports`, deliberately: this is a program, not a library.
+  `bugs`, `license`, `keywords`, `publishConfig.access: public` — and, from
+  1.0.0, `mcpName` (`io.github.abap2UI5/mcp-server`), the MCP Registry's
+  proof that the package belongs to the listing. No `main` and
+  no `exports`, deliberately: this is a program, not a library. `server.json`
+  is not in `files`: the registry reads it from the checkout at publish time,
+  not from the tarball.
 - **The tarball is `server.mjs`, `lib/`, `README.md`, `LICENSE` and
   `package.json`** — no tests, no workflows, no lockfile. `AGENTS.md` used to
   ship too, on the reasoning that an agent could read the contract of the thing
@@ -185,12 +240,15 @@ the framework publishes, not only before this server does.
 ## After a release
 
 **The floating major tag.** The composite action is used as
-`abap2UI5/mcp-server@v0`; the workflow's `move-major-tag` job points `v0` at
-each release it publishes (it needs `contents: write`, and nothing else in the
-workflow does). 0.2.0 was released before that job existed, so `v0` did not
-exist until the next release — the README pins `@v0.2.0` until then. Creating
-it once by hand is the other way:
-`git tag -f v0 v0.2.0^{} && git push -f origin refs/tags/v0`.
+`abap2UI5/mcp-server@v1`; the workflow's `move-major-tag` job points the
+major of each release it publishes (`v1` for 1.x) at it (it needs `contents:
+write`, and nothing in the publishing jobs does). A new major creates a new
+tag and leaves the previous one where it was: `v0` stays at 0.3.0, so a
+workflow pinned to `@v0` keeps working and keeps 0.3.0 until somebody moves
+it to `@v1`. **After 1.0.0**: app-template's `check.yml` and any other
+`@v0` consumer move to `@v1` — a change in those repositories. Should a run
+ever fail before the job, the tag is set by hand:
+`git tag -f v1 v1.0.0^{} && git push -f origin refs/tags/v1`.
 
 Both of these were done when 0.1.0 landed; they are here as the checklist for
 the release after a **rename**, which is when they come back:

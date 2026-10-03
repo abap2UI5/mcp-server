@@ -1,0 +1,13 @@
+{
+  "level": 2,
+  "classes": ["zcl_bench_08"],
+  "controls": [
+    "sap.m.IconTabBar",
+    { "any": ["sap.m.IconTabFilter"], "min": 3 },
+    ["sap.m.Table", "sap.ui.table.Table"],
+    "sap.m.TextArea"
+  ],
+  "events": ["sap.m.Button.press"],
+  "bindings": ["sap.m.TextArea.value"],
+  "calls": ["message_toast_display"]
+}

@@ -1,0 +1,7 @@
+node_modules/
+# the pinned app-template and abap2UI5 clones the grader and the runner use -
+# fetched on first use, always safe to delete
+.cache/
+# run output: transcripts, agent output, grades. Publish the run behind a
+# number you quote (see README "Publishing a result"), do not commit it here
+results/
