@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **Database tables in the npm backend's sandbox.** A sandbox's transparent
+  tables (TABL, with their data elements) are transpiled with the classes
+  and created in the runtime's SQLite database at boot: the build takes
+  their `CREATE TABLE` out of the transpiler's init.mjs and `apps/init.mjs`
+  runs it after the package's boot, before the apps load (a structure is a
+  TABL too and creates nothing; a sandbox without tables builds and boots as
+  before; a transparent table the transpiler wrote no statement for fails the
+  build with that reason). `migrate_report { deploy: true }` deploys
+  abap-cloud-gui's tables and data elements with its classes - since its
+  PR #8 the variant and layout stores (`z2ui5_cgui_var`, `z2ui5_cgui_lay`)
+  are the default, and the deploy failed at app start with `Void type:
+  Z2UI5_CGUI_VAR`; `abap2ui5-unit` deploys a project's `*.tabl.xml` /
+  `*.dtel.xml` too, so a class under test can INSERT and SELECT its own
+  tables (`test/fixtures/table-app`, run in `test/npm-integration.test.mjs`).
+  A framework checkout (and the clone of `A2UI5_MCP_BACKEND=clone`, once
+  `build_backend` made it) already created every deployed table through the
+  framework's own setup; without a clone yet there is no sandbox, as before.
+
 - **The agent client follows the protocol's frontend rules** (abap2UI5/protocol
   frontend suite, adapter `agent`: 53 pass / 5 MUST failures / 3 warnings
   before, 61 pass / 0 / 0 now; the 20 skips are capabilities a client without

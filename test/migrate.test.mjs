@@ -62,7 +62,7 @@ test('resolvePopups: POPUPS_HOME is authoritative, else .deps/popups of the chec
   }
 });
 
-test('deployFiles: the class, src/01 and the popups it calls - every file of each object, test includes left out', () => {
+test('deployFiles: the class, src/01 (its tables and data elements too) and the popups it calls - every file of each object, test includes left out', () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-migrate-'));
   try {
     const gui = path.join(base, 'gui');
@@ -75,6 +75,8 @@ test('deployFiles: the class, src/01 and the popups it calls - every file of eac
     put(path.join(gui, 'src', '01', 'z2ui5_cl_cgui_report.clas.xml'));
     put(path.join(gui, 'src', '01', 'z2ui5_cl_cgui_list.clas.testclasses.abap'));
     put(path.join(gui, 'src', '01', 'package.devc.xml'));
+    put(path.join(gui, 'src', '01', 'z2ui5_cgui_var.tabl.xml'));
+    put(path.join(gui, 'src', '01', 'z2ui5_cgui_var_name.dtel.xml'));
     put(path.join(popups, 'src', '00', 'z2ui5_cl_popup_context.clas.abap'));
     for (const p of POPUP_FILES.slice(1)) put(path.join(popups, p));
     put(path.join(popups, 'src', 'z2ui5_cl_popup_file_dl.clas.abap'));
@@ -85,10 +87,11 @@ test('deployFiles: the class, src/01 and the popups it calls - every file of eac
     };
     const { support } = deployFiles({ files: { 'zcl_x.clas.abap': 'X', 'zcl_x.clas.xml': 'Y' }, dir: box, cloudGui: gui, popups, classNameOf: gate });
     assert.deepEqual(fs.readdirSync(box).sort(), [
-      'z2ui5_cl_cgui_report.clas.abap', 'z2ui5_cl_cgui_report.clas.xml', 'z2ui5_cl_popup_context.clas.abap',
+      'z2ui5_cgui_var.tabl.xml', 'z2ui5_cgui_var_name.dtel.xml', 'z2ui5_cl_cgui_report.clas.abap', 'z2ui5_cl_cgui_report.clas.xml', 'z2ui5_cl_popup_context.clas.abap',
       'z2ui5_cl_popup_get_range.clas.abap', 'z2ui5_cl_popup_input_val.clas.abap', 'z2ui5_cl_popup_to_confirm.clas.abap',
       'z2ui5_cl_popup_to_select.clas.abap', 'zcl_x.clas.abap', 'zcl_x.clas.xml',
     ]);
+    assert.ok(support.includes('z2ui5_cgui_var'), 'the variant store\'s table goes along');
     assert.ok(support.includes('z2ui5_cl_cgui_report'));
     assert.throws(() => deployFiles({ files: { 'bad.clas.abap': '' }, dir: box, cloudGui: gui, popups, classNameOf: gate }), /invalid class name/);
   } finally {
