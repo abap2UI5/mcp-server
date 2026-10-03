@@ -1,6 +1,7 @@
 {
   "name": "@abap2ui5/mcp-server",
   "version": "0.3.0",
+  "mcpName": "io.github.abap2UI5/mcp-server",
   "description": "MCP server for abap2UI5: capability queries, view validation, deploy, headless run + screenshot — the AI agent dev loop, no SAP system needed.",
   "type": "module",
   "bin": {
@@ -10,8 +11,10 @@
   },
   "scripts": {
     "start": "node server.mjs",
-    "check": "npm test",
-    "test": "node --test \"test/*.test.mjs\""
+    "check": "npm run check:server-json && npm test",
+    "check:server-json": "node scripts/check-server-json.mjs",
+    "test": "node --test \"test/*.test.mjs\"",
+    "version": "node scripts/check-server-json.mjs --sync && git add server.json"
   },
   "repository": {
     "type": "git",

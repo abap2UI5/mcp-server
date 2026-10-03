@@ -1,0 +1,175 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.abap2UI5/mcp-server",
+  "title": "abap2UI5",
+  "description": "abap2UI5 dev loop for AI agents: validate views, screenshot, deploy and run apps - no SAP system",
+  "websiteUrl": "https://abap2ui5.github.io/docs/advanced/mcp_server.html",
+  "repository": {
+    "url": "https://github.com/abap2UI5/mcp-server",
+    "source": "github"
+  },
+  "version": "0.3.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "@abap2ui5/mcp-server",
+      "version": "0.3.0",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "AI_VIEW_CHECK_HOME",
+          "description": "Checkout or install of @abap2ui5/linter (validate_view, fix_view, screenshot_view). Default: the peer npm installs beside the server. A set value is authoritative.",
+          "format": "filepath",
+          "isRequired": false
+        },
+        {
+          "name": "A2UI5_HOME",
+          "description": "abap2UI5 framework checkout (app_guide, api_reference, pitfalls; backend when present). Default: ../abap2UI5, else the GitHub mirror and the npm runtime.",
+          "format": "filepath",
+          "isRequired": false
+        },
+        {
+          "name": "SAMPLES_CONTROLS_HOME",
+          "description": "samples-controls checkout (capabilities, examples, generation_rules, scope_of, UI5 for screenshots). Default: ../samples-controls, else the GitHub mirror.",
+          "format": "filepath",
+          "isRequired": false
+        },
+        {
+          "name": "SAMPLES_HOME",
+          "description": "abap2UI5/samples checkout, one of the catalogues examples searches. Default: ../samples, else the GitHub mirror.",
+          "format": "filepath",
+          "isRequired": false
+        },
+        {
+          "name": "SAMPLES_STACK_HOME",
+          "description": "abap2UI5/samples-stack checkout (OData, RAP, APC, launchpad samples). Default: ../samples-stack, else the GitHub mirror.",
+          "format": "filepath",
+          "isRequired": false
+        },
+        {
+          "name": "APP_TEMPLATE_HOME",
+          "description": "abap2UI5/app-template checkout that scaffold_app serves. Default: ../app-template, else the GitHub mirror.",
+          "format": "filepath",
+          "isRequired": false
+        },
+        {
+          "name": "DOCS_HOME",
+          "description": "abap2UI5/docs checkout that docs_search reads. Default: ../docs, else the GitHub mirror.",
+          "format": "filepath",
+          "isRequired": false
+        },
+        {
+          "name": "OPENUI5_SRC",
+          "description": "OpenUI5 source checkout scope_of reads the JSDoc from (via samples-controls). Default: ../fork-openui5 next to samples-controls.",
+          "format": "filepath",
+          "isRequired": false
+        },
+        {
+          "name": "A2UI5_MCP_WORKSPACE",
+          "description": "Where the npm backend installs, the dev sandbox lives and a framework clone lands. Default: ~/.abap2ui5-mcp.",
+          "format": "filepath",
+          "isRequired": false
+        },
+        {
+          "name": "A2UI5_MCP_BACKEND",
+          "description": "Which backend runs the apps: npm (the @abap2ui5/node-runtime package, even beside a checkout) or clone (clone the framework). Default: decided per call.",
+          "format": "string",
+          "choices": [
+            "npm",
+            "clone"
+          ],
+          "isRequired": false
+        },
+        {
+          "name": "A2UI5_MCP_RUNTIME_VERSION",
+          "description": "Pin the @abap2ui5/node-runtime release (X.Y.Z) the npm backend installs. Default: the registry's latest.",
+          "format": "string",
+          "isRequired": false
+        },
+        {
+          "name": "A2UI5_MCP_PORT",
+          "description": "Port of the local backend run_app boots against. Default: 3000.",
+          "format": "number",
+          "isRequired": false
+        },
+        {
+          "name": "A2UI5_MCP_OFFLINE",
+          "description": "Set to 1 for no network: no UI5 CDN fallback, no GitHub mirror, no registry lookup.",
+          "format": "string",
+          "isRequired": false
+        },
+        {
+          "name": "A2UI5_MCP_REMOTE",
+          "description": "Set to 0 to switch off the read-only GitHub mirror used when no checkout is found.",
+          "format": "string",
+          "isRequired": false
+        },
+        {
+          "name": "A2UI5_MCP_REMOTE_DIR",
+          "description": "Cache directory of the GitHub mirror. Default: <tmp>/abap2ui5-mcp-remote.",
+          "format": "filepath",
+          "isRequired": false
+        },
+        {
+          "name": "A2UI5_MCP_REMOTE_TTL_MS",
+          "description": "How long a mirrored copy is used before it is refreshed, in milliseconds. Default: one day.",
+          "format": "number",
+          "isRequired": false
+        },
+        {
+          "name": "A2UI5_MCP_CHROMIUM",
+          "description": "Chromium binary for run_app and interact_app. Default: CHROMIUM_BIN, Playwright's managed browser, then a system chromium.",
+          "format": "filepath",
+          "isRequired": false
+        },
+        {
+          "name": "A2UI5_MCP_SCREENSHOT_DIR",
+          "description": "Where run_app and interact_app write their PNGs. Default: <tmp>/abap2ui5-mcp-screenshots.",
+          "format": "filepath",
+          "isRequired": false
+        },
+        {
+          "name": "A2UI5_MCP_PREBUILT_URL",
+          "description": "Where build_backend mode prebuilt downloads the backend from. Default: the framework's release asset.",
+          "format": "string",
+          "isRequired": false
+        },
+        {
+          "name": "A2UI5_MCP_LINT_TIMEOUT_MS",
+          "description": "Hard timeout of the abaplint run, in milliseconds. Default: 5 minutes.",
+          "format": "number",
+          "isRequired": false
+        },
+        {
+          "name": "A2UI5_MCP_SCOPE_TIMEOUT_MS",
+          "description": "Hard timeout of scope_of, in milliseconds. Default: 5 minutes.",
+          "format": "number",
+          "isRequired": false
+        },
+        {
+          "name": "A2UI5_MCP_BUILD_TIMEOUT_MS",
+          "description": "Hard timeout of a build, the prebuilt download and the npm install, in milliseconds. Default: 30 minutes.",
+          "format": "number",
+          "isRequired": false
+        },
+        {
+          "name": "A2UI5_MCP_UNIT_TIMEOUT_MS",
+          "description": "Hard timeout of the ABAP Unit runner, in milliseconds. Default: 10 minutes.",
+          "format": "number",
+          "isRequired": false
+        },
+        {
+          "name": "GITHUB_TOKEN",
+          "description": "Optional token sent to api.github.com only, to raise the rate limit of the docs tree listing (GH_TOKEN is read too).",
+          "format": "string",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}

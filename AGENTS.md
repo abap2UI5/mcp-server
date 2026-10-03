@@ -723,6 +723,19 @@ legitimately slower.
   README table row — and the gate tells you about every count left behind.
   The server `version` is read from `package.json` at startup and asserted by
   the tests.
+- **`server.json` is the MCP Registry listing, and it repeats `package.json`.**
+  Its `version`, its npm package's `version` and `identifier`, and its `name`
+  (= `package.json`'s `mcpName`, the registry's npm ownership proof) are
+  copies, and the registry only notices a drift after npm holds the version
+  (`release.yml`'s `mcp-registry` job runs after the publish).
+  `scripts/check-server-json.mjs` (`npm run check:server-json`, a CI step,
+  a release step, and `test/server-json.test.mjs`) fails on any of them, and
+  checks the listed environment variables in BOTH directions against what
+  `server.mjs` and `lib/` read (plus `lib/repo-dirs.json`'s overrides): a new
+  env var therefore means a `server.json` entry - optional, no `default`,
+  since a set variable is authoritative here - or an entry in the script's
+  `NOT_LISTED` with the reason. `npm version` syncs the two version fields by
+  itself (the `version` script).
 - **The resource surface has the same one source: `lib/resources.mjs`.** The
   `RESOURCES` array (plus `RESOURCE_TEMPLATES` for the per-chapter guide) is
   what `resources/list` serves, and the same gate file checks the README's

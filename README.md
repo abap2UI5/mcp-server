@@ -32,6 +32,54 @@ cheaper ones matter first.
 
 ## Quick start
 
+### One-click install
+
+[![Install in VS Code](https://img.shields.io/badge/VS_Code-VS_Code?style=flat-square&label=Install%20Server&color=0098FF)](https://insiders.vscode.dev/redirect/mcp/install?name=abap2ui5&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22--yes%22%2C%22-p%22%2C%22%40abap2ui5%2Fmcp-server%22%2C%22abap2ui5-mcp%22%5D%7D)
+[![Install in VS Code Insiders](https://img.shields.io/badge/VS_Code_Insiders-VS_Code_Insiders?style=flat-square&label=Install%20Server&color=24bfa5)](https://insiders.vscode.dev/redirect/mcp/install?name=abap2ui5&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22--yes%22%2C%22-p%22%2C%22%40abap2ui5%2Fmcp-server%22%2C%22abap2ui5-mcp%22%5D%7D&quality=insiders)
+[![Install in Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/en/install-mcp?name=abap2ui5&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyItLXllcyIsIi1wIiwiQGFiYXAydWk1L21jcC1zZXJ2ZXIiLCJhYmFwMnVpNS1tY3AiXX0%3D)
+
+Every button registers the same stdio server, named `abap2ui5`:
+
+```json
+{"command":"npx","args":["--yes","-p","@abap2ui5/mcp-server","abap2ui5-mcp"]}
+```
+
+The badges go through a web redirect because GitHub does not render links to
+an editor's own URL scheme; the direct links, to paste into a browser or
+`xdg-open`/`open`, are:
+
+```text
+vscode:mcp/install?%7B%22name%22%3A%22abap2ui5%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22--yes%22%2C%22-p%22%2C%22%40abap2ui5%2Fmcp-server%22%2C%22abap2ui5-mcp%22%5D%7D
+cursor://anysphere.cursor-deeplink/mcp/install?name=abap2ui5&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyItLXllcyIsIi1wIiwiQGFiYXAydWk1L21jcC1zZXJ2ZXIiLCJhYmFwMnVpNS1tY3AiXX0%3D
+```
+
+(`vscode-insiders:` in place of `vscode:` for Insiders.) Claude Code:
+
+```sh
+claude mcp add abap2ui5 -- npx --yes -p @abap2ui5/mcp-server abap2ui5-mcp
+```
+
+**Claude Code plugin.** The abap2UI5 plugin bundles the framework's agent
+skills (building an app, the ABAP and UI5 pitfall catalogues, the view-chain
+layout, ...) together with this server, registered the same way as above —
+one install for both:
+
+```text
+/plugin marketplace add abap2UI5/abap2UI5
+/plugin install abap2ui5@abap2ui5
+```
+
+Releases from 1.0.0 on are also listed in the
+[official MCP Registry](https://github.com/modelcontextprotocol/registry) as
+`io.github.abap2UI5/mcp-server` ([`server.json`](server.json)), for clients
+that install from the registry.
+
+That is level 1 below: `validate_view` and `fix_view` work out of the box,
+and `setup_status` tells the agent what else works on this machine and what
+is missing.
+
+### What each install brings
+
 Level 1 — `validate_view`, `fix_view` and `screenshot_view`, the tools most
 work happens at. They need the [linter](https://github.com/abap2UI5/linter),
 which the server declares as a **peer dependency** (`@abap2ui5/linter`,

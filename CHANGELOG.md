@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- **Listed in the official MCP Registry as `io.github.abap2UI5/mcp-server`.**
+  `server.json` describes the npm package (stdio, `npx`) and every
+  environment variable the server reads - all optional, none with a default,
+  because a set variable is authoritative here. `package.json` carries the
+  `mcpName` the registry checks npm ownership by, and the release workflow
+  publishes the listing after the npm publish, in a job of its own, logged in
+  with GitHub OIDC (no secret) through a pinned, checksum-verified
+  `mcp-publisher`. `npm run check:server-json` (CI, the release workflow and
+  `npm test`) fails when `server.json`'s versions, package name or registry
+  name drift from `package.json`, or when its variable list and the code
+  disagree in either direction; `npm version` keeps the versions in step by
+  itself (the new `version` script).
+- **One-click install in the README**: VS Code and VS Code Insiders badges, a
+  Cursor badge and the direct `vscode:` / `cursor://` links beside the
+  `claude mcp add` line - all registering `npx --yes -p @abap2ui5/mcp-server
+  abap2ui5-mcp`, which `test/install-links.test.mjs` decodes from every link
+  and holds against the registration the README shows in clear - and the
+  Claude Code plugin (`/plugin marketplace add abap2UI5/abap2UI5`, `/plugin
+  install abap2ui5@abap2ui5`), which bundles the framework's agent skills with
+  this server.
 - **The linter is a declared peer dependency, and `npx -p @abap2ui5/mcp-server`
   brings it along.** The server had no dependency on `@abap2ui5/linter` at
   all: the registration every document gives installed a server whose
