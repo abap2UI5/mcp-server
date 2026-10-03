@@ -13,7 +13,8 @@
  * it drifted (a missing remove_app row), so now it points instead of copying.
  *
  * The intended agent loop: examples/app_guide -> write the class (scaffold_app
- * first, when the user wants a project of their own rather than a class) ->
+ * first, when the user wants a project of their own rather than a class;
+ * add_agent_setup, when the project exists but has no agent setup yet) ->
  * validate_view + screenshot_view (seconds, no system) -> deploy_app ->
  * build_backend -> run_app -> read the errors, LOOK at the running app ->
  * edit -> repeat.

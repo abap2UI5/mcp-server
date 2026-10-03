@@ -100,6 +100,9 @@ test('every sibling-dependent tool degrades with an actionable error when the ch
     // the starter project comes from a repository of its own
     expectMissing(await call('scaffold_app', {}), /app-template/, 'APP_TEMPLATE_HOME');
     expectMissing(await call('scaffold_app', { class: 'zcl_my_app' }), /app-template/, 'APP_TEMPLATE_HOME');
+    // ...and so does the agent setup for an existing one, before any project is looked at
+    expectMissing(await call('add_agent_setup', {}), /app-template/, 'APP_TEMPLATE_HOME');
+    expectMissing(await call('add_agent_setup', { project_dir: ROOT, dry_run: true }), /app-template/, 'APP_TEMPLATE_HOME');
     expectMissing(await call('scope_of', { entities: ['sap.m.Wizard'] }), CORPUS, 'SAMPLES_CONTROLS_HOME');
     /* The dev sandbox has two homes - the corpus, or the framework checkout -
      * so with both absent the message names both, and the env var of each. */

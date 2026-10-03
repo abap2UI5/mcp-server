@@ -52,7 +52,7 @@
         },
         {
           "name": "APP_TEMPLATE_HOME",
-          "description": "abap2UI5/app-template checkout that scaffold_app serves. Default: ../app-template, else the GitHub mirror.",
+          "description": "abap2UI5/app-template checkout that scaffold_app serves and add_agent_setup executes. Default: ../app-template, else the GitHub mirror.",
           "format": "filepath",
           "isRequired": false
         },
