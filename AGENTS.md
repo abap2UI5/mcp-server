@@ -340,10 +340,20 @@ sends them), keeps per session what the frontend keeps per component (the
 views in their five slots, the models and who owns them, the draft id, the
 unsent edits - `applyResponse` in `lib/snapshot.mjs`), and answers with the
 **agent snapshot v1** `analyzeScreen` derives from the view XML and the
-model. `docs/agent-snapshot.md` is the specification - the VS Code
-extension and the ABAP agent addon implement the same shape from it, so a
-change to the snapshot is a change to that page in the same commit, and the
-shape test in `test/snapshot.test.mjs` is where it shows. Three rules:
+model. The normative snapshot v1 is the semantic profile of
+abap2UI5/protocol (`profiles/semantic.md`, moved there from
+`docs/agent-snapshot.md`, which points to it and stays the reference for
+this implementation) - the VS Code extension and the ABAP agent addon
+implement the same shape, so a change to the snapshot is a change to that
+page in the same commit (and to the profile), and the shape test in
+`test/snapshot.test.mjs` is where it shows. The client follows the
+protocol's frontend rules - the `PROTOCOL` check, `sap-contextid` per
+session, the CSRF token handshake, one roundtrip at a time per session
+(a second `act` with an event queues), the error body verbatim, the
+popup/popover teardown on an `APP` change; the protocol's frontend suite
+checks them (`abap2ui5-conformance frontend --adapter agent` in an
+abap2UI5/protocol checkout, with `MCP_SERVER_HOME` pointing here), and
+`test/appclient.test.mjs` has a unit test for each. Three rules:
 **validate before sending** (an event that is not an action of the current
 snapshot, a field that is not on it or not editable, a choice outside its
 values is an error result naming what IS allowed, and a refused act changes

@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+- **The agent client follows the protocol's frontend rules** (abap2UI5/protocol
+  frontend suite, adapter `agent`: 53 pass / 5 MUST failures / 3 warnings
+  before, 61 pass / 0 / 0 now; the 20 skips are capabilities a client without
+  a browser does not have). `lib/appclient.mjs`: a response declaring a
+  `PROTOCOL` other than 2 is refused whole - its draft id, view and model -
+  with both numbers named (an absent one is let through); the last
+  `sap-contextid` response header of a session is sent with every later POST
+  of that session (never empty, never `undefined`; a response without it
+  keeps it), so a stateful ABAP app keeps its work process; a token layer's
+  `403` + `X-CSRF-Token: Required` is answered by a `HEAD` token fetch and
+  one re-send of the same body, the token then sent with every POST (a `403`
+  without `Required` stays final); one roundtrip at a time per session - an
+  `app_act` with an event while another is in flight waits for it and runs on
+  the draft id it left, instead of posting the same draft id twice; a
+  roundtrip clears only the edits it carried, so values set while it is in
+  flight stay pending, survive its model push and travel next (a failed one
+  rolls back only its own edits); the error body is shown verbatim - no tag
+  stripping, no entity decoding, only shortened (40 lines, 4000 characters)
+  and control characters shown as U+FFFD. `lib/snapshot.mjs`
+  `applyResponse`: a response of another `APP` tears the popup and the
+  popover down. **Embedders:** the `transport` option now also receives
+  `method` (`'POST'`, or `'HEAD'` for the token fetch, without a body) and
+  the `sap-contextid` / `x-csrf-token` headers to send; the client reads
+  both from the answer's `headers` and does the handshakes itself, so a
+  transport must not repeat them. New exports: `PROTOCOL`, `headerOf`,
+  `validContextId`. `docs/agent-snapshot.md` points to the normative
+  semantic profile (abap2UI5/protocol `profiles/semantic.md`).
+
 - **Agent snapshot: selection dialogs and message lists.** `SelectDialog`
   and `TableSelectDialog` are tables now (`control` names them,
   `selectionMode` from `multiSelect`, the dialog's `title` titles its layer),
