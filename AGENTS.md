@@ -86,7 +86,10 @@ backend), `A2UI5_MCP_RUNTIME_VERSION` (the `@abap2ui5/node-runtime` release,
 X.Y.Z; default the registry's latest - `A2UI5_MCP_OFFLINE` also stops that
 question), `A2UI5_MCP_SKIP_NETWORK_TESTS` (the two `npm test` files that
 reach the registry - npm-integration and agent-integration - skip themselves), and the child-process timeouts `A2UI5_MCP_LINT_TIMEOUT_MS` /
-`A2UI5_MCP_SCOPE_TIMEOUT_MS` (default 5 min), `A2UI5_MCP_BUILD_TIMEOUT_MS`
+`A2UI5_MCP_SCOPE_TIMEOUT_MS` (default 5 min), `A2UI5_MCP_UI` (`auto`/`on`/`off`:
+whether the app tools declare their MCP Apps screen, below),
+`A2UI5_MCP_APP_FORMAT` (`snapshot`/`adaptive-card`: the app tools' default
+answer format, below), `A2UI5_MCP_BUILD_TIMEOUT_MS`
 (default 30 min, also the prebuilt download and the npm install) and
 `A2UI5_MCP_UNIT_TIMEOUT_MS` (default 10 min, the test runner).
 
@@ -413,6 +416,73 @@ with UI5's JSONModel path semantics (`selectedContexts[0]/sPath` is `null`
 there, so it is `null` here) - and refused naming `args[i]` everywhere else;
 docs/agent-snapshot.md "Row event parameters" is the list.
 
+### The screen in the chat — `lib/mcp-app.mjs`, `lib/adaptive-card.mjs`
+
+The snapshot is the agent's view; two optional surfaces show the same screen
+to the USER, and both send what the user does back as `app_act` calls - never
+as protocol requests of their own. That is the rule to keep: **a chat surface
+is not a second protocol client.** It builds an `app_act` from the snapshot
+on screen and lets the client's validation decide, so nothing the snapshot
+does not allow can be fired and the agent's session sees every act (an agent
+act with the session it last saw is refused naming the current one).
+
+- **MCP Apps** (SEP-1865, `io.modelcontextprotocol/ui`, stable spec
+  2026-01-26 in modelcontextprotocol/ext-apps - the source of every key used
+  here, not a blog): the three app tools carry `_meta.ui.resourceUri =
+  ui://abap2ui5/app-screen` (and the deprecated flat `ui/resourceUri` the
+  spec's SDK still writes) when the client's `initialize` advertised the
+  extension with `text/html;profile=mcp-app` - the spec's "servers SHOULD
+  check client capabilities" - or under `A2UI5_MCP_UI=on`; added in the
+  `tools/list` handler (`toolsWithUi`), the TOOLS array stays the one source.
+  The resource is in `RESOURCES` (a `ui://` URI, the one entry that is not a
+  document and reads no checkout) and carries `_meta.ui` on the listing and
+  the read. The page is `lib/mcp-app-view.mjs` inlined verbatim into one HTML
+  document (`appScreenHtml`): **no external URL, no network API, no eval, no
+  import** - the spec's default CSP when a resource declares no `csp`
+  (`connect-src 'none'`, scripts and styles inline only) runs it, and
+  `test/mcp-app.test.mjs` fails on anything that would need more (and on
+  `</script` or `<!--` in the module, which would break the inline script).
+  Why not the UI5 Web Components frontend (abap2UI5/frontend-webcomponent):
+  it is a protocol client with its own draft (it would bypass app_act), and
+  its build is 106 files / 14.7 MB loaded through dynamic chunk imports,
+  which an inline document under that CSP cannot load. The pure half of the
+  page (`buildActCall`, `editsFromForm`, `renderScreen`, `createBridge`) is
+  tested in Node - every recorded fixture act is rebuilt by `buildActCall`
+  and must send the recorded request - and the real page runs once in
+  headless Chromium under the default CSP with a host page speaking the
+  bridge (skipped without a Chromium).
+- **Adaptive Cards**: `format: "adaptive-card"` (or `A2UI5_MCP_APP_FORMAT`)
+  appends the card as an embedded resource
+  (`application/vnd.microsoft.card.adaptive`) after the unchanged snapshot;
+  off by default. Rendered by abap2UI5/protocol's renderer from
+  `client.screen(session)` (an additive, read-only method of the client);
+  `appCard` adds `session` and a row action's `row` to each Action.Submit,
+  `cardSubmitToAct` maps a submitted payload to ONE `app_act`
+  (docs/agent-snapshot.md has the table). `test/adaptive-card.test.mjs`
+  validates every fixture screen's card against the 1.5 subset and replays
+  the fixtures with their acts submitted through the card. A card that
+  cannot be rendered costs the card, never the act.
+
+### Vendored code — `lib/vendor/`, `scripts/vendor-adaptive-cards.mjs`
+
+`lib/vendor/adaptive-cards/{render,mapping,submit}.mjs` are COPIES of
+abap2UI5/protocol `renderers/adaptive-cards/`, at the commit
+`lib/vendor/adaptive-cards/source.json` records, with the sha256 of each.
+Rules: never edit a copy - change it upstream and re-vendor (`node
+scripts/vendor-adaptive-cards.mjs /path/to/protocol --ref <commit>`); the only
+transformation is that the renderer's imports of the protocol repository's
+copies of OUR agent modules point back at `lib/` (a copy of a copy would be a
+second version of `viewxml`/`snapshot` in one process). `test/vendor.test.mjs`
+fails offline on a hash mismatch, a missing header, an unrecorded file or an
+import into the protocol tree, and - with a protocol checkout that has the
+commit (`PROTOCOL_HOME` or `../protocol`) - when the copies differ from what
+the script makes of it (`--check` is the same from the command line). This is
+the mirror image of how the VS Code extension and the protocol repository
+vendor `lib/{viewxml,snapshot,appclient}.mjs` from here: a change to those
+three modules is re-vendored there, and a bump of the renderer here goes
+through this repository's tests. The vendored files are under the ASCII gate
+too, and they ship (`lib/` is in the package).
+
 ### The CI runner — `scripts/ci-unit.mjs`, `action.yml`, the `abap2ui5-unit` bin
 
 The same code as the tools, for a repository's CI and for a terminal: the
@@ -652,6 +722,16 @@ changes upstream, this repo must change in the same breath:
   that file's planner rule for rule; `test/agent-setup.test.mjs` compares the
   two plans byte for byte when the sibling checkout has `create/`. A new merge
   kind there is a refusal here ("cannot do - update it") until it is ported.
+- abap2UI5/protocol: **`renderers/adaptive-cards/`** - vendored, not read
+  live (above); its `renderCard(state, { messages })`, `walk` and `inputsOf`
+  and the card's input-id-is-the-binding-path convention are what
+  `lib/adaptive-card.mjs` relies on. A re-vendor that changes them fails
+  `test/adaptive-card.test.mjs`.
+- modelcontextprotocol/ext-apps: the **MCP Apps spec** (2026-01-26) - the
+  `ui://` scheme, `text/html;profile=mcp-app`, `_meta.ui.resourceUri`, the
+  extension id in the client capabilities, the `ui/*` postMessage methods
+  and the default CSP. The wire protocol is unchanged between the SDK's 1.x
+  and 2.x; a new spec version is a change of `lib/mcp-app*.mjs` and its test.
 - abap2UI5-linter: the package `exports` map entries `.`, `./findings`,
   `./config` and `./rule-docs` (and the shapes behind them: `checkFiles` and
   `screenshotFiles`, `severityOf` / `severityRank` / `SEVERITIES`,

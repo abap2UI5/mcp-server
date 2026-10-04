@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- **The app screen in the chat (MCP Apps).** `app_start`, `app_describe` and
+  `app_act` name the new UI resource `ui://abap2ui5/app-screen`
+  (`text/html;profile=mcp-app`, SEP-1865 stable 2026-01-26) when the client
+  advertises the `io.modelcontextprotocol/ui` extension - `A2UI5_MCP_UI=on|off`
+  overrides. A host that renders MCP Apps shows the snapshot as a page the
+  user can operate: fields, buttons, row actions, editable cells, messages.
+  What the user does goes back as `app_act` calls through the host (validated
+  like the agent's own) and is reported to the model with
+  `ui/update-model-context`. The page is one self-contained HTML document -
+  no external URL, no network - so it runs under the spec's default CSP.
+- **Adaptive Cards.** `format: "adaptive-card"` on the three app tools (or
+  `A2UI5_MCP_APP_FORMAT=adaptive-card`) adds the screen as an Adaptive Card
+  1.5 - an embedded resource `application/vnd.microsoft.card.adaptive` - for
+  Copilot/Teams-style hosts; off by default. Its submit payloads map to
+  `app_act` arguments (docs/agent-snapshot.md). The renderer is
+  abap2UI5/protocol's, vendored under `lib/vendor/adaptive-cards` with a
+  source record and a sha256 drift test (`scripts/vendor-adaptive-cards.mjs`).
+- `createAppClient` gains `screen(session)`: a copy of a session's folded
+  state, for renderers other than the snapshot (additive; the vendored
+  copies elsewhere keep working unchanged).
+
 ## 1.0.0 - 2026-10-03
 
 **1.0 is a stability promise, not a feature release.** This server's tool

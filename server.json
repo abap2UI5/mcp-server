@@ -103,6 +103,18 @@
           "isRequired": false
         },
         {
+          "name": "A2UI5_MCP_UI",
+          "description": "Whether app_start/app_describe/app_act declare their MCP Apps screen (ui://abap2ui5/app-screen): auto (default - when the client advertises the io.modelcontextprotocol/ui extension), on, off.",
+          "format": "string",
+          "isRequired": false
+        },
+        {
+          "name": "A2UI5_MCP_APP_FORMAT",
+          "description": "The default answer format of the app tools: snapshot (default) or adaptive-card (the snapshot plus an Adaptive Card 1.5 as an embedded resource, for card-rendering hosts).",
+          "format": "string",
+          "isRequired": false
+        },
+        {
           "name": "A2UI5_MCP_OFFLINE",
           "description": "Set to 1 for no network: no UI5 CDN fallback, no GitHub mirror, no registry lookup.",
           "format": "string",

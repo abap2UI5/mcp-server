@@ -132,7 +132,13 @@ test('no description pins a line count of a sibling artifact', () => {
 test('every resource has a stable URI, a name, a description and a mime type', () => {
   assert.ok(RESOURCES.length > 0);
   for (const r of RESOURCES) {
-    assert.match(r.uri, /^abap2ui5:\/\/[a-z0-9/-]+$/, `resource URI '${r.uri}' must be a stable abap2ui5:// path`);
+    // a document is an abap2ui5:// path; the one MCP Apps screen is a ui:// resource of its profile
+    if (r.uri.startsWith('ui://')) {
+      assert.match(r.uri, /^ui:\/\/abap2ui5\/[a-z0-9-]+$/, `UI resource URI '${r.uri}' must be ui://abap2ui5/<name>`);
+      assert.equal(r.mimeType, 'text/html;profile=mcp-app', `'${r.uri}' is an MCP Apps resource`);
+    } else {
+      assert.match(r.uri, /^abap2ui5:\/\/[a-z0-9/-]+$/, `resource URI '${r.uri}' must be a stable abap2ui5:// path`);
+    }
     assert.match(r.name, /^[a-z][a-z0-9-]*$/, `resource name '${r.name}' must be a lowercase identifier`);
     assert.ok(r.description && r.description.length > 60, `'${r.uri}' needs a real description, not a label`);
     assert.ok(r.mimeType, `'${r.uri}' must declare a mime type`);
@@ -142,7 +148,7 @@ test('every resource has a stable URI, a name, a description and a mime type', (
 
 test('the README resources table lists exactly the RESOURCES URIs plus the templates', () => {
   const readme = read('README.md');
-  const listed = [...readme.matchAll(/^\| `(abap2ui5:\/\/[^`]+)` \|/gm)].map((m) => m[1]).sort();
+  const listed = [...readme.matchAll(/^\| `((?:abap2ui5|ui):\/\/[^`]+)` \|/gm)].map((m) => m[1]).sort();
   const expected = [...RESOURCE_URIS, ...RESOURCE_TEMPLATES.map((t) => t.uriTemplate)].sort();
   assert.deepEqual(listed, expected,
     'README.md "Resources" table and lib/resources.mjs disagree - update the table (one row per resource/template, URI in backticks)');

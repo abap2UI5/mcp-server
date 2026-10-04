@@ -261,6 +261,13 @@ test('every sibling-dependent tool degrades with an actionable error when the ch
     expectMissingRead(await readErr('abap2ui5://capabilities'), CORPUS, 'SAMPLES_CONTROLS_HOME');
     expectMissingRead(await readErr('abap2ui5://generation-rules'), CORPUS, 'SAMPLES_CONTROLS_HOME');
 
+    // the MCP Apps screen is part of this server, not of a checkout: it reads
+    // with every sibling missing
+    send({ jsonrpc: '2.0', id: 40, method: 'resources/read', params: { uri: 'ui://abap2ui5/app-screen' } });
+    const screen = await until((m) => m.id === 40);
+    assert.ok(screen.result, `the UI resource must read without checkouts: ${JSON.stringify(screen.error)}`);
+    assert.equal(screen.result.contents[0].mimeType, 'text/html;profile=mcp-app');
+
     /* Completion is ADVISORY: with the abap2UI5 checkout absent, completing
      * the guide-chapter template answers an empty list, never an error - the
      * client is typing ahead, and the read itself carries the degradation. */
