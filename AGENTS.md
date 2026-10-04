@@ -51,7 +51,7 @@ reads it live like a checkout.
 | `A2UI5_HOME` | `../abap2UI5` | `.claude/skills/{abap-check,ui5-check}/SKILL.md` (`pitfalls`), `docs/agents/building-apps.md` (`app_guide`), `src/02/z2ui5_if_client.intf.abap` (`api_reference`) - and, WHEN a checkout is there, the backend: `node/srv/express.mjs` (backend server), `node/downport/` + `node/setup/abap_transpile.json` (incremental build), `node/output/`. Without one the backend is the npm package `@abap2ui5/node-runtime` (below), and nothing needs this checkout |
 | `SAMPLES_HOME` | `../samples`, `../abap2UI5-samples` | `catalogue.json` (preferred) + `SAMPLES.md` (fallback, and the src/00 area) — one of the three catalogues `examples` searches |
 | `SAMPLES_STACK_HOME` | `../samples-stack`, `../abap2UI5-samples-stack` | `catalogue.json` (preferred) + `SAMPLES.md` (fallback) — the stack-dependent catalogue (OData, RAP, APC, launchpad) |
-| `APP_TEMPLATE_HOME` | `../app-template`, `../abap2UI5-app-template` | `template.json` and the files it lists — what `scaffold_app` serves and renames (the tool is dead without this checkout) |
+| `APP_TEMPLATE_HOME` | `../app-template`, `../abap2UI5-app-template` | `template.json` and the files it lists — what `scaffold_app` serves and renames, and what `add_agent_setup` writes into an existing project by the `agentSetup` key (both are dead without this checkout or its mirror) |
 | `DOCS_HOME` | `../docs` | `docs/**/*.md` — the documentation site's sources, searched live by `docs_search` |
 | `ABAP_CLOUD_GUI_HOME` | `../abap-cloud-gui` | `tools/report2cloud/lib/{convert,textpool,report}.mjs` — the report converter `migrate_report` imports in-process, with the checkout's own `node_modules` (`npm ci` there; LOCAL only, no mirror - `resolveCloudGui`, not in `RESOLVERS`); with `deploy: true` also its `src/01`, and the popups beside it (`POPUPS_HOME`, `.deps/popups` or `build/popups` of the checkout, `../popups`) |
 | `AI_VIEW_CHECK_HOME` | `../linter` (legacy aliases: `../abap2UI5-linter`, `../ai-view-check`) — which for an npm/npx install is ALSO where npm hoists the declared peer `@abap2ui5/linter` (`node_modules/@abap2ui5/{mcp-server,linter}`), then an INSTALLED one elsewhere: `<cwd>/node_modules/…` (app-template's devDependency), the server's own `node_modules/…`, then wherever Node's resolver finds the package from `lib/repos.mjs` (`viewCheckCandidates`, `nodeResolvedViewCheck`) | `validate_view` + `fix_view` + `screenshot_view`: dynamic import of the linter's package `exports` entries `.`, `./findings`, `./config`, `./rule-docs` (via `importViewCheck`) |
@@ -126,7 +126,11 @@ Three rules, each pinned by `test/remote.test.mjs` and
   in `lib/runtime.mjs` are the two doors to the sandbox and the backend, and
   both are local-only - a mirror of the framework is simply no checkout, so
   with nothing else there the npm backend runs the apps and the mirror goes
-  on serving the guide.
+  on serving the guide. `add_agent_setup` is a writer that READS a mirror:
+  the template it executes is only read (like `scaffold_app`'s), what it
+  writes is the project the agent named - and the one piece of the template
+  it would run as code, `scripts/check-pin.mjs` for the pin warning, it
+  imports from a local checkout only and skips over a mirror.
 - **A failed download degrades to what was there before.** With a cached
   mirror the stale copy stands in (`stale: true`); without one the tool
   degrades with its usual message plus the reason (`remoteStatus`). A
@@ -639,7 +643,15 @@ changes upstream, this repo must change in the same breath:
   reported (`scaffold_app` says to pull), never guessed at. The template's
   `node scripts/rename.mjs` and the VS Code extension's "New Project from Template" are
   the other two executors — three programs, one description, so a file added to
-  the template reaches all three at once.
+  the template reaches all three at once. The **`agentSetup`** key of the same
+  file (the subset of `files.shared` an EXISTING project takes, which two files
+  are merged and how - `json` over named keys, `lines` - the
+  `sourceFolder` edits and `existingVariants`) has two executors: the
+  template's `create/agent-setup.mjs` (`npm create abap2ui5-app --
+  --agent-setup`) and `lib/agent-setup.mjs` (`add_agent_setup`), which ports
+  that file's planner rule for rule; `test/agent-setup.test.mjs` compares the
+  two plans byte for byte when the sibling checkout has `create/`. A new merge
+  kind there is a refusal here ("cannot do - update it") until it is ported.
 - abap2UI5-linter: the package `exports` map entries `.`, `./findings`,
   `./config` and `./rule-docs` (and the shapes behind them: `checkFiles` and
   `screenshotFiles`, `severityOf` / `severityRank` / `SEVERITIES`,
@@ -725,6 +737,16 @@ agent) find these artifacts in a dirty sibling worktree, mcp-server caused them:
   `_to_confirm`, `_to_select`, `_input_val`) with all their files - what the
   class needs to transpile and run; `remove_app` takes the classes out one
   by one (the tables' XML stays until deleted by hand).
+- the PROJECT an agent passes to `add_agent_setup` (or the server's working
+  directory, when that has a `.git`, `.abapgit.xml` or `package.json`) - not
+  a sibling, but the one place outside a sandbox or workspace this server
+  writes into, and only when asked: the files template.json's `agentSetup`
+  lists, new ones only, plus additions to `package.json` and `.gitignore`.
+  Never a file the project has (beyond those two merges), never the source
+  folder `.abapgit.xml` names, never through a symbolic link out of the
+  project, and never the file system root, the home directory, this
+  server's installation, the template checkout, the mirror cache or the
+  workspace (`agentTargetProblem`).
 - `<tmp>/abap2ui5-mcp-remote/<repo>/` — the read-only GitHub mirrors (not a
   sibling worktree, but the same question "where did this come from": a
   directory that carries `.abap2ui5-mirror.json` is one, and deleting it is
@@ -886,7 +908,14 @@ legitimately slower.
   Both pairs were mis-served exactly this way — `generation_rules` described
   itself as "the canonical rulebook for writing an abap2UI5 app" while
   serving a document that opens "You are porting one official UI5 demo kit
-  sample".
+  sample". The same holds for `scaffold_app` (a NEW project, handed back, nothing
+  written) against `add_agent_setup` (an EXISTING project, written into):
+  that is also why the agent setup is a tool of its own rather than an option
+  of `scaffold_app` - different input (a directory, where `class`, `package`
+  and `repo` mean nothing, as the create package refuses them beside
+  `--agent-setup`), a different side effect, and a result shape of its own
+  (`written` / `merged` / `skipped` / `warnings` / `next`) that would
+  otherwise have made one tool's answer two contracts under the 1.0 promise.
 - **`lib/repo-dirs.json` is THE rename history of the ecosystem**, and this
   repo owns it because this is the component that resolves the repos root.
   Per repo it carries the directory names a checkout can carry (newest first —
@@ -956,7 +985,7 @@ legitimately slower.
 | [samples](https://github.com/abap2UI5/samples) | The pattern catalogue `examples` searches |
 | [samples-stack](https://github.com/abap2UI5/samples-stack) | The stack-dependent catalogue `examples` searches |
 | [abap2UI5](https://github.com/abap2UI5/abap2UI5) | Runtime substrate: transpiled backend + express server — and the client API `api_reference` parses |
-| [app-template](https://github.com/abap2UI5/app-template) | The starter project `scaffold_app` serves and renames, executing the template's own `template.json` (`APP_TEMPLATE_HOME`) |
+| [app-template](https://github.com/abap2UI5/app-template) | The starter project `scaffold_app` serves and renames, and the agent setup `add_agent_setup` adds to an existing project, both executing the template's own `template.json` (`APP_TEMPLATE_HOME`) |
 | [docs](https://github.com/abap2UI5/docs) | The documentation site `docs_search` reads, in source form |
 | [abap2UI5-linter](https://github.com/abap2UI5/linter) | `validate_view` implementation (imported via its package `exports` map) |
 | [vscode-extension](https://github.com/abap2UI5/vscode-extension) | Registers this server for MCP clients in the editor (`src/mcp.ts`) |

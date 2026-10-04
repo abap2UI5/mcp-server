@@ -156,7 +156,9 @@ via the committed [`.mcp.json`](.mcp.json); the
 `docs_search`, `scaffold_app`, `generation_rules`) read committed files, so
 when no checkout resolves and no env var is set they read them from GitHub
 instead: the files land in a per-user cache (`<tmp>/abap2ui5-mcp-remote`, a
-day at a time) that the server treats as a read-only checkout. And the
+day at a time) that the server treats as a read-only checkout; `add_agent_setup`
+reads the template from there too, and writes only into the project it is
+given. And the
 expensive half runs on the npm package `@abap2ui5/node-runtime` (below), so
 `npx --yes -p @abap2ui5/mcp-server abap2ui5-mcp` in a fresh project covers
 `deploy_app`, `build_backend`, `run_app`, `interact_app`, `run_unit_tests`
@@ -217,6 +219,7 @@ fix it.
 | `app_guide` | How to build an app, live from the framework checkout | abap2UI5 |
 | `api_reference` | The client API (`z2ui5_if_client`) with its ABAP-Doc: methods, parameters, defaults, the `cs_*` constants | abap2UI5 |
 | `scaffold_app` | The files a new project starts from, live from app-template; `{ class: … }` renames throughout, sidecar `CLSNAME` included | app-template |
+| `add_agent_setup` | Set up an **existing** project for AI work — what `npm create abap2ui5-app -- --agent-setup` does: AGENTS.md, the skills, `.mcp.json`, the allowlist, both gates and the CI job, written into `project_dir`; never overwrites, merges `package.json`/`.gitignore`, follows the `STARTING_FOLDER` | app-template |
 | `examples` | Search the three sample catalogues, verification status and all — answers with a class to read, never a snippet to trust | any of samples / samples-controls / samples-stack (or the GitHub mirror) |
 | `read_example` | Read the source of a sample an `examples` hit named — from the checkout, or fetched from GitHub | the sample's repository (or the GitHub mirror) |
 | `docs_search` | Full-text search over the documentation site's pages: page, heading, snippet and the published URL | docs |
@@ -250,6 +253,26 @@ event branch of an app becomes visible without a system; `run_unit_tests`
 runs the test classes `deploy_app` wrote beside the app (a local
 `z2ui5_if_client` double, see the app guide's chapter 9) in the open-abap
 runtime and answers with assertions.
+
+`scaffold_app` and `add_agent_setup` both execute app-template's own
+`template.json`, for the two kinds of project. `scaffold_app` hands back a
+whole NEW project, app class included, and writes nothing. `add_agent_setup`
+is for the abapGit repository that already exists - most of them never
+started from the template - and does what
+`npm create abap2ui5-app -- --agent-setup` does there, by the template's
+`agentSetup` key: it writes the agent setup and the two gates into
+`project_dir` (default: the server's
+working directory, when that looks like a project), never overwrites a file
+the project has (each one is listed as skipped), merges `package.json` and
+`.gitignore` by only adding what is missing (each value kept that differs
+from the template's is a warning), points the configs at the source folder
+`.abapgit.xml` names and writes nothing into it. A second run changes
+nothing; `dry_run: true` answers the same report without writing. Every path
+it writes comes from the template's file list and is checked first - a plain
+relative path, a shared file of the template, outside the source folder; one
+that fails refuses the whole call before anything is written. A symbolic
+link, or a folder that leads out of the project through one, is never
+written through: that file is skipped, and the answer says why.
 
 `examples` degrades per catalogue instead of failing: it searches the
 checkouts it finds and names the ones it could not, so a thinner answer never

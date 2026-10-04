@@ -94,9 +94,11 @@ jobs:
       # a rename or a reformat upstream reached a user before it reached CI.
       - run: git clone --depth 1 https://github.com/abap2UI5/abap2UI5
       # app-template is a sibling this server reads too - scaffold_app serves
-      # its files and executes its template.json. Without the clone the three
-      # scaffold tests skip themselves, and a smoke job that silently covers
-      # less than it appears to is worse than one that fails.
+      # its files and executes its template.json, add_agent_setup executes its
+      # agentSetup key. Without the clone the three scaffold tests and the
+      # agent-setup parity test (against the template's create/agent-setup.mjs)
+      # skip themselves, and a smoke job that silently covers less than it
+      # appears to is worse than one that fails.
       - run: git clone --depth 1 https://github.com/abap2UI5/app-template
       # the documentation site's sources - docs_search reads them, and its
       # smoke assertions only run when the checkout is there

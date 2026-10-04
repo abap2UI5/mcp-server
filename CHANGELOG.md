@@ -2,139 +2,6 @@
 
 ## Unreleased
 
-- **Database tables in the npm backend's sandbox.** A sandbox's transparent
-  tables (TABL, with their data elements) are transpiled with the classes
-  and created in the runtime's SQLite database at boot: the build takes
-  their `CREATE TABLE` out of the transpiler's init.mjs and `apps/init.mjs`
-  runs it after the package's boot, before the apps load (a structure is a
-  TABL too and creates nothing; a sandbox without tables builds and boots as
-  before; a transparent table the transpiler wrote no statement for fails the
-  build with that reason). `migrate_report { deploy: true }` deploys
-  abap-cloud-gui's tables and data elements with its classes - since its
-  PR #8 the variant and layout stores (`z2ui5_cgui_var`, `z2ui5_cgui_lay`)
-  are the default, and the deploy failed at app start with `Void type:
-  Z2UI5_CGUI_VAR`; `abap2ui5-unit` deploys a project's `*.tabl.xml` /
-  `*.dtel.xml` too, so a class under test can INSERT and SELECT its own
-  tables (`test/fixtures/table-app`, run in `test/npm-integration.test.mjs`).
-  A framework checkout (and the clone of `A2UI5_MCP_BACKEND=clone`, once
-  `build_backend` made it) already created every deployed table through the
-  framework's own setup; without a clone yet there is no sandbox, as before.
-
-- **The agent client follows the protocol's frontend rules** (abap2UI5/protocol
-  frontend suite, adapter `agent`: 53 pass / 5 MUST failures / 3 warnings
-  before, 61 pass / 0 / 0 now; the 20 skips are capabilities a client without
-  a browser does not have). `lib/appclient.mjs`: a response declaring a
-  `PROTOCOL` other than 2 is refused whole - its draft id, view and model -
-  with both numbers named (an absent one is let through); the last
-  `sap-contextid` response header of a session is sent with every later POST
-  of that session (never empty, never `undefined`; a response without it
-  keeps it), so a stateful ABAP app keeps its work process; a token layer's
-  `403` + `X-CSRF-Token: Required` is answered by a `HEAD` token fetch and
-  one re-send of the same body, the token then sent with every POST (a `403`
-  without `Required` stays final); one roundtrip at a time per session - an
-  `app_act` with an event while another is in flight waits for it and runs on
-  the draft id it left, instead of posting the same draft id twice; a
-  roundtrip clears only the edits it carried, so values set while it is in
-  flight stay pending, survive its model push and travel next (a failed one
-  rolls back only its own edits); the error body is shown verbatim - no tag
-  stripping, no entity decoding, only shortened (40 lines, 4000 characters)
-  and control characters shown as U+FFFD. `lib/snapshot.mjs`
-  `applyResponse`: a response of another `APP` tears the popup and the
-  popover down. **Embedders:** the `transport` option now also receives
-  `method` (`'POST'`, or `'HEAD'` for the token fetch, without a body) and
-  the `sap-contextid` / `x-csrf-token` headers to send; the client reads
-  both from the answer's `headers` and does the handshakes itself, so a
-  transport must not repeat them. New exports: `PROTOCOL`, `headerOf`,
-  `validContextId`. `docs/agent-snapshot.md` points to the normative
-  semantic profile (abap2UI5/protocol `profiles/semantic.md`).
-
-- **Agent snapshot: selection dialogs and message lists.** `SelectDialog`
-  and `TableSelectDialog` are tables now (`control` names them,
-  `selectionMode` from `multiSelect`, the dialog's `title` titles its layer),
-  and their `confirm` is a row action: `app_act({ event, row })` picks the row
-  as a click does - its `selectionField` (`selected="{ZZSELKZ}"`) set, the
-  other rows' cleared in single select, all sent as the model delta - and
-  fills the confirm's `$parameters` from the selected rows
-  (`selectedItem`, `selectedItems`, `selectedContexts`). The row-valued
-  parameters of table row events (`listItem`, `rowIndex`, `rowContext`,
-  `rowBindingContext`, a row action item's `row`) are filled from `row` too,
-  for the shapes views write (`.getBindingContext().getProperty('X')`,
-  `.getPath()`, `.get<Prop>()`, `.getCells()[n].get<Prop>()`, the `? :`
-  guard); paths follow UI5's JSONModel, so `selectedContexts[0]/sPath` is
-  `null` as in the browser. Anything else is refused naming `args[i]`. The
-  items of a `MessagePopover` / `MessageView` are messages with `source`
-  `popover` / `messageview` and the optional `subtitle` and `description`.
-  All additive - `snapshotVersion` stays 1, and `docs/agent-snapshot.md` now
-  says what may change within a version. New recorded sessions: samples-
-  controls 623 (SelectDialog), samples 452 (MessageView, MessagePopover) and
-  two abap-cloud-gui report2cloud reports (the F4 TableSelectDialog of the
-  popups, the message popover); the agent integration test picks a row
-  through `app_act` on `@abap2ui5/node-runtime`.
-- **`migrate_report`: a classic ABAP report as an abap2UI5 app.** The source
-  of a report (and optionally its `.prog.xml` text pool and the class name)
-  in; the class of the abap-cloud-gui addon out - `INHERITING FROM
-  z2ui5_cl_cgui_report`, the selection screen as `selection_screen( )`, the
-  event blocks as its methods, the list as `write( )`, the ALV as `alv( )` -
-  with the migration report (TODOs, unreleased tables and APIs with their
-  successors, what was not carried over, every mapped construct) and the
-  refusals (`file:row:col` and the reason; no class unless `partial`). The
-  converter is the addon's `report2cloud`, imported from an abap-cloud-gui
-  checkout (`ABAP_CLOUD_GUI_HOME` or `../abap-cloud-gui`, `npm ci` done) -
-  not bundled, not on npm, and reported with the clone command when it is
-  missing (`lib/siblings.mjs`, `setup_status` lists it). `deploy: true`
-  writes the class with the addon's `src/01` and the popups it calls into the
-  dev sandbox, builds the backend and answers `app_start`'s snapshot of the
-  selection screen, stage by stage like `verify_app`. `lib/migrate.mjs`;
-  `test/migrate.test.mjs` converts a fixture report and a refused one (skipped
-  without the checkout) and runs the deploy on `@abap2ui5/node-runtime`
-  through Execute (behind the network gate).
-- **The app client embeds without wrappers.** `createAppClient` takes
-  `transport` (one roundtrip: the serialized request with its headers,
-  timeout signal and the draft id it continues in, `{ status, headers?,
-  body }` out), `location` (the app start's ORIGIN/PATHNAME/SEARCH),
-  an optional `generation` (absent: no restart detection) and `backendHint`
-  (the words after "the backend did not answer (...)"). The defaults are the
-  local backend's, so the MCP server's requests and refusals are unchanged
-  (the recorded sessions replay as before); the VS Code extension, which
-  vendors the client for a real SAP system, drops the request rewriting and
-  message patching it needed. `docs/agent-snapshot.md` "Embedding the
-  client" is the reference; `test/appclient.test.mjs` covers every option.
-- **Every abap2UI5 app is agent-operable: `app_list`, `app_start`,
-  `app_describe`, `app_act`.** `interact_app` drives an app with CSS
-  selectors in a headless Chromium and answers with a picture; the new tools
-  speak the abap2UI5 JSON protocol itself against the local backend - the app
-  start, the event with its arguments, the model delta of what was typed,
-  exactly as the UI5 frontend sends them - and answer with an **agent
-  snapshot v1**: the fields an agent may fill (model path, label, kind,
-  value, choice values, required, editable), the actions it may fire (event
-  name, static arguments, row-dependent ones as `$row:FIELD`), the tables
-  (columns, the first rows, selection mode, editable cells), the messages
-  (toast, message box, MessageStrip, value states, the app's message table)
-  and some static text, from the view XML of every open slot (main, nested,
-  popup, popover) and the model. An act is validated against the snapshot
-  before anything is sent - an unknown event, a field that is not on the
-  screen or not editable, a choice outside its values is refused naming what
-  is allowed; values without an event stay pending, as typing does in the
-  browser; the popup close the browser performs alone is `@CLOSE_POPUP`.
-  `app_describe` answers from the last response kept, no roundtrip.
-  `lib/snapshot.mjs` (pure: the frontend's slot and model bookkeeping, and
-  the snapshot), `lib/viewxml.mjs` (the view, binding, expression and
-  event-wire parsers) and `lib/appclient.mjs` (the roundtrips, sessions and
-  validation); the linter's UI5 metadata, when it resolves, classifies
-  controls the snapshot has no entry for. The shape is shared with the VS
-  Code extension and the ABAP agent addon: `docs/agent-snapshot.md` is its
-  reference, including where it deviates from the contract it started from
-  (no `/XX/` two-way prefix in the current protocol, pending values,
-  `selectionField`, `@CLOSE_POPUP`) and what it cannot see yet.
-  `test/snapshot.test.mjs` and `test/appclient.test.mjs` run on eleven
-  recorded sample sessions (`test/fixtures/agent/`, real request/response
-  pairs of abap2UI5/samples apps on `@abap2ui5/node-runtime` 1.146.0) - the
-  replay insists on the exact request the real run sent;
-  `test/agent-integration.test.mjs` operates a form, a table with a row
-  action and selection, and a popup on the published runtime, through the
-  client and through the server over stdio (network-gated like
-  `test/npm-integration.test.mjs`).
-
 ## 1.0.0 - 2026-10-03
 
 **1.0 is a stability promise, not a feature release.** This server's tool
@@ -164,15 +31,18 @@ degradation message, a hint - is for the agent to read, not to parse.
 
 What 1.0 contains:
 
-- **24 tools.** `setup_status` (what works on this machine right now, and
+- **30 tools.** `setup_status` (what works on this machine right now, and
   why not); the knowledge half - `capabilities`, `examples`, `read_example`,
   `app_guide`, `api_reference`, `generation_rules`, `scaffold_app`,
-  `docs_search`, `pitfalls`, `scope_of`; the cheap view half, seconds and no
-  backend - `validate_view`, `fix_view`, `screenshot_view`; the dev sandbox -
-  `deploy_app`, `read_app`, `remove_app`; and the expensive half on a real
+  `docs_search`, `pitfalls`, `scope_of`; the project's own setup -
+  `add_agent_setup`; the cheap view half, seconds and no backend -
+  `validate_view`, `fix_view`, `screenshot_view`; the dev sandbox -
+  `deploy_app`, `read_app`, `remove_app`; the expensive half on a real
   transpiled backend - `build_backend`, `build_log`, `backend`, `run_app`,
   `interact_app`, `run_unit_tests`, and `verify_app`, the whole loop in one
-  call.
+  call; operating a running app without a browser - `app_list`,
+  `app_start`, `app_describe`, `app_act`; and `migrate_report`, a classic
+  ABAP report as an abap2UI5 app class.
 - **Six resources** (`abap2ui5://guide`, `abap2ui5://api`,
   `abap2ui5://capabilities`, `abap2ui5://generation-rules`,
   `abap2ui5://pitfalls/abap`, `abap2ui5://pitfalls/view`) plus the
@@ -230,6 +100,167 @@ What 1.0 contains:
   install, that deeper hoist and the project's own devDependency against
   copies of `lib/`. The missing-linter hints and the README say what npm
   installs and what it only declares.
+
+- **`add_agent_setup`: an existing project set up for AI work.** What
+  `npm create abap2ui5-app -- --agent-setup` does, for any MCP client's
+  agent: app-template's `template.json` `agentSetup` key, executed over the
+  project directory the agent names (`project_dir`; the server's working
+  directory by default, when it has a `.git`, `.abapgit.xml` or
+  `package.json`) - AGENTS.md, CLAUDE.md, the agent skills, `.mcp.json`, the
+  `.claude` allowlist, `abaplint.jsonc` and `abap2ui5lint.jsonc`, the CI
+  workflow and the scripts it runs. A file the project has is never
+  overwritten (skipped, and named); `package.json` and `.gitignore` are
+  merged and only gain entries, every value kept that differs from the
+  template's a warning; the configs follow the project's `.abapgit.xml`
+  `STARTING_FOLDER`, and nothing is written into that folder; a second run
+  changes nothing; `dry_run` answers the same report and writes nothing. The
+  answer: `written`, `merged` (with what was added), `skipped` (with why),
+  `warnings` (kept values, an `abaplint.json` beside the new `abaplint.jsonc`,
+  a missing source folder, the framework pin `check:pin` would fail on) and
+  `next`. The template comes from the checkout or the read-only mirror, as
+  for `scaffold_app`; every path it lists is checked before anything is
+  written (a plain relative path, a shared file of the template, outside the
+  source folder - else the whole call refuses), a symbolic link is never
+  written through, and the file system root, the home directory, the
+  server's installation, the template, the mirror cache and the workspace
+  are refused as targets. A tool of its own rather than an option of
+  `scaffold_app`, which hands a NEW project back and writes nothing.
+  `lib/agent-setup.mjs` ports the template's `create/agent-setup.mjs`
+  planner; `test/agent-setup.test.mjs` drives the tool over stdio (a fresh
+  directory, an existing project skipped and merged, another
+  `STARTING_FOLDER`, idempotence, the refusals, symbolic links, the pin
+  check) and compares its plan byte for byte with the create package's when
+  an app-template checkout is beside this repository.
+- **Every abap2UI5 app is agent-operable: `app_list`, `app_start`,
+  `app_describe`, `app_act`.** `interact_app` drives an app with CSS
+  selectors in a headless Chromium and answers with a picture; the new tools
+  speak the abap2UI5 JSON protocol itself against the local backend - the app
+  start, the event with its arguments, the model delta of what was typed,
+  exactly as the UI5 frontend sends them - and answer with an **agent
+  snapshot v1**: the fields an agent may fill (model path, label, kind,
+  value, choice values, required, editable), the actions it may fire (event
+  name, static arguments, row-dependent ones as `$row:FIELD`), the tables
+  (columns, the first rows, selection mode, editable cells), the messages
+  (toast, message box, MessageStrip, value states, the app's message table)
+  and some static text, from the view XML of every open slot (main, nested,
+  popup, popover) and the model. An act is validated against the snapshot
+  before anything is sent - an unknown event, a field that is not on the
+  screen or not editable, a choice outside its values is refused naming what
+  is allowed; values without an event stay pending, as typing does in the
+  browser; the popup close the browser performs alone is `@CLOSE_POPUP`.
+  `app_describe` answers from the last response kept, no roundtrip.
+  `lib/snapshot.mjs` (pure: the frontend's slot and model bookkeeping, and
+  the snapshot), `lib/viewxml.mjs` (the view, binding, expression and
+  event-wire parsers) and `lib/appclient.mjs` (the roundtrips, sessions and
+  validation); the linter's UI5 metadata, when it resolves, classifies
+  controls the snapshot has no entry for. The shape is shared with the VS
+  Code extension and the ABAP agent addon: `docs/agent-snapshot.md` is its
+  reference, including where it deviates from the contract it started from
+  (no `/XX/` two-way prefix in the current protocol, pending values,
+  `selectionField`, `@CLOSE_POPUP`) and what it cannot see yet.
+  `test/snapshot.test.mjs` and `test/appclient.test.mjs` run on eleven
+  recorded sample sessions (`test/fixtures/agent/`, real request/response
+  pairs of abap2UI5/samples apps on `@abap2ui5/node-runtime` 1.146.0) - the
+  replay insists on the exact request the real run sent;
+  `test/agent-integration.test.mjs` operates a form, a table with a row
+  action and selection, and a popup on the published runtime, through the
+  client and through the server over stdio (network-gated like
+  `test/npm-integration.test.mjs`).
+- **The app client embeds without wrappers.** `createAppClient` takes
+  `transport` (one roundtrip: the serialized request with its headers,
+  timeout signal and the draft id it continues in, `{ status, headers?,
+  body }` out), `location` (the app start's ORIGIN/PATHNAME/SEARCH),
+  an optional `generation` (absent: no restart detection) and `backendHint`
+  (the words after "the backend did not answer (...)"). The defaults are the
+  local backend's, so the MCP server's requests and refusals are unchanged
+  (the recorded sessions replay as before); the VS Code extension, which
+  vendors the client for a real SAP system, drops the request rewriting and
+  message patching it needed. `docs/agent-snapshot.md` "Embedding the
+  client" is the reference; `test/appclient.test.mjs` covers every option.
+- **`migrate_report`: a classic ABAP report as an abap2UI5 app.** The source
+  of a report (and optionally its `.prog.xml` text pool and the class name)
+  in; the class of the abap-cloud-gui addon out - `INHERITING FROM
+  z2ui5_cl_cgui_report`, the selection screen as `selection_screen( )`, the
+  event blocks as its methods, the list as `write( )`, the ALV as `alv( )` -
+  with the migration report (TODOs, unreleased tables and APIs with their
+  successors, what was not carried over, every mapped construct) and the
+  refusals (`file:row:col` and the reason; no class unless `partial`). The
+  converter is the addon's `report2cloud`, imported from an abap-cloud-gui
+  checkout (`ABAP_CLOUD_GUI_HOME` or `../abap-cloud-gui`, `npm ci` done) -
+  not bundled, not on npm, and reported with the clone command when it is
+  missing (`lib/siblings.mjs`, `setup_status` lists it). `deploy: true`
+  writes the class with the addon's `src/01` and the popups it calls into the
+  dev sandbox, builds the backend and answers `app_start`'s snapshot of the
+  selection screen, stage by stage like `verify_app`. `lib/migrate.mjs`;
+  `test/migrate.test.mjs` converts a fixture report and a refused one (skipped
+  without the checkout) and runs the deploy on `@abap2ui5/node-runtime`
+  through Execute (behind the network gate).
+- **Agent snapshot: selection dialogs and message lists.** `SelectDialog`
+  and `TableSelectDialog` are tables now (`control` names them,
+  `selectionMode` from `multiSelect`, the dialog's `title` titles its layer),
+  and their `confirm` is a row action: `app_act({ event, row })` picks the row
+  as a click does - its `selectionField` (`selected="{ZZSELKZ}"`) set, the
+  other rows' cleared in single select, all sent as the model delta - and
+  fills the confirm's `$parameters` from the selected rows
+  (`selectedItem`, `selectedItems`, `selectedContexts`). The row-valued
+  parameters of table row events (`listItem`, `rowIndex`, `rowContext`,
+  `rowBindingContext`, a row action item's `row`) are filled from `row` too,
+  for the shapes views write (`.getBindingContext().getProperty('X')`,
+  `.getPath()`, `.get<Prop>()`, `.getCells()[n].get<Prop>()`, the `? :`
+  guard); paths follow UI5's JSONModel, so `selectedContexts[0]/sPath` is
+  `null` as in the browser. Anything else is refused naming `args[i]`. The
+  items of a `MessagePopover` / `MessageView` are messages with `source`
+  `popover` / `messageview` and the optional `subtitle` and `description`.
+  All additive - `snapshotVersion` stays 1, and `docs/agent-snapshot.md` now
+  says what may change within a version. New recorded sessions: samples-
+  controls 623 (SelectDialog), samples 452 (MessageView, MessagePopover) and
+  two abap-cloud-gui report2cloud reports (the F4 TableSelectDialog of the
+  popups, the message popover); the agent integration test picks a row
+  through `app_act` on `@abap2ui5/node-runtime`.
+- **The agent client follows the protocol's frontend rules** (abap2UI5/protocol
+  frontend suite, adapter `agent`: 53 pass / 5 MUST failures / 3 warnings
+  before, 61 pass / 0 / 0 now; the 20 skips are capabilities a client without
+  a browser does not have). `lib/appclient.mjs`: a response declaring a
+  `PROTOCOL` other than 2 is refused whole - its draft id, view and model -
+  with both numbers named (an absent one is let through); the last
+  `sap-contextid` response header of a session is sent with every later POST
+  of that session (never empty, never `undefined`; a response without it
+  keeps it), so a stateful ABAP app keeps its work process; a token layer's
+  `403` + `X-CSRF-Token: Required` is answered by a `HEAD` token fetch and
+  one re-send of the same body, the token then sent with every POST (a `403`
+  without `Required` stays final); one roundtrip at a time per session - an
+  `app_act` with an event while another is in flight waits for it and runs on
+  the draft id it left, instead of posting the same draft id twice; a
+  roundtrip clears only the edits it carried, so values set while it is in
+  flight stay pending, survive its model push and travel next (a failed one
+  rolls back only its own edits); the error body is shown verbatim - no tag
+  stripping, no entity decoding, only shortened (40 lines, 4000 characters)
+  and control characters shown as U+FFFD. `lib/snapshot.mjs`
+  `applyResponse`: a response of another `APP` tears the popup and the
+  popover down. **Embedders:** the `transport` option now also receives
+  `method` (`'POST'`, or `'HEAD'` for the token fetch, without a body) and
+  the `sap-contextid` / `x-csrf-token` headers to send; the client reads
+  both from the answer's `headers` and does the handshakes itself, so a
+  transport must not repeat them. New exports: `PROTOCOL`, `headerOf`,
+  `validContextId`. `docs/agent-snapshot.md` points to the normative
+  semantic profile (abap2UI5/protocol `profiles/semantic.md`).
+- **Database tables in the npm backend's sandbox.** A sandbox's transparent
+  tables (TABL, with their data elements) are transpiled with the classes
+  and created in the runtime's SQLite database at boot: the build takes
+  their `CREATE TABLE` out of the transpiler's init.mjs and `apps/init.mjs`
+  runs it after the package's boot, before the apps load (a structure is a
+  TABL too and creates nothing; a sandbox without tables builds and boots as
+  before; a transparent table the transpiler wrote no statement for fails the
+  build with that reason). `migrate_report { deploy: true }` deploys
+  abap-cloud-gui's tables and data elements with its classes - since its
+  PR #8 the variant and layout stores (`z2ui5_cgui_var`, `z2ui5_cgui_lay`)
+  are the default, and the deploy failed at app start with `Void type:
+  Z2UI5_CGUI_VAR`; `abap2ui5-unit` deploys a project's `*.tabl.xml` /
+  `*.dtel.xml` too, so a class under test can INSERT and SELECT its own
+  tables (`test/fixtures/table-app`, run in `test/npm-integration.test.mjs`).
+  A framework checkout (and the clone of `A2UI5_MCP_BACKEND=clone`, once
+  `build_backend` made it) already created every deployed table through the
+  framework's own setup; without a clone yet there is no sandbox, as before.
 
 ## 0.3.0 - 2026-09-30
 
