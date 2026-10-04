@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   readRuntimePin, compareVersions, openAbapCoreOf, transpilerOf, expressRangeOf, cliVersionOf, desiredDeps,
-  installSpecs, devObjects, devOutputFiles, rewriteImports, strayImports, bootOrder, appsInitSource, transpileConfig,
+  installSpecs, devObjects, devOutputFiles, rewriteImports, strayImports, bootOrder, appsInitSource, transpileConfig, tableSchema, transparentTables,
   selectRuntimeVersion, installedRuntimes, currentRuntimeVersion, ensureRuntime, ensureOpenAbapCore, buildApps, npmView,
   prepareRuntime,
   runtimeDir, runtimeBase, npmSandboxDir, openAbapCoreDir, appsDir, downportDir, npmCommand, resetNpmBackend,
@@ -169,6 +169,43 @@ test('the transpile reads the sandbox and takes the package and open-abap-core a
   const filter = new RegExp(cfg.input_filter[0], 'i');
   for (const f of ['/ws/sandbox/zcl_a.clas.abap', '/ws/sandbox/zcl_a.clas.xml', '/ws/sandbox/zcl_a.clas.testclasses.abap', '/ws/sandbox/zif_b.intf.abap']) assert.ok(filter.test(f), f);
   for (const f of ['/ws/sandbox/README.md', '/ws/sandbox/package.devc.xml']) assert.ok(!filter.test(f), f);
+  for (const f of ['/ws/sandbox/zmcp_note.tabl.xml', '/ws/sandbox/zmcp_note_text.dtel.xml']) assert.ok(filter.test(f), `${f}: tables and data elements are input too`);
+});
+
+test('tables: the sandbox\'s TABL and DTEL objects, their CREATE TABLE out of the transpiler\'s init.mjs, created at boot before the apps', () => {
+  assert.deepEqual(devObjects(['zmcp_note.tabl.xml', 'zmcp_note_text.dtel.xml', 'zcl_a.clas.abap', 'ZS_X.tabl.xml']), ['zcl_a.clas', 'zmcp_note.tabl', 'zmcp_note_text.dtel', 'zs_x.tabl']);
+  assert.deepEqual(devOutputFiles(['zmcp_note.tabl.mjs', 'zmcp_note_text.dtel.mjs', 'mandt.dtel.mjs'], ['zmcp_note.tabl', 'zmcp_note_text.dtel']), ['zmcp_note.tabl.mjs', 'zmcp_note_text.dtel.mjs'], 'the DDIC modules of the sandbox\'s own objects');
+  const init = [
+    'export async function initializeABAP() {',
+    '  const sqlite = [];',
+    "  sqlite.push(`CREATE TABLE 'zmcp_note' ('mandt' NCHAR(3) COLLATE RTRIM, 'id' NCHAR(10) COLLATE RTRIM, PRIMARY KEY('mandt','id'));`);",
+    "  sqlite.push(`CREATE TABLE 'z2ui5_t_01' ('mandt' NCHAR(3) COLLATE RTRIM, PRIMARY KEY('mandt'));`);",
+    '  const pg = [];',
+    '  pg.push(`CREATE TABLE "zmcp_note" ("mandt" NCHAR(3));`);',
+  ].join('\n');
+  assert.deepEqual(tableSchema(init, ['ZMCP_NOTE']), ["CREATE TABLE 'zmcp_note' ('mandt' NCHAR(3) COLLATE RTRIM, 'id' NCHAR(10) COLLATE RTRIM, PRIMARY KEY('mandt','id'));"], 'only the SQLite statement, only of the asked tables');
+  assert.deepEqual(tableSchema(init, []), []);
+  assert.deepEqual(tableSchema('', ['zmcp_note']), []);
+
+  // a structure is a TABL too - it has no table
+  const box = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-tabl-'));
+  try {
+    fs.writeFileSync(path.join(box, 'zmcp_note.tabl.xml'), '<DD02V><TABNAME>ZMCP_NOTE</TABNAME><TABCLASS>TRANSP</TABCLASS></DD02V>');
+    fs.writeFileSync(path.join(box, 'zs_x.tabl.xml'), '<DD02V><TABNAME>ZS_X</TABNAME><TABCLASS>INTTAB</TABCLASS></DD02V>');
+    assert.deepEqual(transparentTables(box, ['zcl_a.clas', 'zmcp_note.tabl', 'zs_x.tabl', 'zmcp_note_text.dtel']), ['zmcp_note']);
+  } finally {
+    fs.rmSync(box, { recursive: true, force: true });
+  }
+
+  const boot = appsInitSource(['zmcp_note.tabl.mjs', 'zcl_a.clas.mjs'], { version: '1.146.0', schema: tableSchema(init, ['zmcp_note']) });
+  assert.match(boot, /databaseConnections\["DEFAULT"\]/);
+  assert.match(boot, /await db\.execute\(\["CREATE TABLE IF NOT EXISTS 'zmcp_note' /, 'created - and a table the package already has is left alone');
+  assert.ok(boot.indexOf('initialize()') < boot.indexOf('db.execute') && boot.indexOf('db.execute') < boot.indexOf('await import("./zmcp_note.tabl.mjs")'),
+    'after the package\'s boot opened the database, before the apps load');
+  assert.match(boot, /opened no DEFAULT database connection/, 'a runtime without a database fails the boot with the reason');
+  const plain = appsInitSource(['zcl_a.clas.mjs'], { version: '1.146.0' });
+  assert.equal(plain, appsInitSource(['zcl_a.clas.mjs'], { version: '1.146.0', schema: [] }));
+  assert.ok(!/database|execute/.test(plain), 'a sandbox without tables boots exactly as before');
 });
 
 test('npm is run without a shell, except on Windows where the arguments are quoted for cmd.exe', () => {
@@ -514,7 +551,15 @@ const out = cfg.output_folder;
 fs.writeFileSync(path.join(out, 'cx_root.clas.mjs'), 'export class cx_root {}');
 let runner = 'import "./init.mjs";\\nfunction getData() {\\n  const ret = [];\\n';
 let init = 'await initializeABAP();\\nawait import("./cx_root.clas.mjs");\\n';
+let sqlite = '';
 for (const o of objs) {
+  if (o.endsWith('.tabl')) {
+    const xml = fs.readFileSync(path.join(cfg.input_folder, o + '.xml'), 'utf8');
+    if (xml.includes('TRANSP') && !xml.includes('NO_SCHEMA')) sqlite += "  sqlite.push(\`CREATE TABLE '" + o.split('.')[0].toLowerCase() + "' ('mandt' NCHAR(3) COLLATE RTRIM, PRIMARY KEY('mandt'));\`);\\n";
+    fs.writeFileSync(path.join(out, o + '.mjs'), 'abap.DDIC["' + o.split('.')[0].toUpperCase() + '"] = {};\\n');
+    init += 'await import("./' + o + '.mjs");\\n';
+    continue;
+  }
   fs.writeFileSync(path.join(out, o + '.mjs'), 'const {cx_root} = await import("./cx_root.clas.mjs");\\nclass x {}\\n');
   fs.writeFileSync(path.join(out, o + '.mjs.map'), '{}');
   init += 'await import("./' + o + '.mjs");\\n';
@@ -525,7 +570,7 @@ for (const o of objs) {
 }
 runner += '  return ret;\\n}\\nasync function run() {\\n  for (const st of getData()) {\\n  }\\n}\\n';
 fs.writeFileSync(path.join(out, 'index.mjs'), runner);
-fs.writeFileSync(path.join(out, 'init.mjs'), init);
+fs.writeFileSync(path.join(out, 'init.mjs'), 'export async function initializeABAP() {\\n  const sqlite = [];\\n' + sqlite + '}\\n' + init);
 console.log(objs.length + 1 + ' objects written to disk');
 `;
 
@@ -573,6 +618,35 @@ test('the build keeps only the dev apps, points their imports at the package, an
   const again = await buildApps({ dir, version: '1.145.0', inputDir: box, coreDir: core });
   assert.equal(again.ok, true, again.reason);
   assert.ok(!fs.readdirSync(apps).some((f) => f.startsWith('zcl_b')), fs.readdirSync(apps).join(', '));
+}));
+
+test('a sandbox with tables: their DDIC modules kept, their CREATE TABLE run by apps/init.mjs; a missing one fails the build', withWorkspace(async () => {
+  const { dir, core } = fakeRuntime('1.145.0');
+  const box = npmSandboxDir();
+  fs.mkdirSync(box, { recursive: true });
+  fs.writeFileSync(path.join(box, 'zcl_a.clas.abap'), '* source');
+  fs.writeFileSync(path.join(box, 'zmcp_note.tabl.xml'), '<TABCLASS>TRANSP</TABCLASS>');
+  fs.writeFileSync(path.join(box, 'zs_flat.tabl.xml'), '<TABCLASS>INTTAB</TABCLASS>');
+  fs.writeFileSync(path.join(box, 'zmcp_note_text.dtel.xml'), '<DD04V/>');
+  const lines = [];
+  const res = await buildApps({ dir, version: '1.145.0', inputDir: box, coreDir: core, onLine: (l) => lines.push(l) });
+  assert.equal(res.ok, true, `${res.reason}\n${lines.join('\n')}`);
+  assert.deepEqual(res.objects, ['zcl_a.clas', 'zmcp_note.tabl', 'zmcp_note_text.dtel', 'zs_flat.tabl']);
+  assert.deepEqual(res.tables, ['zmcp_note'], 'the structure is no table');
+  const apps = appsDir(dir);
+  assert.ok(fs.readdirSync(apps).includes('zmcp_note.tabl.mjs'), 'the table\'s DDIC module is a dev module');
+  const init = fs.readFileSync(path.join(apps, 'init.mjs'), 'utf8');
+  assert.match(init, /await db\.execute\(\["CREATE TABLE IF NOT EXISTS 'zmcp_note' \('mandt' NCHAR\(3\) COLLATE RTRIM, PRIMARY KEY\('mandt'\)\);"\]\);/);
+  assert.ok(init.indexOf('db.execute') < init.indexOf('await import("./zmcp_note.tabl.mjs")'));
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(apps, BUILD_RECORD), 'utf8')).tables, ['zmcp_note']);
+  assert.ok(lines.some((l) => /creates the table\(s\) zmcp_note at boot/.test(l)), lines.join('\n'));
+
+  // the transpiler wrote no CREATE TABLE for a transparent table: said, and the last good apps/ stays
+  fs.writeFileSync(path.join(box, 'zmcp_other.tabl.xml'), '<TABCLASS>TRANSP</TABCLASS> NO_SCHEMA');
+  const bad = await buildApps({ dir, version: '1.145.0', inputDir: box, coreDir: core });
+  assert.equal(bad.ok, false);
+  assert.match(bad.reason, /no CREATE TABLE for zmcp_other into its init\.mjs/);
+  assert.equal(fs.readFileSync(path.join(apps, 'init.mjs'), 'utf8'), init, 'the previous build is untouched');
 }));
 
 /* A build, a fetch or a unit run cleans up in a finally - which a killed

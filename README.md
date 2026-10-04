@@ -341,7 +341,8 @@ cd abap-cloud-gui && npm ci
 ```
 
 With `deploy: true` the class is also written into the dev sandbox together
-with the addon's runtime (`src/01`) and the popups it calls (a checkout of
+with the addon's runtime (`src/01`, its database tables included - the
+backend creates a deployed table at boot) and the popups it calls (a checkout of
 [popups](https://github.com/abap2UI5-addons/popups) at `POPUPS_HOME`, the
 addon's `.deps/popups` or `build/popups`, or `../popups`), the backend is
 built, and the answer carries `app_start`'s snapshot of the selection screen —

@@ -1,5 +1,16 @@
 # Agent snapshot v1 and the app tools
 
+> **Normative version: the semantic profile of abap2UI5/protocol,
+> [`profiles/semantic.md`](https://github.com/abap2UI5/protocol/blob/main/profiles/semantic.md)**
+> (schema: [`schema/snapshot.schema.json`](https://github.com/abap2UI5/protocol/blob/main/schema/snapshot.schema.json)).
+> Snapshot v1 moved there from this page (at `ea4e9fa`); where the two
+> differ, the profile wins. This page stays the reference for this
+> repository's implementation - the tools, the client's options, its
+> deviations - and a change of the snapshot shape is a change of the
+> profile too. The client's protocol behaviour is checked by the protocol's
+> frontend suite: `abap2ui5-conformance frontend --adapter agent`
+> (`MCP_SERVER_HOME` runs a checkout instead of the vendored copy).
+
 **Every abap2UI5 app is agent-operable.** An agent fills fields, fires events
 and reads results *semantically* — by model path, label and event name — over
 the same JSON protocol the browser's UI5 frontend speaks, with no browser and
@@ -341,8 +352,20 @@ The current state from the last response kept — no roundtrip.
    go out as `MODEL` delta with `EVENT` and `T_EVENT_ARG`; the answer is
    folded in; the new snapshot carries the new `session`. Pending edits of
    another slot's model stay pending, as in the browser.
-5. A backend error (HTTP status, no JSON) → error with the backend's text;
-   the session stays at its draft id and the edits are rolled back.
+5. A backend error (HTTP status, no JSON, another `PROTOCOL`) → error with
+   the backend's text, shown verbatim (a `<b>` in it is text - the body is
+   `text/plain`, protocol `spec/errors.md`; only shortened, and control
+   characters shown as U+FFFD); the session stays at its draft id and the
+   act's own edits are rolled back. A response declaring a `PROTOCOL` other
+   than 2 is refused whole - its draft id, view and model included - naming
+   both numbers; a response without `PROTOCOL` is let through.
+6. **One roundtrip at a time** per session: an `app_act` with an `event`
+   while another is in flight waits for it, then runs on the screen and the
+   draft id that one left (so it may name the draft id the one in flight
+   continues). `values` without an event start no roundtrip and apply at
+   once, as typing does while the browser waits; the roundtrip in flight
+   clears only the edits it carried, so these stay pending, survive its
+   model push and travel with the next event.
 
 ### The pick: a selection dialog's confirm
 
@@ -437,6 +460,13 @@ process that has since stopped or restarted is refused (its drafts lived in
 that process) — on the local backend; an embedder without a process to watch
 leaves the check out (see below).
 
+A stateful app's session id travels as the browser frontend sends it
+(protocol `spec/transport.md`): every POST asks for it in a header
+(`sap-contextid-accept: header`), the last `sap-contextid` response header
+of a session is sent with every later POST of that session (a response
+without it keeps it; it is never sent empty or as `undefined`), and another
+session of the same client starts without one.
+
 ## Embedding the client
 
 `lib/appclient.mjs` is written to be copied: the VS Code extension vendors it
@@ -447,24 +477,31 @@ default:
 
 | Option | Default (local backend) | On a real system |
 | --- | --- | --- |
-| `transport({ body, headers, signal, draftId })` → `{ status, headers?, body }` | one `fetch` POST of `body` to `baseUrl` (`fetchImpl`) | the embedder's own roundtrip: auth, CSRF token, cookies, `sap-contextid` |
+| `transport({ method, body, headers, signal, draftId })` → `{ status, headers?, body }` | one `fetch` of `baseUrl` (`fetchImpl`): a POST of `body`, or the CSRF token fetch's HEAD | the embedder's own request: auth, cookies, a proxy |
 | `location(app)` → `{ origin, pathname, search }` (may be async) | `baseUrl` without the trailing slash, `/`, `?app_start=<app>` | the system's launch URL, never a proxy's |
 | `generation()` | absent: no restart detection (the MCP server passes its backend process id) | absent |
 | `backendHint` | `is it running? backend { action: "status" } says` | the embedder's own pointer, or `''` |
 
-- **`transport`** performs ONE roundtrip. `body` is the serialized request
-  (`{"value":{"S_FRONT":…,"MODEL":…}}`), `headers` the two the frontend sends
-  (`content-type: application/json`, `sap-contextid-accept: header`),
-  `signal` the client's timeout (`timeoutMs`, 120 s), `draftId` the
-  `S_FRONT.ID` the request continues — `null` for an app start — so a
-  transport can keep per-session state (a stateful app's `sap-contextid`)
-  without parsing the body. Its answer is `{ status, body }` (plus
-  `headers`, which the client does not read); a status outside 2xx is the
-  backend's refusal (its text extracted as from the error page), and a throw
-  is *the backend did not answer (…)*. A transport that resends (a CSRF
-  `Required` → fetch → resend) does so inside the one call. With a
-  transport, `baseUrl` and `fetchImpl` are unused (unless the default
-  `location` needs `baseUrl`).
+- **`transport`** sends ONE request, as given. `method: 'POST'` is a
+  roundtrip: `body` the serialized request
+  (`{"value":{"S_FRONT":…,"MODEL":…}}`), `headers` what the frontend sends
+  (`content-type: application/json`, `sap-contextid-accept: header`, and -
+  once the backend handed them out - the session's `sap-contextid` and the
+  `x-csrf-token`). `method: 'HEAD'` is the CSRF token fetch
+  (`x-csrf-token: Fetch`, no body). `signal` is the client's timeout
+  (`timeoutMs`, 120 s, one for the roundtrip and its handshake), `draftId`
+  the `S_FRONT.ID` the request continues — `null` for an app start. Its
+  answer is `{ status, headers?, body }`; the client reads `sap-contextid`
+  and `x-csrf-token` from `headers` (any case, a repeated header joined), a
+  status outside 2xx is the backend's refusal (its body shown verbatim), and
+  a throw is *the backend did not answer (…)*. **The client does both
+  handshakes itself** — the stateful session id per session, and a token
+  layer's `403` + `X-CSRF-Token: Required` answered by the HEAD and one
+  re-send of the same body, the token then sent with every POST (a `403`
+  without `Required` is the backend's own gate and final) — so a transport
+  must not do them again: it adds what only the embedder has (credentials,
+  cookies, routing). With a transport, `baseUrl` and `fetchImpl` are unused
+  (unless the default `location` needs `baseUrl`).
 - **`location`** builds the app start's `ORIGIN`/`PATHNAME`/`SEARCH`. The
   backend builds URLs out of them and keeps them with the app's session, so
   they must be what a browser would send; `search` has to name the class

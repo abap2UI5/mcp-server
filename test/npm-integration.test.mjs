@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { fakeTemplate } from './helpers/npm-fixture.mjs';
 
 const PORT = 4441;
@@ -168,6 +169,31 @@ test('deploy, build, unit tests, boot and a roundtrip on the published @abap2ui5
     await rt.stopBackend().catch(() => {});
     for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
     Object.assign(process.env, saved);
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+/* A sandbox table, for real: test/fixtures/table-app is a project with a
+ * transparent table (ZMCP_NOTE), a data element and a class whose unit test
+ * INSERTs two rows and SELECTs them back. abap2ui5-unit deploys it on the
+ * published package - the table must exist in the runtime's database before
+ * the class runs, which only apps/init.mjs's CREATE TABLE makes true. */
+test('a sandbox table: abap2ui5-unit runs a class that INSERTs into and SELECTs from it', { skip: skip || false, timeout: 15 * 60_000 }, () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-npm-tabl-'));
+  try {
+    const project = path.join(base, 'project');
+    fs.cpSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'table-app'), project, { recursive: true });
+    const env = { ...process.env, A2UI5_MCP_BACKEND: 'npm', A2UI5_MCP_WORKSPACE: path.join(base, 'workspace'), A2UI5_MCP_REMOTE: '0', SAMPLES_CONTROLS_HOME: path.join(base, 'no-corpus') };
+    delete env.A2UI5_MCP_RUNTIME_VERSION;
+    const run = spawnSync(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ci-unit.mjs'), 'src', '--json'], {
+      cwd: project, env, encoding: 'utf8', timeout: 14 * 60_000,
+    });
+    assert.equal(run.status, 0, `abap2ui5-unit exited ${run.status}:\n${run.stdout}\n${run.stderr}`);
+    assert.match(run.stderr + run.stdout, /creates the table\(s\) zmcp_note at boot/);
+    const report = JSON.parse(run.stdout);
+    const tests = report.results.flatMap((r) => r.tests || []);
+    assert.deepEqual(tests.map((t) => `${t.object} ${t.localClass}->${t.method} ${t.ok === false ? 'FAIL' : 'ok'}`), ['ZCL_MCP_NOTES ltcl_notes->insert_and_select ok']);
+  } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }
 });
