@@ -92,6 +92,8 @@ import {
   classNameOf,
 } from './lib/runtime.mjs';
 import { createAppClient, AgentError } from './lib/appclient.mjs';
+import { toolsWithUi, uiEnabled } from './lib/mcp-app.mjs';
+import { appCard, cardContent, defaultAppFormat, APP_FORMATS } from './lib/adaptive-card.mjs';
 import { migrateReport, deployFiles, resolvePopups, validTargetClass, SetupError } from './lib/migrate.mjs';
 import { explicitEnv } from './lib/repos.mjs';
 
@@ -271,9 +273,22 @@ async function agentClient() {
  * budget's friend, indentation is not. A refusal (AgentError) is an error
  * result naming what is allowed; anything else propagates to the handler's
  * catch like every other tool's failure. */
-async function snapshotAnswer(run) {
+async function snapshotAnswer(run, { format = 'snapshot', client = null } = {}) {
   try {
-    return text(JSON.stringify(await run()));
+    const snap = await run();
+    const answer = text(JSON.stringify(snap));
+    /* format "adaptive-card": the same screen as an Adaptive Card 1.5, an
+     * embedded resource after the unchanged snapshot (lib/adaptive-card.mjs).
+     * A card that cannot be rendered costs the card, never the act: the
+     * snapshot is the answer, and the reason is said beside it. */
+    if (format === 'adaptive-card' && client && snap && snap.session) {
+      try {
+        answer.content.push(cardContent(appCard(client.screen(snap.session), snap.session).card, snap.session));
+      } catch (e) {
+        answer.content.push({ type: 'text', text: `no Adaptive Card for this screen: ${(e && e.message) || e}` });
+      }
+    }
+    return answer;
   } catch (e) {
     if (e instanceof AgentError) return toolError(e.message);
     throw e;
@@ -1243,24 +1258,27 @@ async function handle(name, args = {}, ctx = {}) {
       const miss = missingBackend();
       if (miss) return miss;
       const cls = classNameOf(args.app);
+      const format = oneOf(args.format, { name: 'format', allowed: APP_FORMATS, dflt: defaultAppFormat() });
       if (!backendBuilt()) return toolError('backend not built — call build_backend first (then app_start; app_list names what the build carries)');
       const maxRows = boundedInt(args.max_rows, { name: 'max_rows', dflt: 20, min: 0, max: 200 });
       await startBackend();
       const client = await agentClient();
-      return snapshotAnswer(() => client.start(cls, { values: args.values, maxRows }));
+      return snapshotAnswer(() => client.start(cls, { values: args.values, maxRows }), { format, client });
     }
     case 'app_describe': {
       const maxRows = boundedInt(args.max_rows, { name: 'max_rows', dflt: undefined, min: 0, max: 200 });
+      const format = oneOf(args.format, { name: 'format', allowed: APP_FORMATS, dflt: defaultAppFormat() });
       const client = await agentClient();
-      return snapshotAnswer(async () => client.describe(args.session, { maxRows }));
+      return snapshotAnswer(async () => client.describe(args.session, { maxRows }), { format, client });
     }
     case 'app_act': {
       const maxRows = boundedInt(args.max_rows, { name: 'max_rows', dflt: undefined, min: 0, max: 200 });
+      const format = oneOf(args.format, { name: 'format', allowed: APP_FORMATS, dflt: defaultAppFormat() });
       const row = args.row === undefined || args.row === null ? undefined : Number(args.row);
       const client = await agentClient();
       return snapshotAnswer(() => client.act(args.session, {
         values: args.values, event: args.event, args: args.args, row, maxRows,
-      }));
+      }), { format, client });
     }
     case 'run_unit_tests': {
       const miss = missingBackend();
@@ -1385,7 +1403,13 @@ function diagnostic(level, message) {
   }
 }
 
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
+/* The app tools name the MCP Apps screen (ui://abap2ui5/app-screen,
+ * lib/mcp-app.mjs) when the client advertised the extension in its
+ * initialize - or always/never, by A2UI5_MCP_UI. The TOOLS array stays the
+ * one source; only the metadata is added here. */
+server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  tools: toolsWithUi(TOOLS, uiEnabled(server.getClientCapabilities())),
+}));
 
 /* The knowledge documents, as resources (lib/resources.mjs): listing is free
  * (names and URIs, no file touched), reading resolves the sibling live and

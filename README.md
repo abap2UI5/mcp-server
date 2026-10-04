@@ -236,7 +236,7 @@ fix it.
 | `run_app` | Boot an app headless: status, real page errors, and a **screenshot** | a build (npm backend or abap2UI5 checkout); samples-controls serves UI5 locally when present, the CDN otherwise |
 | `interact_app` | Boot an app, then click, fill, press and wait through a short script — the **event branch**, photographed | a build (same as run_app) |
 | `app_list` | The app classes the built backend can start — the deployed dev apps and the framework's own | a build (npm backend or abap2UI5 checkout) |
-| `app_start` | Start an app and get its **agent snapshot**: fields (path, label, kind, value), actions (event + arguments), tables, messages — over the abap2UI5 JSON protocol, no browser | a build (same as run_app) |
+| `app_start` | Start an app and get its **agent snapshot**: fields (path, label, kind, value), actions (event + arguments), tables, messages — over the abap2UI5 JSON protocol, no browser; in an MCP Apps host also an interactive screen, with `format: "adaptive-card"` also an Adaptive Card | a build (same as run_app) |
 | `app_describe` | The current agent snapshot of a session, from memory — no roundtrip | a session from app_start |
 | `app_act` | Fill fields and fire an event by name — validated against the snapshot, sent as the real model delta — and get the next snapshot | a session from app_start |
 | `run_unit_tests` | Run the deployed apps' test classes (on a checkout: or the whole transpiled tree) in the open-abap runtime: assertions, not pictures | a build (npm backend or abap2UI5 checkout) |
@@ -321,6 +321,42 @@ the derivation rules, the operations, the deviations from the original
 contract and what the snapshot cannot see yet. `interact_app` stays the tool
 for what only a browser shows (the rendered page, client-side behaviour).
 
+### The screen in the chat: MCP Apps and Adaptive Cards
+
+The snapshot is text for the agent. Two optional surfaces show the same
+screen to the **user** in the chat, and send what the user does back through
+`app_act` - the same validation as the agent's own acts, so nothing the
+snapshot does not allow can be fired, and the agent sees the act:
+
+- **MCP Apps** ([SEP-1865](https://github.com/modelcontextprotocol/ext-apps/blob/main/specification/2026-01-26/apps.mdx),
+  stable 2026-01-26, extension `io.modelcontextprotocol/ui`). `app_start`,
+  `app_describe` and `app_act` name the UI resource `ui://abap2ui5/app-screen`
+  (`_meta.ui.resourceUri`, MIME type `text/html;profile=mcp-app`) when the
+  client advertises the extension in its `initialize`. A host that renders MCP
+  Apps (the extension's own README lists Claude, ChatGPT, VS Code and Goose)
+  shows it as a sandboxed iframe beside the result: fields to fill, buttons,
+  row actions, table cells, messages. A click is a `tools/call` of `app_act`
+  through the host, built from the snapshot on screen; afterwards the page
+  tells the model what happened (`ui/update-model-context`) and renders the
+  new snapshot. The page is one self-contained HTML document - no external
+  URL, no network, no eval - so it runs under the spec's restrictive default
+  CSP; it needs nothing else. `A2UI5_MCP_UI=on` declares the screen for a host
+  that renders MCP Apps without advertising the extension, `off` never; the
+  tools' text answers do not change either way.
+- **Adaptive Cards** for Copilot/Teams-style hosts: `format: "adaptive-card"`
+  on `app_start`, `app_describe` and `app_act` (or `A2UI5_MCP_APP_FORMAT=adaptive-card` for every call)
+  adds the screen as an Adaptive Card 1.5 - an embedded resource of type
+  `application/vnd.microsoft.card.adaptive` after the unchanged snapshot -
+  rendered by abap2UI5/protocol's renderer (vendored under
+  `lib/vendor/adaptive-cards`). Off by default. Each `Action.Submit` carries
+  `session` (and `row` for a row's action); a submitted payload maps to one
+  `app_act` call: `event` and `row` as they are, every input whose value
+  changed as `values["<binding path>"]`, a message box button as the box's
+  close action with the button as its `$action` argument, the popup/popover
+  close wire as `@CLOSE_POPUP` / `@CLOSE_POPOVER` (`cardSubmitToAct` in
+  `lib/adaptive-card.mjs`; the full table is in
+  [docs/agent-snapshot.md](docs/agent-snapshot.md#the-screen-in-the-chat-mcp-apps-and-adaptive-cards)).
+
 ### Migrating a classic report
 
 `migrate_report` takes the source of a classic report (`REPORT`,
@@ -404,6 +440,9 @@ agents that want a document whole instead of sliced. Same live reads from the
 same sibling checkouts: listing is free (no checkout needed), reading a
 resource whose checkout is missing answers with the same actionable error the
 tool gives.
+The one resource that is not a document is `ui://abap2ui5/app-screen`, the
+MCP Apps screen of the app tools (see "The screen in the chat" above); it is
+part of this server and needs no checkout.
 
 | Resource | Content | Needs |
 |---|---|---|
@@ -414,6 +453,7 @@ tool gives.
 | `abap2ui5://pitfalls/view` | ui5-check — the view defects a green CI does not catch | abap2UI5 |
 | `abap2ui5://capabilities` | CAPABILITIES.md — the verified capability map | samples-controls |
 | `abap2ui5://generation-rules` | The rulebook for porting a UI5 demo-kit sample | samples-controls |
+| `ui://abap2ui5/app-screen` | The MCP Apps screen of the app tools (`text/html;profile=mcp-app`) - the snapshot as a page the user operates in the chat | - |
 
 ## Prompts
 

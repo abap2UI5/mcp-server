@@ -1,0 +1,19 @@
+{
+  "note": "What scripts/vendor-adaptive-cards.mjs copied from abap2UI5/protocol, at which commit, and the sha256 of every file it wrote. Generated - do not edit; test/vendor.test.mjs holds the copies to these hashes.",
+  "repository": "abap2UI5/protocol",
+  "commit": "604d26769a9b7dcaa1f985f1297ff9c0a59b012e",
+  "files": {
+    "lib/vendor/adaptive-cards/mapping.mjs": {
+      "from": "renderers/adaptive-cards/mapping.mjs",
+      "sha256": "9de056e622fba15bb61bad63025a9eaa6472530b4ee559388f3b9262a62115c0"
+    },
+    "lib/vendor/adaptive-cards/render.mjs": {
+      "from": "renderers/adaptive-cards/render.mjs",
+      "sha256": "e19194c717104a62425d20318f70b98965aa3ece2ead514b11294114e5f9657e"
+    },
+    "lib/vendor/adaptive-cards/submit.mjs": {
+      "from": "renderers/adaptive-cards/submit.mjs",
+      "sha256": "65320e13f7a3bb10521269b0286e3f57511d179a061a884da9960c62a9f8cec6"
+    }
+  }
+}

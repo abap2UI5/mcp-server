@@ -23,6 +23,10 @@ and the four operations on it. Three implementations share it:
 | VS Code extension | abap2UI5/vscode-extension | follows this page |
 | ABAP agent addon | abap2UI5-addons/agent | follows this page |
 
+The same snapshot can be shown to the USER in the chat - as an MCP Apps
+screen or an Adaptive Card - whose actions come back as `app_act` calls:
+[The screen in the chat](#the-screen-in-the-chat-mcp-apps-and-adaptive-cards).
+
 The shape is "Contract B" of the 2026-10-03 brainstorm. Where the real
 protocol forced a difference, it is listed under
 [Deviations and extensions](#deviations-and-extensions) — implementations
@@ -467,6 +471,67 @@ of a session is sent with every later POST of that session (a response
 without it keeps it; it is never sent empty or as `undefined`), and another
 session of the same client starts without one.
 
+## The screen in the chat: MCP Apps and Adaptive Cards
+
+The snapshot is the agent's view. This server can also show the same screen
+to the user in the chat - and nothing here is a second protocol client: both
+surfaces send what the user does as `app_act` calls, which validate exactly
+like the agent's own (an action not on the snapshot, a field that is not
+editable, a choice outside its values is refused, nothing is sent).
+
+**MCP Apps** (SEP-1865, extension `io.modelcontextprotocol/ui`, stable spec
+2026-01-26 of modelcontextprotocol/ext-apps). `app_start`, `app_describe` and
+`app_act` carry `_meta.ui.resourceUri = "ui://abap2ui5/app-screen"` (plus the
+deprecated flat `_meta["ui/resourceUri"]`, which the spec's SDK still writes)
+when the client advertised the extension with `text/html;profile=mcp-app`, or
+when `A2UI5_MCP_UI=on`. The resource (`lib/mcp-app.mjs`, the page logic in
+`lib/mcp-app-view.mjs`) is one HTML document without any external URL, so it
+declares no `_meta.ui.csp` and runs under the host's restrictive default.
+Over the postMessage bridge the page:
+
+| Step | Message |
+| --- | --- |
+| handshake | `ui/initialize` (`protocolVersion` 2026-01-26) -> `ui/notifications/initialized` |
+| show | `ui/notifications/tool-result`: the result's text block (or `structuredContent`) parsed as snapshot v1 and rendered - fields as inputs, actions as buttons (a message box close action as one button per choice), tables with their editable cells and row actions, messages, texts, `pending`, `unsupported` |
+| act | a button press -> `tools/call` `app_act { session, event: <action id>, values: { <field id or cell path>: value } of the inputs the user CHANGED, row?, args?: the box choice at the `$action` position, max_rows?: the tool input's }` - only when the host proxies tool calls (`hostCapabilities.serverTools`), one at a time |
+| refresh | `tools/call` `app_describe { session }` |
+| tell the model | after a successful act, `ui/update-model-context` with what was sent and the new session (when the host offers `updateModelContext`) |
+| size, teardown | `ui/notifications/size-changed`; `ui/resource-teardown` and `ping` answered |
+
+The page calls no other tool. An `app_act` the agent makes later with the
+session it last saw is refused naming the current one (Sessions, above), so
+an agent and a user operating the same session cannot overwrite each other.
+
+**Adaptive Cards.** `format: "adaptive-card"` (or
+`A2UI5_MCP_APP_FORMAT=adaptive-card`) appends the screen as an Adaptive Card
+1.5 to the result - `{ type: "resource", resource: { uri:
+"abap2ui5://app-card/<session>", mimeType:
+"application/vnd.microsoft.card.adaptive", text: <card JSON> } }` - after the
+unchanged snapshot. The card is rendered by abap2UI5/protocol's
+`renderers/adaptive-cards` (vendored, `lib/vendor/adaptive-cards`) from the
+session's folded state (`client.screen(session)`); inputs carry their binding
+path as id. Each `Action.Submit`'s `data` gets `session`, and a row's action
+`row`. A card host submits the action's data merged with every input; this
+maps to ONE `app_act` (`cardSubmitToAct(snapshot, payload)` in
+`lib/adaptive-card.mjs`):
+
+| Submitted | app_act argument |
+| --- | --- |
+| `data.session` | `session` (the snapshot's when absent) |
+| `data.event` | `event` (the event name: the first enabled action of that name, the row action when `row` is given) |
+| `data.row` | `row` |
+| `"/PATH": value`, `"/TAB/<row>/<COL>": value` (`#n` duplicates folded) | `values["/PATH"]` - only when it differs from the snapshot; `"true"`/`"false"` of a boolean become booleans, a multi-select's `"A,B"` becomes `["A","B"]` |
+| `data.box: "<button>"` | `event`: the message box close action, `args`: the button at its `$action` position; a box without `onClose` maps to nothing (`null`) |
+| `data.client: ["CONTROL_GLOBAL","VIEW_SLOTS","destroy","POPUP"\|"POPOVER"]` | `event: "@CLOSE_POPUP"` / `"@CLOSE_POPOVER"` |
+| `data.args`, `data.refs` | dropped - app_act computes the arguments from the model at act time, after the edits |
+| any other `data.client` | refused: a frontend action only a browser performs |
+
+What the card shows is the renderer's portable profile v1 (its README lists
+the mapping and its limits: no `change` events, growing tables show every
+row, `sap.ui.table` and nested views are placeholders); controls outside it
+are placeholders, so a row action of a grid table is on the snapshot but not
+on the card.
+
 ## Embedding the client
 
 `lib/appclient.mjs` is written to be copied: the VS Code extension vendors it
@@ -517,6 +582,10 @@ default:
   local-backend tool.
 
 `metadata()`, `maxSessions` and `timeoutMs` are the same for every embedder.
+
+`screen(session)` answers a copy of a session's folded state (the views in
+their slots, the models with the pending edits, the last `T_CUSTOM`) - what a
+renderer other than the snapshot needs; the Adaptive Card above is one.
 
 ## Deviations and extensions
 
