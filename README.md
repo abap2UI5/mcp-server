@@ -379,8 +379,9 @@ cd abap-cloud-gui && npm ci
 With `deploy: true` the class is also written into the dev sandbox together
 with the addon's runtime (`src/01`, its database tables included - the
 backend creates a deployed table at boot) and the popups it calls (a checkout of
-[popups](https://github.com/abap2UI5-addons/popups) at `POPUPS_HOME`, the
-addon's `.deps/popups` or `build/popups`, or `../popups`), the backend is
+[popups](https://github.com/abap2UI5-addons/popups) at `POPUPS_HOME`, else
+the addon's `.deps/popups`, `../popups` beside it or the addon's
+`build/popups`, in that order), the backend is
 built, and the answer carries `app_start`'s snapshot of the selection screen —
 `app_act` with `CGUI_EXECUTE` runs the report. The database tables a report
 reads are not in the local backend: the screen runs, a run that reads them
@@ -486,9 +487,11 @@ duplicates none of their content:
   `~/.abap2ui5-mcp` and is safe to delete.
 - **Port:** the backend listens on 3000 (`A2UI5_MCP_PORT` overrides).
 - **Timeouts:** every spawned child is killed (whole process tree) when it
-  exceeds its limit — lint/scope 5 min, build 30 min by default;
-  `A2UI5_MCP_LINT_TIMEOUT_MS`, `A2UI5_MCP_SCOPE_TIMEOUT_MS` and
-  `A2UI5_MCP_BUILD_TIMEOUT_MS` override (values in ms).
+  exceeds its limit — lint/scope 5 min, unit tests 10 min, build (with the
+  prebuilt download and the npm install) 30 min by default;
+  `A2UI5_MCP_LINT_TIMEOUT_MS`, `A2UI5_MCP_SCOPE_TIMEOUT_MS`,
+  `A2UI5_MCP_UNIT_TIMEOUT_MS` and `A2UI5_MCP_BUILD_TIMEOUT_MS` override
+  (values in ms).
 - **UI5 sources** are served from the samples-controls checkout's `@openui5`
   packages, so booting needs no network. The built theme CSS is not in those
   packages — with network access it loads from the CDN (styled screenshots);

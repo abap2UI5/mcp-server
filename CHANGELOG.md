@@ -330,6 +330,12 @@
   the network, while the npm backend has always bound loopback. The backend
   is started with `HOST=127.0.0.1` now, also over a `HOST` the user's
   environment exports.
+- **The README's timeouts and popups lookup match the code.** The timeout
+  note left out `A2UI5_MCP_UNIT_TIMEOUT_MS` (the unit-test runner's 10 min),
+  and `migrate_report`'s popups were said to be looked for in `build/popups`
+  before `../popups` - the server takes `.deps/popups`, `../popups`, then
+  `build/popups`. RELEASING.md's tarball list now names the `abap2ui5-unit`
+  script and `action.yml` it ships. A test holds the three to the code.
 
 ## 1.0.0 - 2026-10-03
 

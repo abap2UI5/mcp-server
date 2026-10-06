@@ -53,7 +53,7 @@ reads it live like a checkout.
 | `SAMPLES_STACK_HOME` | `../samples-stack`, `../abap2UI5-samples-stack` | `catalogue.json` (preferred) + `SAMPLES.md` (fallback) — the stack-dependent catalogue (OData, RAP, APC, launchpad) |
 | `APP_TEMPLATE_HOME` | `../app-template`, `../abap2UI5-app-template` | `template.json` and the files it lists — what `scaffold_app` serves and renames, and what `add_agent_setup` writes into an existing project by the `agentSetup` key (both are dead without this checkout or its mirror) |
 | `DOCS_HOME` | `../docs` | `docs/**/*.md` — the documentation site's sources, searched live by `docs_search` |
-| `ABAP_CLOUD_GUI_HOME` | `../abap-cloud-gui` | `tools/report2cloud/lib/{convert,textpool,report}.mjs` — the report converter `migrate_report` imports in-process, with the checkout's own `node_modules` (`npm ci` there; LOCAL only, no mirror - `resolveCloudGui`, not in `RESOLVERS`); with `deploy: true` also its `src/01`, and the popups beside it (`POPUPS_HOME`, `.deps/popups` or `build/popups` of the checkout, `../popups`) |
+| `ABAP_CLOUD_GUI_HOME` | `../abap-cloud-gui` | `tools/report2cloud/lib/{convert,textpool,report}.mjs` — the report converter `migrate_report` imports in-process, with the checkout's own `node_modules` (`npm ci` there; LOCAL only, no mirror - `resolveCloudGui`, not in `RESOLVERS`); with `deploy: true` also its `src/01`, and the popups beside it (`POPUPS_HOME`, else `.deps/popups` of the checkout, `../popups` beside it, its `build/popups` - in that order, `resolvePopups`) |
 | `AI_VIEW_CHECK_HOME` | `../linter` (legacy aliases: `../abap2UI5-linter`, `../ai-view-check`) — which for an npm/npx install is ALSO where npm hoists the declared peer `@abap2ui5/linter` (`node_modules/@abap2ui5/{mcp-server,linter}`), then an INSTALLED one elsewhere: `<cwd>/node_modules/…` (app-template's devDependency), the server's own `node_modules/…`, then wherever Node's resolver finds the package from `lib/repos.mjs` (`viewCheckCandidates`, `nodeResolvedViewCheck`) | `validate_view` + `fix_view` + `screenshot_view`: dynamic import of the linter's package `exports` entries `.`, `./findings`, `./config`, `./rule-docs` (via `importViewCheck`) |
 
 One more checkout is read but not by this server: **`OPENUI5_SRC`** (default
@@ -84,8 +84,9 @@ because the backend hands its paths to children running elsewhere), `A2UI5_MCP_B
 framework clone as the answer to "no checkout", the default before the npm
 backend), `A2UI5_MCP_RUNTIME_VERSION` (the `@abap2ui5/node-runtime` release,
 X.Y.Z; default the registry's latest - `A2UI5_MCP_OFFLINE` also stops that
-question), `A2UI5_MCP_SKIP_NETWORK_TESTS` (the two `npm test` files that
-reach the registry - npm-integration and agent-integration - skip themselves), and the child-process timeouts `A2UI5_MCP_LINT_TIMEOUT_MS` /
+question), `A2UI5_MCP_SKIP_NETWORK_TESTS` (the three `npm test` files that
+reach the registry - npm-integration, agent-integration and migrate's
+deploy test - skip themselves), and the child-process timeouts `A2UI5_MCP_LINT_TIMEOUT_MS` /
 `A2UI5_MCP_SCOPE_TIMEOUT_MS` (default 5 min), `A2UI5_MCP_UI` (`auto`/`on`/`off`:
 whether the app tools declare their MCP Apps screen, below),
 `A2UI5_MCP_APP_FORMAT` (`snapshot`/`adaptive-card`: the app tools' default
