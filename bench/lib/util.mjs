@@ -25,12 +25,17 @@ export function run(cmd, args, { cwd, env, timeoutMs = 10 * 60 * 1000, input, on
     let stdout = '';
     let stderr = '';
     let timedOut = false;
+    /* Decoded as UTF-8 across chunk boundaries: a chunk is bytes, and a
+     * character split between two of them came out as replacement
+     * characters - in the transcript, the result text, the grader's output. */
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
     const timer = setTimeout(() => {
       timedOut = true;
       try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch { /* gone */ } }
     }, timeoutMs);
-    child.stdout.on('data', (d) => { stdout += d; if (onStdout) onStdout(String(d)); });
-    child.stderr.on('data', (d) => { stderr += d; if (onStderr) onStderr(String(d)); });
+    child.stdout.on('data', (d) => { stdout += d; if (onStdout) onStdout(d); });
+    child.stderr.on('data', (d) => { stderr += d; if (onStderr) onStderr(d); });
     child.on('error', (e) => { stderr += String(e && e.message || e); });
     child.on('close', (code, signal) => {
       clearTimeout(timer);

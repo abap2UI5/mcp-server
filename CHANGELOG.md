@@ -158,6 +158,13 @@
   class FOR TESTING?", sending the reader after a problem that is not there.
   Such a class is `notRun` now (in `--json` too), naming the failure the run
   stopped at.
+- **abap2UI5-bench keeps the agent's transcript in whole characters**
+  (`bench/`, not part of the package). Its child-process helper turned each
+  output chunk into a string on its own, so a character the pipe split
+  between two chunks - an em dash in the agent's text - became replacement
+  characters in `transcript.jsonl`, the result text and the grader's
+  output. The streams are decoded as UTF-8 across chunks now, and
+  `verify.mjs` checks it.
 
 ## 1.0.0 - 2026-10-03
 
