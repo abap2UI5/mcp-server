@@ -77,6 +77,16 @@ test('errorText shows the error body verbatim: markup is text, nothing stripped 
   assert.ok(errorText(500, 'x'.repeat(10000)).length < 4100, 'and capped in characters');
 });
 
+test('errorText takes linear time over a long run of whitespace inside the body', () => {
+  // /\s+$/ retried each run from every one of its positions: 15 s for this body
+  const body = `a${' '.repeat(100000)}b${'\n'.repeat(100000)}c \n\t `;
+  const t0 = Date.now();
+  const out = errorText(500, body);
+  assert.ok(Date.now() - t0 < 1000, `took ${Date.now() - t0} ms`);
+  assert.ok(out.startsWith('HTTP 500: a   '), 'the body is still shown from its start');
+  assert.equal(errorText(500, 'a 　\n \t'), 'HTTP 500: a', 'trailing whitespace of every kind \\s matched is still trimmed');
+});
+
 // ---------------------------------------------- replay of real sessions ----
 
 test('form (samples 381): values go out as the model delta of the SHOW roundtrip, the typed values stay on screen', async () => {

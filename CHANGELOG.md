@@ -249,6 +249,12 @@
   long, with empty rows the snapshot listed and the next delta sent as the
   edited row. It is re-applied as JSONModel#setProperty does now - only
   where its parent exists; the path stays pending, as in the frontend.
+- **A backend error body padded with whitespace no longer stalls the
+  server.** The refusal text trimmed its end with `/\s+$/`, which is
+  retried from every position of a whitespace run that is not at the end:
+  quadratic, 15 s of a blocked event loop for a body with 100k blanks and
+  100k newlines inside it. `trimEnd()` removes the same characters in
+  linear time.
 
 ## 1.0.0 - 2026-10-03
 
