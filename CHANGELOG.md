@@ -292,6 +292,15 @@
   it.** `row: ""`, `false` or `[]` acted on row 0 and `row: true` on row 1
   - a pick or a row action on a row nobody named. `row` is a non-negative
   integer now (a number, or a string of digits); anything else is refused.
+- **Catalogue rows, doc headings and view wires parse in linear time.**
+  Their patterns retried every split of a run of blanks between two `\s*`
+  (or a lazy group and `\s*$`): a SAMPLES.md row with 1000 blanks and no
+  sample link - a padded header row - blocked the server for 85 s in
+  `examples` (read from SAMPLES.md where no catalogue.json is), a heading line with 10k blanks took 0.4 s in
+  `docs_search`, and an `.eB(...)` attribute with a long run of blanks after
+  its parenthesis 14 s per 100k in the app tools. The rewrites match the
+  same lines and capture the same text; a test holds them to the old
+  patterns.
 
 ## 1.0.0 - 2026-10-03
 

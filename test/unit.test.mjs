@@ -5,12 +5,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { stripJsonc, LOCAL_BENIGN, benignRules, deployApp, removeApp } from '../lib/runtime.mjs';
 import { parseCapabilities, searchCapabilities } from '../lib/capabilities.mjs';
-import { parseExamples, searchExamples, catalogueEntries, CATALOGUES } from '../lib/examples.mjs';
+import { parseExamples, searchExamples, catalogueEntries, CATALOGUES, ROW } from '../lib/examples.mjs';
 import { CORPUS_DIRS, resolveLintConfig, viewCheckCandidates, SERVER_ROOT } from '../lib/repos.mjs';
 import { sliceCatalogue } from '../lib/pitfalls.mjs';
 import { sliceGuide, guideChapters } from '../lib/guide.mjs';
 import { parseApi, searchApi, apiSummary } from '../lib/api.mjs';
-import { searchDocs } from '../lib/docs.mjs';
+import { searchDocs, slicePage, headingText } from '../lib/docs.mjs';
 import { parseSizes } from '../lib/screenshot.mjs';
 import { oneOf, boundedInt, stringArray, checkStringArgs } from '../lib/args.mjs';
 import { readCached } from '../lib/cache.mjs';
@@ -2050,4 +2050,63 @@ test('setup.sh reuses every directory name lib/repo-dirs.json knows for the chec
     assert.ok(entry, `setup.sh clones ${dirs[0]}, which repo-dirs.json does not name`);
     assert.deepEqual(dirs, entry.dirs, `setup.sh's names for ${dirs[0]}`);
   }
+});
+
+// ------------------------------------- markdown parsers over runs of blanks ----
+
+/* The patterns these parsers used: a lazy group or a \s* in front of another
+ * \s* retried every split of a run of blanks - quadratic for a heading, cubic
+ * for a catalogue row ('| ' + 1000 blanks + '|' took 85 s). The rewrites must
+ * match the same lines and capture the same text. */
+const OLD_ROW = /^\|\s*(?:\*\*(?<title>[^*]+)\*\*\s*(?:(?:—|--)\s*)?)?(?<sub>[^|<]*?)\s*(?<blocks>(?:<br>(?:<[a-z]+>[^<]*<\/[a-z]+>|[^<]*))*)\s*\|\s*\[`(?<cls>[A-Z0-9_]+)`\]\((?<path>[^)]+)\)\s*\|/;
+const seeded = (seed) => (n) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
+const LS = String.fromCharCode(0x2028);
+
+test('the catalogue row pattern matches what the old one matched, with the same groups', () => {
+  const rnd = seeded(7);
+  const pick = (a) => a[rnd(a.length)];
+  const ws = () => pick(['', ' ', '  ', '\t', ' \r ', '   ']);
+  const part = () => pick(['', 'a', 'a b', 'x | y', 'a*b', 'a — b', '--x', '<x', '|']);
+  const block = () => pick(['<br>' + part(), `<br><sub>${part()}</sub>`, `<br><i>${part()}</i>`, '<br>', '<br><sub>docs: [a](b)</sub>', `<br>${part()} | [\`Z\`](z) `]);
+  const link = () => pick(['[`A`](p)', '[`A_1`](src/x.abap)', '[`a`](p)', '[`A`]()', '[`A`](p', 'A']);
+  const groups = (m) => m && { title: m.groups.title, sub: (m.groups.sub || '').trim(), blocks: m.groups.blocks, cls: m.groups.cls, path: m.groups.path, end: m[0].length };
+  let matched = 0;
+  for (let k = 0; k < 40000; k += 1) {
+    let s = '|' + ws() + (rnd(2) ? `**${part()}**${ws()}${pick(['', '— ', '-- ', '—', '--'])}${ws()}` : '') + part() + ws();
+    for (let b = rnd(4); b > 0; b -= 1) s += block() + ws();
+    s += pick(['|', '', ' |']) + ws() + link() + ws() + pick(['|', '', ' |', '| x |']) + pick(['', ' | [`B`](q) |', ' x']);
+    if (rnd(5) === 0) { const at = rnd(s.length); s = s.slice(0, at) + s.slice(at + 1 + rnd(3)); }
+    const old = groups(OLD_ROW.exec(s));
+    if (old) matched += 1;
+    assert.deepEqual(groups(ROW.exec(s)), old, JSON.stringify(s));
+  }
+  assert.ok(matched > 5000, `the generator makes rows that match (${matched})`);
+});
+
+test('headingText is the heading regex: same lines, same text', () => {
+  const rnd = seeded(11);
+  const toks = ['#', '#', '#', ' ', ' ', '\t', '\r', LS, 'a', 'b c', '*', '—', ' '];
+  for (let k = 0; k < 60000; k += 1) {
+    let s = '';
+    for (let n = rnd(10); n > 0; n -= 1) s += toks[rnd(toks.length)];
+    for (const [min, max] of [[1, 4], [2, 3]]) {
+      const m = new RegExp(`^#{${min},${max}}\\s+(.+?)\\s*$`).exec(s);
+      assert.equal(headingText(s, min, max), m ? m[1] : null, JSON.stringify(s));
+    }
+    const page = `${s}\n${toks[rnd(toks.length)]}\n# t`;
+    // slicePage hands the title to plain(): links, * and ` dropped, blanks folded
+    const old = (page.match(/^#\s+(.+?)\s*$/m) || [, ''])[1].trim().replace(/[*`]/g, '').replace(/\s+/g, ' ').trim();
+    assert.equal(slicePage(page).title, old, JSON.stringify(page));
+  }
+});
+
+test('catalogue rows and doc headings take linear time over a run of blanks', () => {
+  const blanks = ' '.repeat(100000);
+  const t0 = Date.now();
+  assert.deepEqual(parseExamples(`| ${blanks}|\n## a${blanks}b\n| **t** a${blanks}b |\n| **t** a<br>${blanks}| [\`X\`](p) x`), []);
+  const [row] = parseExamples(`## S${blanks}\n| **T** ${blanks}— s${blanks}<br>sum${blanks}| [\`Z_A\`](src/z_a.clas.abap)${blanks}|`);
+  assert.deepEqual([row.section, row.title, row.sub, row.summary, row.cls], ['S', 'T', 's', 'sum', 'Z_A']);
+  const page = slicePage(`# a${blanks}b\n## c${blanks}\r${blanks}\n#${blanks}`);
+  assert.equal(page.title, `a b`);
+  assert.ok(Date.now() - t0 < 2000, `took ${Date.now() - t0} ms`);
 });

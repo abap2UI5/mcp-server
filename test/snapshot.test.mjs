@@ -98,6 +98,17 @@ test('parseWire reads eB, eBP and eF handlers and describes every argument kind'
   assert.deepEqual(describeArg("'a\\'b'"), { static: true, value: "a'b" });
 });
 
+test('parseWire takes linear time over a run of blanks after a parenthesis, and still takes one semicolon', () => {
+  // \)\s*;?\s*$ retried both \s* splits of the run after every ')'
+  const blanks = ' '.repeat(100000);
+  const t0 = Date.now();
+  assert.equal(parseWire(`.eB(['X'])${blanks}x`), null);
+  assert.equal(parseWire(`.eB(['X']${') '.repeat(50000)}x`), null);
+  assert.ok(Date.now() - t0 < 1000, `took ${Date.now() - t0} ms`);
+  for (const ok of [".eB(['X'])", ".eB(['X']);", ".eB(['X']) \t;", ` .eB(['X'])${blanks};${blanks}`, ".eB(['X'], 'a)') ;"]) assert.equal(parseWire(ok)?.event, 'X', JSON.stringify(ok.slice(0, 30)));
+  for (const no of [".eB(['X']);;", ".eB(['X']) ; ;", ".eB(['X'])x", ".eB(['X']) ;x"]) assert.equal(parseWire(no), null, no);
+});
+
 test('nameOfPath derives the ABAP-ish name, without the old /XX/ two-way prefix', () => {
   assert.equal(nameOfPath('/MS_HEAD/KUNNR'), 'MS_HEAD-KUNNR');
   assert.equal(nameOfPath('/XX/MS_HEAD/KUNNR'), 'MS_HEAD-KUNNR');
