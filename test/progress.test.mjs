@@ -261,3 +261,93 @@ test('build_backend sends no progress notifications without a progressToken', as
     fs.rmSync(base, { recursive: true, force: true });
   }
 });
+
+/* verify_app hands its one request context to every stage's handler, and
+ * each stage made a progress reporter of its own, counting from zero: the
+ * progress of the ONE progressToken went 1, 3 (the deploy lint's marks), then
+ * 1 again (the build). The MCP spec: the value MUST increase with each
+ * notification. A2UI5_HOME points nowhere, so auto is the corpus' full build
+ * (the fake below), and no linter skips the validate stage. */
+test('verify_app\'s progress increases across its stages', { skip: process.platform === 'win32' && 'needs a POSIX shell on PATH' }, async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-verifyprog-'));
+  const demokit = path.join(base, 'ai-demokit');
+  fs.mkdirSync(path.join(demokit, 'scripts'), { recursive: true });
+  fs.writeFileSync(
+    path.join(demokit, 'scripts', 'e2e-build.mjs'),
+    `let n = 0;
+     const iv = setInterval(() => {
+       console.log('transpiling step ' + ++n);
+       if (n >= 8) { clearInterval(iv); process.exit(0); }
+     }, 300);`,
+  );
+  fs.writeFileSync(path.join(demokit, 'abaplint.jsonc'), '{ "global": { "exclude": [] }, "rules": {} }');
+  const cli = path.join(demokit, 'node_modules', '@abaplint', 'cli');
+  fs.mkdirSync(cli, { recursive: true });
+  fs.writeFileSync(path.join(cli, 'package.json'), JSON.stringify({ name: '@abaplint/cli', bin: { abaplint: './abaplint' } }));
+  fs.writeFileSync(path.join(cli, 'abaplint'), 'process.stdout.write("[]\\n");');
+
+  const p = spawn('node', [path.join(ROOT, 'server.mjs')], {
+    stdio: ['pipe', 'pipe', 'ignore'],
+    env: {
+      ...process.env,
+      AI_DEMOKIT_HOME: demokit,
+      SAMPLES_CONTROLS_HOME: '',
+      A2UI5_HOME: path.join(base, 'no-framework'),
+      AI_VIEW_CHECK_HOME: path.join(base, 'no-linter'),
+      A2UI5_MCP_SCREENSHOT_DIR: path.join(base, 'shots'),
+      A2UI5_MCP_REMOTE: '0',
+    },
+  });
+  let buf = '';
+  p.stdout.on('data', (d) => (buf += d));
+  const msgs = () => buf.split('\n').filter(Boolean).map((l) => {
+    try {
+      return JSON.parse(l);
+    } catch {
+      return null;
+    }
+  }).filter(Boolean);
+  const send = (o) => p.stdin.write(JSON.stringify(o) + '\n');
+  const until = (pred, ms = 20000) =>
+    new Promise((res, rej) => {
+      const t0 = Date.now();
+      const iv = setInterval(() => {
+        const hit = msgs().find(pred);
+        if (hit) {
+          clearInterval(iv);
+          res(hit);
+        } else if (Date.now() - t0 > ms) {
+          clearInterval(iv);
+          rej(new Error(`timeout; got: ${buf.slice(-500)}`));
+        }
+      }, 50);
+    });
+
+  try {
+    send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'verify-progress', version: '0' } } });
+    await until((m) => m.id === 1);
+    send({
+      jsonrpc: '2.0', id: 2, method: 'tools/call',
+      params: {
+        name: 'verify_app',
+        arguments: {
+          class_name: 'zcl_prog_app', boot: false,
+          abap_source: 'CLASS zcl_prog_app DEFINITION PUBLIC. PUBLIC SECTION. INTERFACES z2ui5_if_app. ENDCLASS. CLASS zcl_prog_app IMPLEMENTATION. ENDCLASS.',
+        },
+        _meta: { progressToken: 'tok-verify' },
+      },
+    });
+    const done = await until((m) => m.id === 2);
+    assert.ok(!done.result.isError, `verify_app must pass: ${JSON.stringify(done.result).slice(0, 800)}`);
+    const progress = msgs().filter((m) => m.method === 'notifications/progress').map((m) => m.params);
+    assert.ok(progress.some((n) => /abaplint/.test(n.message)), 'the deploy stage reported');
+    assert.ok(progress.some((n) => /transpiling step/.test(n.message)), 'the build stage reported');
+    for (let i = 1; i < progress.length; i += 1) {
+      assert.ok(progress[i].progress > progress[i - 1].progress,
+        `progress must increase: ${progress.map((n) => n.progress).join(', ')}`);
+    }
+  } finally {
+    p.kill();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});

@@ -145,6 +145,12 @@
   fill's own timeout on top (40 s at the default 10 s, whatever the
   argument said). The look runs within the action's timeout now, and an
   element that never appears fails the action there.
+- **`verify_app`'s progress only goes up.** Each stage made its own
+  progress reporter for the one request, counting from zero, so the
+  notifications of one `progressToken` went 1, 3 (the deploy lint), then 1
+  again (the build) - the MCP spec says the value MUST increase with each
+  notification. The counter (and the one-per-second throttle) belongs to
+  the request now.
 
 ## 1.0.0 - 2026-10-03
 

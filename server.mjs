@@ -166,23 +166,34 @@ async function hydrateRepos(keys) {
  * message and the number of lines seen so far as the (open-ended) progress
  * counter. Only wired up when the client asked for progress by sending a
  * progressToken (the MCP contract); notification failures never fail the
- * build. */
-function progressReporter({ progressToken, sendNotification }) {
+ * build.
+ *
+ * The counter belongs to the REQUEST, not to the reporter: verify_app hands
+ * its one ctx to every stage's handler, and each stage makes a reporter of
+ * its own - with a counter per reporter the progress of one progressToken
+ * went 1, 3 (the deploy lint), then 1 again (the build), and the spec says
+ * the value MUST increase with each notification. */
+const progressCounters = new WeakMap();
+function progressReporter(ctx) {
+  const { progressToken, sendNotification } = ctx;
   if (progressToken === undefined || progressToken === null || !sendNotification) return undefined;
-  let lines = 0;
-  let lastSent = 0;
+  let state = progressCounters.get(ctx);
+  if (!state) {
+    state = { lines: 0, lastSent: 0 };
+    progressCounters.set(ctx, state);
+  }
   // `force` skips the throttle for the milestones a caller must not lose -
   // the start/end marks around a phase, which are the whole progress story
   // for a child that prints little (abaplint answers in one JSON blob)
   return (line, force = false) => {
-    lines += 1;
+    state.lines += 1;
     const now = Date.now();
-    if (!force && now - lastSent < 1000) return;
-    lastSent = now;
+    if (!force && now - state.lastSent < 1000) return;
+    state.lastSent = now;
     Promise.resolve(
       sendNotification({
         method: 'notifications/progress',
-        params: { progressToken, progress: lines, message: String(line).slice(0, 300) },
+        params: { progressToken, progress: state.lines, message: String(line).slice(0, 300) },
       }),
     ).catch(() => {});
   };
