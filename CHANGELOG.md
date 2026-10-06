@@ -93,6 +93,13 @@
   "false" }` booted. `screenshot_view`'s `model` as a string was spread into
   the derived model one character per key. Refused by name now, like a
   string argument that is not a string.
+- **`run_app` / `interact_app` recover from a Chromium that went away.** The
+  browser was kept for the server's whole life: one that crashed or was
+  killed was handed out again, and every later call failed on "browser has
+  been closed" until the server was restarted; a launch that failed (no
+  Chromium installed yet) stayed the answer after the install. A
+  disconnected browser and a failed launch now clear the slot, and the next
+  call launches afresh.
 
 ## 1.0.0 - 2026-10-03
 

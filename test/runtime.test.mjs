@@ -467,3 +467,36 @@ test('a failed open-abap-core clone in the incremental build is a reported, logg
     fs.rmSync(bin, { recursive: true, force: true });
   }
 });
+
+// ------------------------------------------------------------- getBrowser ----
+
+/* run_app's Chromium was cached for the server's life: one that crashed was
+ * handed out again (every later run_app failed on "browser has been
+ * closed" until a restart), and a failed launch stayed the answer after the
+ * browser had been installed. Both clear the slot now. */
+test('getBrowser launches afresh after a failed launch and after a disconnect', async () => {
+  const { getBrowser, closeBrowser } = await import('../lib/runtime.mjs');
+  const { EventEmitter } = await import('node:events');
+  await closeBrowser();
+  const fake = () => {
+    const b = new EventEmitter();
+    b.connected = true;
+    b.isConnected = () => b.connected;
+    b.close = async () => { b.connected = false; b.emit('disconnected'); };
+    return b;
+  };
+  let launches = 0;
+  await assert.rejects(getBrowser({ launch: async () => { launches += 1; throw new Error('no chromium'); } }), /no chromium/);
+  const first = await getBrowser({ launch: async () => { launches += 1; return fake(); } });
+  assert.equal(launches, 2, 'a failed launch is not the answer for good');
+  assert.equal(await getBrowser({ launch: async () => { launches += 1; return fake(); } }), first, 'a live browser is shared');
+  assert.equal(launches, 2);
+  // the browser goes away under the server (a crash, an OOM kill)
+  first.connected = false;
+  first.emit('disconnected');
+  const second = await getBrowser({ launch: async () => { launches += 1; return fake(); } });
+  assert.notEqual(second, first, 'a dead browser is not handed out again');
+  assert.equal(launches, 3);
+  await closeBrowser();
+  assert.equal(second.connected, false);
+});
