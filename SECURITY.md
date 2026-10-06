@@ -31,7 +31,10 @@ Worth knowing before assessing a report:
   page on the machine, though, so the npm host also answers only requests
   addressed to `127.0.0.1`, `localhost` or `[::1]` (the `Host` header) and,
   when they carry an `Origin`, sent from a page there - a page cannot drive
-  or read the dev apps through DNS rebinding. A framework checkout's
+  or read the dev apps through DNS rebinding. The server's own clients of
+  that backend (the start's port wait, `run_app`'s Chromium, the app tools)
+  connect to `127.0.0.1` itself, never to the name `localhost`, which can
+  resolve to `::1` - a port another local user may hold. A framework checkout's
   `express.mjs` checks neither header; that check belongs to the framework.
 - **A default directory under the shared temp dir is used only when it is
   the user's own.** The GitHub mirror's default base,

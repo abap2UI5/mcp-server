@@ -383,6 +383,16 @@
   `127.0.0.1`, `localhost` or `[::1]` and, when they carry an `Origin`, sent
   from a page on one of those - run_app's Chromium and the app tools are;
   anything else gets a 403.
+- **The server reaches its own backend at 127.0.0.1, never at `localhost`.**
+  The backend binds 127.0.0.1, but run_app's and interact_app's Chromium
+  opened `http://localhost:<port>`, the start waited for the port at Node's
+  default host (`localhost`) and the page's backend errors were picked out
+  by the name `localhost`. Where that name resolves to `::1` first, those
+  connections reached `[::1]:<port>` - which another local user can listen
+  on, serving the page and answering the start - or nothing at all. All of
+  them use `BACKEND_HOST` now (`appStartUrl`, `waitPort`, `isBackendUrl`,
+  `backendBaseUrl`); the npm host's Host/Origin guard accepts what the
+  Chromium sends from that address.
 
 ## 1.0.0 - 2026-10-03
 

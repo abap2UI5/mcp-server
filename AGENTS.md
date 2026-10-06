@@ -287,7 +287,13 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
   one), serves on 127.0.0.1 - and only requests addressed to a loopback
   name (Host `127.0.0.1`, `localhost`, `[::1]`) from no page or a loopback
   one (Origin), a 403 otherwise, so a browser page cannot reach it through
-  DNS rebinding (`loopbackRequest`) - prints a banner (release, dev modules,
+  DNS rebinding (`loopbackRequest`). Every client of the backend here -
+  the start's port wait, run_app's and interact_app's Chromium, the app
+  tools - connects to that bound address, `BACKEND_HOST` in
+  `lib/runtime.mjs`, and never to the name `localhost`, which can resolve
+  to `::1` first (another local user's port, or none);
+  `test/runtime.test.mjs` fails on a `localhost` in the code of
+  `server.mjs`, `lib/` or `scripts/`. It prints a banner (release, dev modules,
   accelerate, compression - `backend status` shows it) and the "Listening
   on" the start waits for. Start, stop, port and orphan handling are the
   checkout's, unchanged.

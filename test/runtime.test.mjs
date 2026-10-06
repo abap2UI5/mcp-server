@@ -547,3 +547,75 @@ test('getBrowser launches afresh after a failed launch and after a disconnect', 
   await closeBrowser();
   assert.equal(second.connected, false);
 });
+
+/* The backend binds 127.0.0.1, and its clients asked for the NAME localhost:
+ * run_app's page.goto, the start's port wait (http.get's default host) and
+ * the check that picks the backend's responses out of the page's. Where
+ * localhost resolves to ::1 first, those reached [::1]:<port> - a port
+ * another local user can listen on - or nothing at all. Every client path
+ * uses BACKEND_HOST now, and the npm host's Host/Origin guard still lets
+ * run_app's Chromium in at that address. */
+test('every client of the backend connects to the address it binds, never to the name localhost', async () => {
+  const { BACKEND_HOST, PORT, appStartUrl, backendBaseUrl, isBackendUrl, waitPort } = await import('../lib/runtime.mjs');
+  const { loopbackRequest } = await import('../lib/npm-host.mjs');
+  const http = await import('node:http');
+  const { EventEmitter } = await import('node:events');
+  assert.equal(BACKEND_HOST, '127.0.0.1');
+
+  const start = new URL(appStartUrl('ZCL_APP', 4567));
+  assert.equal(start.hostname, BACKEND_HOST, 'run_app\'s Chromium opens the bound address');
+  assert.equal(start.port, '4567');
+  assert.equal(start.search, '?app_start=ZCL_APP');
+  assert.equal(new URL(backendBaseUrl()).hostname, BACKEND_HOST, 'the app tools post to the bound address');
+  assert.equal(new URL(backendBaseUrl()).port, String(PORT));
+
+  assert.equal(isBackendUrl(`http://127.0.0.1:${PORT}/?app_start=ZCL_APP`), true);
+  assert.equal(isBackendUrl(`http://localhost:${PORT}/`), false, 'a localhost page is not the backend the page was opened on');
+  assert.equal(isBackendUrl(`http://127.0.0.1:${PORT + 1}/`), false);
+  assert.equal(isBackendUrl('https://sdk.openui5.org/resources/sap-ui-core.js'), false);
+  assert.equal(isBackendUrl('not a url'), false);
+
+  // what run_app's Chromium sends from that page passes the npm host's guard
+  const page = new URL(appStartUrl('ZCL_APP'));
+  assert.equal(loopbackRequest({ host: page.host, origin: page.origin }), true);
+  assert.equal(loopbackRequest({ host: page.host }), true);
+
+  // the port wait asks the bound address, not http.get's default (localhost)
+  const asked = [];
+  const fakeGet = (opts, onResponse) => {
+    asked.push(opts);
+    const req = new EventEmitter();
+    req.destroy = () => {};
+    setImmediate(() => onResponse({ destroy() {} }));
+    return req;
+  };
+  await waitPort(4567, 1000, { get: fakeGet });
+  assert.equal(asked.length, 1);
+  assert.equal(asked[0].host, BACKEND_HOST);
+  assert.equal(asked[0].port, 4567);
+
+  // and against a real server bound to 127.0.0.1 alone, as the backend is
+  const srv = http.createServer((q, r) => r.end('ok'));
+  await new Promise((r) => srv.listen(0, BACKEND_HOST, r));
+  try {
+    await waitPort(srv.address().port, 5000);
+  } finally {
+    await new Promise((r) => srv.close(r));
+  }
+
+  // no client path names localhost for its own backend: the code (comments
+  // aside) of the server, lib/ and scripts/ - the npm host's list of the
+  // names it ACCEPTS is the server side and stays
+  const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+  const files = ['server.mjs',
+    ...fs.readdirSync(path.join(repo, 'lib')).filter((f) => f.endsWith('.mjs') && f !== 'npm-host.mjs').map((f) => `lib/${f}`),
+    ...fs.readdirSync(path.join(repo, 'scripts')).filter((f) => f.endsWith('.mjs')).map((f) => `scripts/${f}`)];
+  for (const rel of files) {
+    const code = fs.readFileSync(path.join(repo, rel), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n')
+      .filter((l) => !/^\s*\/\//.test(l));
+    const hit = code.findIndex((l) => /localhost/i.test(l));
+    assert.equal(hit, -1, `${rel} names localhost in code: ${code[hit]}`);
+  }
+});

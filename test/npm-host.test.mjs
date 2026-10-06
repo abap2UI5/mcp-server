@@ -146,7 +146,8 @@ test('the host refuses a request addressed to another name or sent from another 
     });
     try {
       assert.equal(await ask({}), 200, 'the app tools: Host 127.0.0.1, no Origin');
-      assert.equal(await ask({ Host: `localhost:${port}`, Origin: `http://localhost:${port}` }), 200, 'run_app\'s Chromium');
+      assert.equal(await ask({ Host: `127.0.0.1:${port}`, Origin: `http://127.0.0.1:${port}` }), 200, 'run_app\'s Chromium (BACKEND_HOST)');
+      assert.equal(await ask({ Host: `localhost:${port}`, Origin: `http://localhost:${port}` }), 200, 'a page the user opens at localhost');
       assert.equal(await ask({ Host: `rebound.example:${port}` }), 403, 'a rebound name');
       assert.equal(await ask({ Origin: 'http://evil.example' }), 403, 'a page of another site');
       assert.equal(await ask({ Origin: 'null' }), 403, 'a sandboxed frame or a file: page');
