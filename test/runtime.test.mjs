@@ -406,3 +406,42 @@ test('a checkout without its own abaplint/transpiler install is reported, never 
     fs.rmSync(base, { recursive: true, force: true });
   }
 });
+
+/* The incremental build clones open-abap-core when the checkout has no copy.
+ * That clone was an execFileSync: the stdio server froze for its length, a
+ * cancel could not stop it, and a failed clone THREW out of buildBackend -
+ * a rejected build instead of a report, with no build_log record. */
+test('a failed open-abap-core clone in the incremental build is a reported, logged failure', { skip: process.platform === 'win32' && 'needs a POSIX shell on PATH' }, async () => {
+  const shots = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-shots-'));
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-gitbin-'));
+  fs.writeFileSync(path.join(bin, 'git'), '#!/bin/sh\necho "fatal: unable to access open-abap-core" >&2\nexit 128\n');
+  fs.chmodSync(path.join(bin, 'git'), 0o755);
+  try {
+    await withFakeRepos('', { A2UI5_MCP_SCREENSHOT_DIR: shots, PATH: `${bin}${path.delimiter}${process.env.PATH}` }, async ({ a2 }) => {
+      fs.mkdirSync(path.join(a2, 'node/downport'), { recursive: true });
+      fs.mkdirSync(path.join(a2, 'node/output'), { recursive: true });
+      fs.writeFileSync(path.join(a2, 'node/output/init.mjs'), '');
+      fs.mkdirSync(path.join(a2, 'node/setup'), { recursive: true });
+      fs.writeFileSync(path.join(a2, 'node/setup/abap_transpile.json'), JSON.stringify({ libs: [{ url: 'https://github.com/open-abap/open-abap-core' }] }));
+      const cli = path.join(a2, 'node_modules', '@abaplint', 'transpiler-cli');
+      fs.mkdirSync(cli, { recursive: true });
+      fs.writeFileSync(path.join(cli, 'package.json'), JSON.stringify({ name: '@abaplint/transpiler-cli', bin: { abap_transpile: './t.js' } }));
+      fs.writeFileSync(path.join(cli, 't.js'), 'process.exit(0);');
+      const { buildLog } = await import('../lib/runtime.mjs');
+      const res = await buildBackend({ mode: 'incremental' });
+      assert.equal(res.ok, false);
+      assert.equal(res.code, 128);
+      assert.match(res.tail, /git clone open-abap-core exited 128/);
+      assert.match(res.tail, /unable to access/);
+      const log = buildLog({ tail: 50 });
+      assert.equal(log.mode, 'incremental');
+      assert.equal(log.ok, false);
+      assert.ok(log.lines.some((l) => /exited 128/.test(l)), 'the failure is in build_log');
+      assert.equal(fs.existsSync(path.join(a2, 'node/open-abap-core')), false, 'no half clone left for the next build');
+      assert.equal(fs.existsSync(path.join(a2, 'e2e-transpile.json')), false);
+    });
+  } finally {
+    fs.rmSync(shots, { recursive: true, force: true });
+    fs.rmSync(bin, { recursive: true, force: true });
+  }
+});

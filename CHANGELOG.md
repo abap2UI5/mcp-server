@@ -53,6 +53,13 @@
   (`locals_imp`, `locals_def`, `macros`) that `migrate_report { deploy:
   true }` writes - the class disappeared from the deployed-apps list while
   its includes stayed in the next build's input.
+- **The incremental build no longer clones open-abap-core synchronously.**
+  The `git clone` (and the corpus' patch script) ran through
+  `execFileSync`: the stdio server answered nothing for the length of the
+  clone, a cancel or the shutdown could not stop it, and a failed clone
+  threw out of `build_backend` without a `build_log` record. Both steps are
+  spawned like every other child now - cancellable, killed with their tree,
+  reported and logged; a failed step takes the half clone with it.
 
 ## 1.0.0 - 2026-10-03
 
