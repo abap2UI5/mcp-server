@@ -156,7 +156,8 @@ via the committed [`.mcp.json`](.mcp.json); the
 `docs_search`, `scaffold_app`, `generation_rules`) read committed files, so
 when no checkout resolves and no env var is set they read them from GitHub
 instead: the files land in a per-user cache (`<tmp>/abap2ui5-mcp-remote`, a
-day at a time) that the server treats as a read-only checkout; `add_agent_setup`
+day at a time - used only while it is a directory of the user's own, created
+0700; `A2UI5_MCP_REMOTE_DIR` moves it) that the server treats as a read-only checkout; `add_agent_setup`
 reads the template from there too, and writes only into the project it is
 given. And the
 expensive half runs on the npm package `@abap2ui5/node-runtime` (below), so

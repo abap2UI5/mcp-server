@@ -12,6 +12,7 @@ import {
   mirrorFresh, remoteStatus, lastHydrate, resetRemote, REMOTE_FILES, REMOTE_TOOLS, resourceRepos, MARKER,
 } from '../lib/remote.mjs';
 import { resolveKey, REPO_DIRS } from '../lib/repos.mjs';
+import { privateDirProblem } from '../lib/private-dir.mjs';
 import { TOOL_NAMES } from '../lib/tools.mjs';
 import { RESOURCE_URIS } from '../lib/resources.mjs';
 
@@ -322,5 +323,72 @@ test('a template.json entry that escapes the repository refuses the whole mirror
     assert.ok(!impl.calls.some((u) => u.endsWith('escaped.txt')), 'the bad entry is not even fetched');
     assert.ok(!fs.existsSync(path.join(dir, 'escaped.txt')) && !fs.existsSync(path.join(path.dirname(dir), 'escaped.txt')));
     assert.ok(!isRemoteCheckout(remoteRoot('appTemplate')), 'no half mirror either');
+  }
+}));
+
+/* The default base is <tmp>/abap2ui5-mcp-remote - on Linux under /tmp, which
+ * every local user can write. Another user who made that name first (or
+ * linked it) decided what every knowledge tool served, and add_agent_setup
+ * wrote the files of their template.json into the user's project. TMPDIR
+ * points os.tmpdir() at a directory of this test's own, so nothing here
+ * touches the real shared temp dir. */
+const POSIX = process.platform !== 'win32';
+test('the default mirror base is used only when it is this user\'s own directory', { skip: !POSIX && 'POSIX modes and links' }, withEnv(async (t, dir) => {
+  const savedTmp = process.env.TMPDIR;
+  delete process.env.A2UI5_MCP_REMOTE_DIR;
+  process.env.TMPDIR = dir;
+  try {
+    assert.equal(os.tmpdir(), dir);
+    const base = path.join(dir, 'abap2ui5-mcp-remote');
+    // what another user would plant: a fresh template mirror behind a link
+    const planted = path.join(dir, 'theirs');
+    const tpl = path.join(planted, REPO_DIRS.appTemplate.dirs[0]);
+    fs.mkdirSync(tpl, { recursive: true });
+    fs.writeFileSync(path.join(tpl, 'template.json'), JSON.stringify({ files: { shared: ['.claude/settings.json'] } }));
+    fs.writeFileSync(path.join(tpl, MARKER), JSON.stringify({ fetchedAt: new Date().toISOString(), files: ['template.json'] }));
+    fs.symlinkSync(planted, base);
+    assert.equal(remoteRoot('appTemplate'), path.join(base, REPO_DIRS.appTemplate.dirs[0]));
+    const local = resolveKey('appTemplate', { local: true });
+    if (!local) assert.equal(resolveKey('appTemplate'), null, 'a linked base is no mirror');
+    const impl = fakeFetch({ '/template.json': '{"files":{}}' });
+    const res = await hydrate('appTemplate', { local: null, fetchImpl: impl });
+    assert.equal(res.root, null);
+    assert.match(res.error, /symbolic link/);
+    assert.match(remoteStatus('appTemplate'), /A2UI5_MCP_REMOTE_DIR/);
+    assert.equal(impl.calls.length, 0, 'nothing fetched, nothing written through the link');
+    await assert.rejects(fetchRemoteFile('appTemplate', 'README.md', { fetchImpl: impl }), /symbolic link/);
+    assert.deepEqual(fs.readdirSync(tpl).sort(), [MARKER, 'template.json'].sort());
+
+    // a real directory everybody can write is refused the same way
+    fs.unlinkSync(base);
+    fs.mkdirSync(base);
+    fs.chmodSync(base, 0o777);
+    fs.cpSync(tpl, path.join(base, REPO_DIRS.appTemplate.dirs[0]), { recursive: true });
+    resetRemote();
+    if (!local) assert.equal(resolveKey('appTemplate'), null, 'a world-writable base is no mirror');
+    assert.match((await hydrate('appTemplate', { local: null, fetchImpl: impl })).error, /writable by every user/);
+
+    // absent, it is created 0700 and used; one of ours readable by others is narrowed
+    fs.rmSync(base, { recursive: true, force: true });
+    resetRemote();
+    const spec = { files: { shared: ['package.json'], named: [] } };
+    const ok = await hydrate('appTemplate', { local: null, fetchImpl: fakeFetch({ '/template.json': JSON.stringify(spec), '/package.json': '{}' }) });
+    assert.equal(ok.fetched, true, ok.error);
+    assert.equal(fs.statSync(base).mode & 0o777, 0o700);
+    fs.chmodSync(base, 0o755);
+    assert.equal(privateDirProblem(base), null);
+    assert.equal(fs.statSync(base).mode & 0o777, 0o700);
+    // owned by somebody else (the uid is a parameter: no test can chown)
+    assert.match(privateDirProblem(base, { uid: fs.statSync(base).uid + 1 }), /belongs to another user/);
+    // an absent directory is nothing to distrust; a file is no directory
+    assert.equal(privateDirProblem(path.join(dir, 'absent')), null);
+    fs.writeFileSync(path.join(dir, 'file'), '');
+    assert.match(privateDirProblem(path.join(dir, 'file')), /not a directory/);
+    // a base the user names is the user's choice
+    process.env.A2UI5_MCP_REMOTE_DIR = planted;
+    assert.equal(remoteRoot('appTemplate'), tpl);
+  } finally {
+    if (savedTmp === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = savedTmp;
   }
 }));

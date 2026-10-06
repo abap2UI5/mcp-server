@@ -833,7 +833,11 @@ agent) find these artifacts in a dirty sibling worktree, mcp-server caused them:
 - `<tmp>/abap2ui5-mcp-remote/<repo>/` — the read-only GitHub mirrors (not a
   sibling worktree, but the same question "where did this come from": a
   directory that carries `.abap2ui5-mirror.json` is one, and deleting it is
-  always safe).
+  always safe). The default base is under the shared temp dir by a fixed
+  name, so it is read and written only while it is a real directory of the
+  user's own that nobody else can write - created 0700, refused with the
+  reason otherwise (`remoteBaseProblem`, `lib/private-dir.mjs`); a base
+  `A2UI5_MCP_REMOTE_DIR` names is not checked.
 
 `<samples-controls>/.abaplint-mcp-dev.jsonc` (the patched lint config for
 deployed dev apps, gitignored there) used to be on that list and is not any

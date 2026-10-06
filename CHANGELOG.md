@@ -336,6 +336,18 @@
   before `../popups` - the server takes `.deps/popups`, `../popups`, then
   `build/popups`. RELEASING.md's tarball list now names the `abap2ui5-unit`
   script and `action.yml` it ships. A test holds the three to the code.
+- **Security: the GitHub mirror's default base must be the user's own.**
+  `<tmp>/abap2ui5-mcp-remote` has a fixed name under the temp dir - `/tmp` on
+  Linux, writable by every local user - and the server took whatever it
+  found there. Another user who created the directory first, or a symbolic
+  link of that name, decided what the knowledge tools served (the guide the
+  agent follows, a `template.json` whose files `add_agent_setup` writes into
+  the user's project), and the mirror's writes and the removals a refresh
+  makes followed the link into the user's own files. The default base is now
+  used only while it is a real directory owned by the user and writable by
+  nobody else: it is created 0700, one of the user's own that others can
+  read is narrowed to 0700, and anything else is refused with the reason and
+  `A2UI5_MCP_REMOTE_DIR` (which stays unchecked) as the way out.
 
 ## 1.0.0 - 2026-10-03
 
