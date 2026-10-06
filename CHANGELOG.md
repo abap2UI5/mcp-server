@@ -270,6 +270,12 @@
   never written by `setAt`; docs/agent-snapshot.md says so. The copies the
   VS Code extension and abap2UI5/protocol vendor pick it up with their next
   re-vendor.
+- **An element named `__proto__` no longer breaks the agent snapshot.** The
+  control tables were looked up by plain index, so a table cell or list
+  item element named `__proto__` (or `__defineGetter__`) found
+  `Object.prototype` and was read as a field spec without properties - a
+  TypeError, and `app_start` / `app_describe` / `app_act` failed for that
+  screen. Only the tables' own keys are read now.
 
 ## 1.0.0 - 2026-10-03
 

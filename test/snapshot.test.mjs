@@ -582,3 +582,18 @@ test('selection dialogs: multiSelect is Multi, a bound selected is the selection
   assert.deepEqual(s.actions.map((a) => `${a.event}:${a.scope}:${a.table || ''}:${a.label}`), ['OK:row:t1:Pick: confirm', 'NO:screen::Pick: cancel']);
   assert.equal(s.title, 'T', 'on the page, the page titles the layer');
 });
+
+test('an element named like an Object.prototype member is a custom control, not a spec the snapshot trips over', () => {
+  // lookupSpec read FIELD_SPECS['__proto__'] - Object.prototype, a "spec" without props: a TypeError out of the snapshot
+  for (const tag of ['__proto__', '__defineGetter__']) {
+    const s = buildSnapshot({
+      response: respond(view(
+        `<Table items="{/T}"><items><ColumnListItem><cells><${tag} xmlns="" text="{Q}"/><Input value="{R}"/></cells></ColumnListItem></items></Table>`
+        + `<List items="{/T}"><CustomListItem><${tag} xmlns="" text="{Q}"/></CustomListItem></List>`,
+      ), { T: [{ Q: 1, R: 'r' }] }),
+    });
+    assert.deepEqual(s.tables[0].columns.map((c) => c.name), ['Q', 'R'], tag);
+    assert.deepEqual(s.tables[0].editableCells, ['R'], `${tag}: no editable cell for an element that is no input`);
+    assert.deepEqual(s.tables[1].rows, [{ Q: 1 }]);
+  }
+});
