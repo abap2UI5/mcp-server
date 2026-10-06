@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   hydrate, fetchRemoteFile, safeRelPath, isRemoteCheckout, readMarker, remoteRoot, remoteEnabled,
-  mirrorFresh, remoteStatus, lastHydrate, resetRemote, REMOTE_FILES, REMOTE_TOOLS, resourceRepos, MARKER,
+  mirrorFresh, remoteStatus, lastHydrate, resetRemote, REMOTE_FILES, REMOTE_TOOLS, resourceRepos, MARKER, TEXT_MAX_BYTES,
 } from '../lib/remote.mjs';
 import { resolveKey, REPO_DIRS } from '../lib/repos.mjs';
 import { privateDirProblem } from '../lib/private-dir.mjs';
@@ -391,4 +391,67 @@ test('the default mirror base is used only when it is this user\'s own directory
     if (savedTmp === undefined) delete process.env.TMPDIR;
     else process.env.TMPDIR = savedTmp;
   }
+}));
+
+/* A response stream of `total` bytes in 1 MB chunks of `fill`, made as they
+ * are pulled - `pulled()` says how much the reader asked for, `cancelled()`
+ * whether it let go of the rest. */
+function bigBody(total, { fill = 0x61 } = {}) {
+  let sent = 0;
+  let cancelled = false;
+  const stream = new ReadableStream({
+    pull(c) {
+      if (sent >= total) return c.close();
+      const n = Math.min(1048576, total - sent);
+      sent += n;
+      c.enqueue(new Uint8Array(n).fill(fill));
+    },
+    cancel() {
+      cancelled = true;
+    },
+  }, { highWaterMark: 0 });
+  return { stream, pulled: () => sent, cancelled: () => cancelled };
+}
+
+/* fetchText had timeouts and no size limit: a proxy or mirror answering a
+ * file with a huge or endless body filled the server's memory before the
+ * 20 s were up. It reads up to TEXT_MAX_BYTES (8 MB, over twenty times the
+ * largest file a mirror carries) and stops there, by URL. */
+test('a GitHub answer over the text cap is cut at the cap and reported, one under it is read whole', withEnv(async () => {
+  assert.equal(TEXT_MAX_BYTES, 8 * 1024 * 1024);
+  const big = bigBody(64 * 1048576);
+  await assert.rejects(
+    fetchRemoteFile('samples', 'src/zcl_big.clas.abap', { fetchImpl: async () => new Response(big.stream) }),
+    (e) => /could not fetch abap2UI5\/samples\/src\/zcl_big\.clas\.abap/.test(e.message) && /larger than 8 MB - stopped reading/.test(e.message),
+  );
+  assert.ok(big.pulled() <= TEXT_MAX_BYTES + 2 * 1048576, `read ${big.pulled()} bytes of an oversized answer`);
+  assert.equal(big.cancelled(), true, 'the rest of the answer is let go');
+  assert.equal(fs.existsSync(path.join(remoteRoot('samples'), 'src/zcl_big.clas.abap')), false, 'nothing is written');
+
+  // declared too large: refused before a byte is read
+  const declared = bigBody(1024);
+  await assert.rejects(
+    fetchRemoteFile('samples', 'src/zcl_decl.clas.abap', {
+      fetchImpl: async () => new Response(declared.stream, { headers: { 'content-length': String(100 * 1048576) } }),
+    }),
+    /larger than 8 MB/,
+  );
+  assert.equal(declared.pulled(), 0);
+
+  // under the cap: read whole and decoded as text() decodes, a character
+  // split across two chunks included
+  const bytes = Buffer.from('\ufeffCLASS zcl_ok \u00e4\u00f6\u00fc.', 'utf8');
+  const split = new ReadableStream({
+    start(c) {
+      c.enqueue(new Uint8Array(bytes.subarray(0, 17)));
+      c.enqueue(new Uint8Array(bytes.subarray(17)));
+      c.close();
+    },
+  });
+  const at = await fetchRemoteFile('samples', 'src/zcl_ok.clas.abap', { fetchImpl: async () => new Response(split) });
+  assert.equal(fs.readFileSync(at, 'utf8'), await new Response(bytes).text());
+  // an answer just under the cap is still the file
+  const near = bigBody(TEXT_MAX_BYTES - 10);
+  const nearAt = await fetchRemoteFile('samples', 'src/zcl_near.clas.abap', { fetchImpl: async () => new Response(near.stream) });
+  assert.equal(fs.statSync(nearAt).size, TEXT_MAX_BYTES - 10);
 }));

@@ -393,6 +393,16 @@
   them use `BACKEND_HOST` now (`appStartUrl`, `waitPort`, `isBackendUrl`,
   `backendBaseUrl`); the npm host's Host/Origin guard accepts what the
   Chromium sends from that address.
+- **Downloads from GitHub are capped in size, not only in time.** The
+  mirror's files, the docs tree listing and the framework's release list
+  were read whole, and the prebuilt backend archive written whole, within
+  their timeouts - a proxy or mirror answering with a huge or endless body
+  filled the memory or the temp disk first. Text answers are read up to 8 MB
+  (`TEXT_MAX_BYTES`, `readCappedText`; the largest real one is 0.34 MB),
+  the archive up to 200 MB (`PREBUILT_MAX_BYTES`; 2.7 MB for 1.146.0): one
+  that declares more is refused unread, one that streams more is cut at the
+  cap, and the tool says so by URL. A prebuilt download cut before its file
+  was open no longer raises an uncaught ENOENT from the cleanup.
 
 ## 1.0.0 - 2026-10-03
 

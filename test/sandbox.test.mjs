@@ -467,12 +467,18 @@ test('the framework clone takes the highest plain X.Y.Z release, never the -702 
     const asked = [];
     const fetchImpl = async (url) => {
       asked.push(url);
-      return { ok: true, status: 200, json: async () => releases };
+      return { ok: true, status: 200, text: async () => JSON.stringify(releases) };
     };
     const res = await cloneFramework({ fetchImpl, onLine: () => {} });
     assert.equal(res.ok, false, 'the stand-in git clones nothing');
     assert.ok(asked[0].includes('/releases?'), `the release list is asked, not releases/latest: ${asked[0]}`);
     assert.match(fs.readFileSync(record, 'utf8'), /--branch 1\.145\.0 /);
+    // a release list over the text cap is not read: the default branch then
+    const lines = [];
+    const huge = async () => new Response('[]', { headers: { 'content-length': String(64 * 1048576) } });
+    await cloneFramework({ fetchImpl: huge, onLine: (l) => lines.push(l) });
+    assert.ok(lines.some((l) => /latest release could not be looked up \(the answer for .* is larger than 8 MB/.test(l)), lines.join('\n'));
+    assert.doesNotMatch(fs.readFileSync(record, 'utf8'), /--branch/);
   } finally {
     for (const [k, v] of Object.entries(saved)) {
       if (v === undefined) delete process.env[k];

@@ -13,7 +13,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { execFileSync } from 'node:child_process';
 import { parseActions, cssAttr, ACTIONS, MAX_ACTIONS } from '../lib/interact.mjs';
-import { parseUnitOutput, downloadPrebuilt, prebuiltUrl, prebuiltManifest, RUNNER_LOOP, runUnitTests, backendBuilt } from '../lib/runtime.mjs';
+import { parseUnitOutput, downloadPrebuilt, prebuiltUrl, prebuiltManifest, RUNNER_LOOP, runUnitTests, backendBuilt, PREBUILT_MAX_BYTES } from '../lib/runtime.mjs';
 import { resolveA2UI5 } from '../lib/repos.mjs';
 import { TOOLS } from '../lib/tools.mjs';
 
@@ -241,7 +241,7 @@ function fakeCheckoutAndArchive(version, { manifest = true } = {}) {
   return { root, a2, tar };
 }
 
-function serve(file, { status = 200 } = {}) {
+function serve(file, { status = 200, chunked = false } = {}) {
   return new Promise((resolve) => {
     const srv = http.createServer((req, res) => {
       if (status !== 200 || !fs.existsSync(file)) {
@@ -249,7 +249,8 @@ function serve(file, { status = 200 } = {}) {
         return;
       }
       const body = fs.readFileSync(file);
-      res.writeHead(200, { 'content-type': 'application/gzip', 'content-length': body.length }).end(body);
+      // chunked: no content-length, the size is only known by reading it
+      res.writeHead(200, { 'content-type': 'application/gzip', ...(chunked ? {} : { 'content-length': body.length }) }).end(body);
     });
     srv.listen(0, '127.0.0.1', () => resolve({ srv, url: `http://127.0.0.1:${srv.address().port}/backend.tar.gz` }));
   });
@@ -315,6 +316,37 @@ test('downloadPrebuilt reports a missing asset and a manifest-less archive inste
     delete process.env.A2UI5_MCP_PREBUILT_URL;
     served.srv.close();
     fs.rmSync(bare.root, { recursive: true, force: true });
+  }
+});
+
+/* The download was bounded by the build timeout only: a proxy or mirror
+ * answering with an endless body filled the temp disk for half an hour. It
+ * stops at PREBUILT_MAX_BYTES (200 MB, the real asset is 2.7 MB) - a
+ * declared size over it is refused unread, a streamed one cut - and the
+ * previous build stays. */
+test('downloadPrebuilt stops at the size cap and leaves the previous build alone', { skip: !HAVE_TAR && 'needs tar on PATH' }, async () => {
+  assert.equal(PREBUILT_MAX_BYTES, 200 * 1024 * 1024);
+  for (const chunked of [false, true]) {
+    const { root, a2, tar } = fakeCheckoutAndArchive('1.144.0');
+    const size = fs.statSync(tar).size;
+    const { srv, url } = await serve(tar, { chunked });
+    process.env.A2UI5_MCP_PREBUILT_URL = url;
+    const lines = [];
+    try {
+      const over = await downloadPrebuilt({ a2, onLine: (l) => lines.push(l), timeoutMs: 60000, maxBytes: size - 1 });
+      assert.equal(over.ok, false, `chunked ${chunked}: ${lines.join('\n')}`);
+      assert.match(over.reason, /the answer for http:\/\/127\.0\.0\.1:\d+\/backend\.tar\.gz is larger than/);
+      assert.ok(lines.some((l) => /prebuilt backend: the answer for .* is larger than .* stopped reading it/.test(l)), lines.join('\n'));
+      assert.ok(fs.existsSync(path.join(a2, 'node/output/stale.mjs')), 'the previous build is left alone');
+      assert.ok(!fs.existsSync(path.join(a2, 'backend-manifest.json')));
+      // exactly at the cap is still the archive
+      const fits = await downloadPrebuilt({ a2, onLine: () => {}, timeoutMs: 60000, maxBytes: size });
+      assert.equal(fits.ok, true);
+    } finally {
+      delete process.env.A2UI5_MCP_PREBUILT_URL;
+      srv.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   }
 });
 

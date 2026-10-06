@@ -493,6 +493,12 @@ duplicates none of their content:
   `A2UI5_MCP_LINT_TIMEOUT_MS`, `A2UI5_MCP_SCOPE_TIMEOUT_MS`,
   `A2UI5_MCP_UNIT_TIMEOUT_MS` and `A2UI5_MCP_BUILD_TIMEOUT_MS` override
   (values in ms).
+- **Download limits:** what is read from GitHub is capped by size as well as
+  by time - 8 MB for a file of the read-only mirror, the docs tree listing
+  and the release list (the largest today is 0.34 MB), 200 MB for the
+  prebuilt backend archive (2.7 MB for 1.146.0). An answer over the cap is
+  refused (when it declares its size) or cut at the cap, and the tool says
+  so by URL; a cached mirror or the previous build stays in place.
 - **UI5 sources** are served from the samples-controls checkout's `@openui5`
   packages, so booting needs no network. The built theme CSS is not in those
   packages — with network access it loads from the CDN (styled screenshots);

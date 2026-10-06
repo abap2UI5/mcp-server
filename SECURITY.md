@@ -55,6 +55,15 @@ Worth knowing before assessing a report:
   app. A tool call is therefore as trusted as the repository it is pointed at.
   Treat an MCP client that can reach this server the way you would treat a
   shell in the same directory.
+- **What it downloads from GitHub is capped in size, not only in time.**
+  A file of the read-only mirror, the docs tree listing and the framework's
+  release list are read up to 8 MB (the largest is 0.34 MB today), the
+  prebuilt backend archive up to 200 MB (2.7 MB today) - so a proxy or
+  mirror in between that answers with a huge or endless body cannot fill
+  the memory or the temp disk. An answer that declares more is refused
+  unread, one that streams more is cut at the cap; either is reported by URL
+  (`TEXT_MAX_BYTES` in `lib/remote.mjs`, `PREBUILT_MAX_BYTES` in
+  `lib/runtime.mjs`).
 - **Every spawned child gets a hard timeout and is killed as a process group**
   (`lib/runtime.mjs`), so a hung or forking build cannot outlive the call that
   started it.

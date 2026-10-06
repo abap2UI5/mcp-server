@@ -118,7 +118,7 @@ literals), `REMOTE_FILES` in `lib/remote.mjs` says which files each mirror
 carries, and `REMOTE_TOOLS` which tools trigger which mirror; `server.mjs`
 hydrates before the tool runs and before a resource read.
 
-Three rules, each pinned by `test/remote.test.mjs` and
+Four rules, each pinned by `test/remote.test.mjs` and
 `test/missing-siblings.test.mjs`:
 
 - **A set env var stays authoritative.** `A2UI5_HOME=/nowhere` is a
@@ -138,6 +138,14 @@ Three rules, each pinned by `test/remote.test.mjs` and
   writes is the project the agent named - and the one piece of the template
   it would run as code, `scripts/check-pin.mjs` for the pin warning, it
   imports from a local checkout only and skips over a mirror.
+- **A download is capped in size, not only in time.** `readCappedText`
+  reads a mirror file, the docs tree listing and the release list up to
+  `TEXT_MAX_BYTES` (8 MB; the largest, samples-controls' `catalogue.json`,
+  is 0.34 MB), `downloadPrebuilt` the backend archive up to
+  `PREBUILT_MAX_BYTES` (200 MB; 2.7 MB for 1.146.0) - refused unread when
+  the answer declares more, cut at the cap when it streams more, said by
+  URL (the archive's cap is pinned in `test/interact.test.mjs`). Raise a
+  cap only with a measured size behind it.
 - **A failed download degrades to what was there before.** With a cached
   mirror the stale copy stands in (`stale: true`); without one the tool
   degrades with its usual message plus the reason (`remoteStatus`). A
