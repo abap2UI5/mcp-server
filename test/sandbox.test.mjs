@@ -231,6 +231,20 @@ test('the CI runner reads the project\'s framework pin, collects classes, interf
   assert.match(fixture, /- \*\*FAIL\*\*  ZCL_D setup \(the test class's setup, before its test method ran\)/);
   assert.doesNotMatch(fixture, /found no test method/);
   assert.match(fixture, /1 class\(es\) failing/);
+  /* The runner stops at the first failure: a class after the failing one
+   * printed no test, and was reported as having "no test method" - a
+   * false diagnosis in every CI summary with two test classes and a red one */
+  const stopped = renderSummary({
+    framework: '1.145.0',
+    mode: 'npm',
+    results: [
+      { cls: 'zcl_e', testclasses: true, tests: [{ localClass: 'ltcl', method: 'bad' }], failed: { object: 'ZCL_E', localClass: 'ltcl', method: 'bad', error: 'boom' } },
+      { cls: 'zcl_f', testclasses: true, tests: [], failed: null, notRun: 'the runner stops at the first failure (ZCL_E), and this class\'s tests had not started' },
+    ],
+  });
+  assert.match(stopped, /\*\*ZCL_F\*\*: not run - the runner stops at the first failure \(ZCL_E\)/);
+  assert.doesNotMatch(stopped, /found no test method/);
+  assert.match(stopped, /1 test method\(s\) ran, 1 class\(es\) failing/);
 });
 
 /* abap2ui5-unit runs on the npm package by default: a checkout somebody
@@ -569,6 +583,9 @@ fs.appendFileSync('inputs.log', fs.readdirSync(down).filter((f) => !f.startsWith
   fs.writeFileSync(path.join(src, 'zcl_proj_helper.clas.abap'), 'CLASS zcl_proj_helper DEFINITION PUBLIC. ENDCLASS.');
   fs.writeFileSync(path.join(src, 'zcl_proj_helper.clas.testclasses.abap'), `${TESTS} " FAIL`);
   fs.writeFileSync(path.join(src, 'zif_proj_thing.intf.abap'), 'INTERFACE zif_proj_thing PUBLIC. ENDINTERFACE.');
+  // after the failing class in the runner's order: never reached
+  fs.writeFileSync(path.join(src, 'zcl_proj_zlast.clas.abap'), 'CLASS zcl_proj_zlast DEFINITION PUBLIC. ENDCLASS.');
+  fs.writeFileSync(path.join(src, 'zcl_proj_zlast.clas.testclasses.abap'), TESTS);
   const box = sandbox().dir;
   const before = fs.readdirSync(box).sort();
 
@@ -583,6 +600,9 @@ fs.appendFileSync('inputs.log', fs.readdirSync(down).filter((f) => !f.startsWith
   const byClass = Object.fromEntries(report.results.map((r) => [r.cls, r]));
   assert.equal(byClass.zcl_proj_helper.failed.object, 'ZCL_PROJ_HELPER');
   assert.equal(byClass.zcl_proj_app.failed, null);
+  assert.equal(byClass.zcl_proj_app.notRun, undefined, 'it ran, before the failure');
+  assert.deepEqual(byClass.zcl_proj_zlast.tests, []);
+  assert.match(byClass.zcl_proj_zlast.notRun, /the runner stops at the first failure \(ZCL_PROJ_HELPER\)/);
   assert.equal(res.status, 1, res.stderr);
   assert.deepEqual(fs.readdirSync(box).sort(), before, 'the session\'s app stays, the project\'s files are gone');
   assert.ok(!fs.readdirSync(path.join(a2, 'node/downport')).some((f) => f.startsWith('zcl_proj_') || f.startsWith('zif_proj_')), 'no copy of the project left in node/downport');

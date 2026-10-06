@@ -151,6 +151,13 @@
   again (the build) - the MCP spec says the value MUST increase with each
   notification. The counter (and the one-per-second throttle) belongs to
   the request now.
+- **`abap2ui5-unit` no longer reports an unreached class as having no test
+  method.** The generated runner stops at the first failing test, so a test
+  class after it in the runner's order printed nothing - and the summary
+  said "a test include, but the runner found no test method - is the local
+  class FOR TESTING?", sending the reader after a problem that is not there.
+  Such a class is `notRun` now (in `--json` too), naming the failure the run
+  stopped at.
 
 ## 1.0.0 - 2026-10-03
 
