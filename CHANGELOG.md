@@ -197,6 +197,12 @@
   for an in-flight build of another mode, so a call answered "build in
   progress" had built nothing and still taken the app down. The backend is
   now stopped once the build really starts (`buildBackend`'s `beforeBuild`).
+- **A `migrate_report { deploy: true }` the sandbox refuses writes nothing.**
+  A `class_name` report2cloud accepts but the sandbox does not (a
+  namespaced `/abc/cl_x`, or one outside `z`/`y`) was refused only after
+  the report runtime's support classes had been copied into the sandbox,
+  so the refused deploy still changed the next build's input. Every name
+  is checked before the first file is written now.
 
 ## 1.0.0 - 2026-10-03
 
