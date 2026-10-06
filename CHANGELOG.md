@@ -225,6 +225,16 @@
   shutdown now also kills the child of a start in flight
   (`stopBackend({ starting: true })`); `backend stop` and `restart` are
   unchanged.
+- **A binding's `model` key names its model in the agent snapshot.** The
+  object syntax `{path: '/A', model: 'other'}` - UI5 binds it to the model
+  `other` - was read as `/A` of the default model: the field was listed
+  editable with the default model's value, a table bound that way got
+  editable cells, and an `app_act` value was written to `/A` (or
+  `/T/0/N`) of the app's own model, which the screen does not edit. It is
+  read like `{other>/A}` now (noted as bound to a named model), as the
+  abap2UI5 agent addon's snapshot already does; docs/agent-snapshot.md
+  says so. The copies the VS Code extension and abap2UI5/protocol vendor
+  pick it up with their next re-vendor.
 
 ## 1.0.0 - 2026-10-03
 

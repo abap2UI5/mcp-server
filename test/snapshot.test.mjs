@@ -494,6 +494,25 @@ test('custom controls, named-model fields and unknown frontend actions are liste
   assert.equal(byEvent(s, 'TICK').control, 'z2ui5.cc.Timer', 'a wire on a custom control is still an action');
 });
 
+/* The object syntax names a model with its model key as {other>/A} does.
+ * Read as the default model, the field was listed editable with the default
+ * model's /A, the table got editable cells, and an act's value landed on /A
+ * and /T/0/N of the app's own model - which the screen does not edit. */
+test('a binding\'s model key names its model: no field, no table rows of the default model', () => {
+  assert.deepEqual(parseBinding("{ path: '/A', model: 'other' }"), { kind: 'path', path: '/A', model: 'other', relative: false, type: '', formatter: false });
+  assert.equal(parseBinding("{path: '/A', model: ''}").model, '', 'an empty model key is the default model');
+  const s = buildSnapshot({
+    response: respond(view(
+      `<Input value="{path:'/A', model:'other'}"/>`
+      + `<Table items="{path:'/T', model:'other'}"><columns><Column><Text text="N"/></Column></columns>`
+      + '<items><ColumnListItem><cells><Input value="{N}"/></cells></ColumnListItem></items></Table>',
+    ), { A: 'a', T: [{ N: 1 }] }),
+  });
+  assert.deepEqual(s.fields, []);
+  assert.deepEqual(s.tables, []);
+  assert.ok(s.unsupported.includes("field Input bound to the named model 'other' (main) - not editable here"), s.unsupported.join(' | '));
+});
+
 test('message box with onClose: an action whose $action argument lists the choices; START_TIMER is a timer action', () => {
   const s = buildSnapshot({
     response: respond(view('<Text text="x"/>'), {}, {

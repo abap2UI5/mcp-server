@@ -168,9 +168,10 @@ nearest mapped ancestor (anything below `sap.m.InputBase` is a `text` field).
 Implementations without that metadata use the table alone.
 
 Not fields: controls inside a table template (they are `editableCells`),
-values bound to a named model (`{device>/…}`), to a relative path outside a
-table (an element binding), or to a formatter/composite (listed in
-`unsupported` where relevant).
+values bound to a named model (`{device>/…}`, or `{path: '/…', model:
+'device'}` - the object syntax's `model` key names the model too), to a
+relative path outside a table (an element binding), or to a
+formatter/composite (listed in `unsupported` where relevant).
 
 ### actions
 
