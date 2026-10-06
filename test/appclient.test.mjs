@@ -410,6 +410,20 @@ test('the pick, single select: the picked row selected, the previous selection c
   assert.deepEqual(bodies[1].MODEL, { T: { __delta: { 1: { SEL: false }, 2: { SEL: true } } } });
 });
 
+test('`row` is a non-negative integer: a JSON number or a string of digits; "", false, [], true, 1.5, -1 are refused', async () => {
+  /* server.mjs read `row` with Number(): "", false and [] became row 0 and
+   * true row 1 - a pick of a row nobody named. The client checks it now. */
+  const { client, bodies } = fakeApp(DIALOG('false', ', ${$parameters>/selectedContexts/0/sPath}'), ROWS());
+  const s = await client.start('z_t');
+  for (const bad of ['', ' ', false, true, [], [0], {}, 1.5, -1, '1.0', '0x1', '1e0', '-0', 'Infinity', Infinity, NaN]) {
+    await rejects(client.act(s.session, { event: 'OK', row: bad }), /^`row` is a row index \(0-based\) - a non-negative integer, not /);
+  }
+  await rejects(client.act(s.session, { row: '' }), /^`row` is a row index/);
+  assert.equal(bodies.length, 1, 'refusals send nothing');
+  await client.act(s.session, { event: 'OK', row: ' 2 ' });
+  assert.deepEqual(bodies[1].S_FRONT.T_EVENT_ARG, ['/T/2']);
+});
+
 test('the pick, multi select: the row joins the selection, selectedItem is the first selected row in model order', async () => {
   const { client, bodies } = fakeApp(DIALOG('true', ', ${$parameters>/selectedContexts/1/sPath}, ${$parameters>/selectedItem}.getCells()[0].getText()'), ROWS());
   const s = await client.start('z_t');

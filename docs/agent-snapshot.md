@@ -353,7 +353,8 @@ The current state from the last response kept — no roundtrip.
      refused when that is not one action any more (fill the values without
      an event first, then fire it from the next snapshot).
    - A row action whose arguments read the row needs `row` (0-based, within
-     `rowCount`); a `$parameters`/`$expr` argument the row does not fill (see
+     `rowCount`; a non-negative integer - a number or a string of digits,
+     anything else is refused); a `$parameters`/`$expr` argument the row does not fill (see
      [row event parameters](#row-event-parameters)) and every `$event`
      argument needs its value in `args` (positional, `null` where the client
      fills in); a static argument cannot be overridden.

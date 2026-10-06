@@ -288,6 +288,10 @@
   and `"Infinity"` as `null` - the field's initial value, without a word.
   A number or a decimal string is taken now, as the agent addon's
   `describe_arg` reads it; anything else is refused naming the field.
+- **`app_act`'s `row` is a row index, not whatever `Number()` makes of
+  it.** `row: ""`, `false` or `[]` acted on row 0 and `row: true` on row 1
+  - a pick or a row action on a row nobody named. `row` is a non-negative
+  integer now (a number, or a string of digits); anything else is refused.
 
 ## 1.0.0 - 2026-10-03
 

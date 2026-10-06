@@ -1281,10 +1281,11 @@ async function handle(name, args = {}, ctx = {}) {
     case 'app_act': {
       const maxRows = boundedInt(args.max_rows, { name: 'max_rows', dflt: undefined, min: 0, max: 200 });
       const format = oneOf(args.format, { name: 'format', allowed: APP_FORMATS, dflt: defaultAppFormat() });
-      const row = args.row === undefined || args.row === null ? undefined : Number(args.row);
+      // the client checks `row` (a non-negative integer) - Number() here made
+      // "", false and [] row 0 and true row 1
       const client = await agentClient();
       return snapshotAnswer(() => client.act(args.session, {
-        values: args.values, event: args.event, args: args.args, row, maxRows,
+        values: args.values, event: args.event, args: args.args, row: args.row, maxRows,
       }), { format, client });
     }
     case 'run_unit_tests': {
