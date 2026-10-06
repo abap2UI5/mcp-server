@@ -106,6 +106,10 @@
   without a `build_log` record, `deploy_app`'s lint answered a bare
   `ENOTDIR`, and every caller queued behind the failed install was rejected
   with it. It is the install's reason now, naming the directory.
+- **`docs_search` survives a dangling symbolic link in the docs tree.** The
+  walk statted every entry, and one link to a file that is not there (a
+  half-finished pull, a moved page) threw `ENOENT` out of it - every search
+  failed. Such an entry is skipped now.
 
 ## 1.0.0 - 2026-10-03
 

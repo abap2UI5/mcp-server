@@ -1270,6 +1270,24 @@ test('a docs checkout is found through DOCS_HOME and its probe', () => {
   }
 });
 
+/* One dangling symbolic link anywhere under docs/ threw out of the tree walk
+ * (statSync on its target), and every docs_search failed with ENOENT. */
+test('a dangling symbolic link in the docs tree is skipped, not the whole search', { skip: process.platform === 'win32' && 'symbolic links need privileges there' }, () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-docs-link-'));
+  try {
+    fs.mkdirSync(path.join(home, 'docs', 'cookbook'), { recursive: true });
+    fs.writeFileSync(path.join(home, 'docs', 'index.md'), '# docs');
+    fs.writeFileSync(path.join(home, 'docs', 'cookbook', 'value_help.md'), '# Value Help\n\nvalue help text');
+    fs.symlinkSync('gone.md', path.join(home, 'docs', 'cookbook', 'broken.md'));
+    const out = execFileSync(process.execPath, ['-e',
+      "import('./lib/docs.mjs').then(m => process.stdout.write(JSON.stringify(m.searchDocs({ query: 'value help' }).map((e) => e.path))))"],
+    { cwd: ROOT, env: { ...process.env, DOCS_HOME: home }, encoding: 'utf8' });
+    assert.deepEqual(JSON.parse(out), ['cookbook/value_help']);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 // ------------------------------------------------------------------ api ----
 /* The client API (z2ui5_if_client), parsed from a fixture that carries every
  * shape the real interface uses: single-line and multi-line METHODS, ABAP-Doc
