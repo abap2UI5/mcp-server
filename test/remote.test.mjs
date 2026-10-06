@@ -207,6 +207,17 @@ test('fetchRemoteFile reads one file on demand, from the cache while fresh', wit
   await hydrate('samples', { local: null, fetchImpl: fakeFetch({ '/catalogue.json': '{}', '/SAMPLES.md': '' }) });
   await fetchRemoteFile('samples', 'src/01/z2ui5_cl_smp_app_493.clas.abap', { fetchImpl: impl });
   assert.equal(impl.calls.length, 2, 'a fresh mirror serves the file it has');
+  /* hydrate refreshes the marker and the files of its list, never a file
+   * fetched on demand: a fresh marker alone kept serving that file's first
+   * fetch for as long as the mirror was refreshed daily */
+  const file = path.join(remoteRoot('samples'), 'src/01/z2ui5_cl_smp_app_493.clas.abap');
+  const old = (Date.now() - 2 * 24 * 60 * 60_000) / 1000;
+  fs.utimesSync(file, old, old);
+  assert.equal(mirrorFresh('samples'), true);
+  await fetchRemoteFile('samples', 'src/01/z2ui5_cl_smp_app_493.clas.abap', { fetchImpl: impl });
+  assert.equal(impl.calls.length, 3, 'a file older than the TTL is fetched again, fresh marker or not');
+  await fetchRemoteFile('samples', 'src/01/z2ui5_cl_smp_app_493.clas.abap', { fetchImpl: impl });
+  assert.equal(impl.calls.length, 3, 'and served from the cache once it is fresh');
   await assert.rejects(fetchRemoteFile('samples', '../escape', { fetchImpl: impl }), /refusing path/);
   await assert.rejects(fetchRemoteFile('samples', 'src/none.abap', { fetchImpl: impl }), /could not fetch abap2UI5\/samples\/src\/none\.abap/);
 }));

@@ -33,6 +33,12 @@
   exception, and `run_app` / `app_start` / `backend start` waited 30 s to
   report "did not start" with an empty output. The start now fails with
   the spawn error right away.
+- **`read_example` re-fetches a mirrored sample once it is a day old.** A
+  file fetched on demand into the GitHub mirror was served from the cache
+  whenever the mirror's marker was fresh - and the marker is refreshed by
+  every knowledge tool once a day, the on-demand files never - so a sample
+  read once stayed at that first copy for good. The file's own age counts
+  now (`A2UI5_MCP_REMOTE_TTL_MS`).
 
 ## 1.0.0 - 2026-10-03
 
