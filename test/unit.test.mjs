@@ -5,12 +5,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { stripJsonc, LOCAL_BENIGN, benignRules, deployApp, removeApp } from '../lib/runtime.mjs';
 import { parseCapabilities, searchCapabilities } from '../lib/capabilities.mjs';
-import { parseExamples, searchExamples, catalogueEntries, CATALOGUES, ROW } from '../lib/examples.mjs';
+import { parseExamples, searchExamples, catalogueEntries, CATALOGUES, matchRow } from '../lib/examples.mjs';
 import { CORPUS_DIRS, resolveLintConfig, viewCheckCandidates, SERVER_ROOT } from '../lib/repos.mjs';
 import { sliceCatalogue } from '../lib/pitfalls.mjs';
 import { sliceGuide, guideChapters } from '../lib/guide.mjs';
 import { parseApi, searchApi, apiSummary } from '../lib/api.mjs';
-import { searchDocs, slicePage, headingText } from '../lib/docs.mjs';
+import { searchDocs, slicePage, headingText, markdownLinks } from '../lib/docs.mjs';
 import { parseSizes } from '../lib/screenshot.mjs';
 import { oneOf, boundedInt, stringArray, checkStringArgs } from '../lib/args.mjs';
 import { readCached } from '../lib/cache.mjs';
@@ -2059,28 +2059,71 @@ test('setup.sh reuses every directory name lib/repo-dirs.json knows for the chec
  * for a catalogue row ('| ' + 1000 blanks + '|' took 85 s). The rewrites must
  * match the same lines and capture the same text. */
 const OLD_ROW = /^\|\s*(?:\*\*(?<title>[^*]+)\*\*\s*(?:(?:—|--)\s*)?)?(?<sub>[^|<]*?)\s*(?<blocks>(?:<br>(?:<[a-z]+>[^<]*<\/[a-z]+>|[^<]*))*)\s*\|\s*\[`(?<cls>[A-Z0-9_]+)`\]\((?<path>[^)]+)\)\s*\|/;
-const seeded = (seed) => (n) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
+/* ROW_PATTERN is OLD_ROW with its blanks kept atomically - what lib/examples.mjs
+ * matched with until matchRow spelled it out (its link scan was quadratic). */
+const ROW_PATTERN = /^\|(?=(\s*))\1(?:\*\*(?<title>[^*]+)\*\*(?=(\s*))\3(?:(?:—|--)(?=(\s*))\4)?)?(?=(?<sub>[^|<]*))\k<sub>(?<blocks>(?:<br>(?:<[a-z]+>[^<]*<\/[a-z]+>|[^<]*(?!\s)))*)\s*\|\s*\[`(?<cls>[A-Z0-9_]+)`\]\((?<path>[^)]+)\)\s*\|/;
+/* mulberry32: an LCG over doubles taken mod n loses its low bits (seeded(7)
+ * answered rnd(12) with 0, 4 and 8 only), and the fuzzers then never built
+ * most of the rows they list */
+const seeded = (seed) => (n) => {
+  seed = (seed + 0x6d2b79f5) | 0;
+  let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) % n;
+};
 const LS = String.fromCharCode(0x2028);
 
-test('the catalogue row pattern matches what the old one matched, with the same groups', () => {
+test('matchRow matches what the row patterns matched, with the same groups', () => {
   const rnd = seeded(7);
   const pick = (a) => a[rnd(a.length)];
-  const ws = () => pick(['', ' ', '  ', '\t', ' \r ', '   ']);
-  const part = () => pick(['', 'a', 'a b', 'x | y', 'a*b', 'a — b', '--x', '<x', '|']);
-  const block = () => pick(['<br>' + part(), `<br><sub>${part()}</sub>`, `<br><i>${part()}</i>`, '<br>', '<br><sub>docs: [a](b)</sub>', `<br>${part()} | [\`Z\`](z) `]);
-  const link = () => pick(['[`A`](p)', '[`A_1`](src/x.abap)', '[`a`](p)', '[`A`]()', '[`A`](p', 'A']);
-  const groups = (m) => m && { title: m.groups.title, sub: (m.groups.sub || '').trim(), blocks: m.groups.blocks, cls: m.groups.cls, path: m.groups.path, end: m[0].length };
+  const ws = () => pick(['', ' ', '  ', '\t', ' \r ', '   ', LS, '\u00a0']);
+  const part = () => pick(['', 'a', 'a b', 'x | y', 'a*b', 'a — b', '--x', '<x', '|', '*', '**', ')', '(', '[`', '`', 'Z', '<br>', '</b>', '<b>']);
+  const block = () => pick(['<br>' + part(), `<br><sub>${part()}</sub>`, `<br><i>${part()}</i>`, '<br>', '<br><sub>docs: [a](b)</sub>', `<br>${part()} | [\`Z\`](z) `,
+    '<br><br>x</b>', `<br><${pick(['br', 'b', 'sub', ''])}>${part()}</${pick(['b', 'sub', '', 'x1'])}>`, '<br> ', '<br>' + ws() + part() + ws()]);
+  const link = () => pick(['[`A`](p)', '[`B_2`](s/y.abap)', '[`A`](p)', '[`A_1`](src/x.abap)', '[`a`](p)', '[`A`]()', '[`A`](p', 'A', '[``](p)', '[`A`] (p)', '[`A`](p))', '[`A`](p|q)']);
+  const toks = ['|', ' ', '<br>', '<b>', '</b>', '[`A`](', 'p)', ')', '**', '—', '--', 'a', '\t', '<', '>', '/', 'Z'];
+  const exact = (m) => m && { title: m.groups.title, sub: m.groups.sub, blocks: m.groups.blocks, cls: m.groups.cls, path: m.groups.path, end: m[0].length };
+  const trimmed = (g) => g && { ...g, sub: (g.sub || '').trim() };
   let matched = 0;
-  for (let k = 0; k < 40000; k += 1) {
-    let s = '|' + ws() + (rnd(2) ? `**${part()}**${ws()}${pick(['', '— ', '-- ', '—', '--'])}${ws()}` : '') + part() + ws();
-    for (let b = rnd(4); b > 0; b -= 1) s += block() + ws();
-    s += pick(['|', '', ' |']) + ws() + link() + ws() + pick(['|', '', ' |', '| x |']) + pick(['', ' | [`B`](q) |', ' x']);
-    if (rnd(5) === 0) { const at = rnd(s.length); s = s.slice(0, at) + s.slice(at + 1 + rnd(3)); }
-    const old = groups(OLD_ROW.exec(s));
-    if (old) matched += 1;
-    assert.deepEqual(groups(ROW.exec(s)), old, JSON.stringify(s));
+  for (let k = 0; k < 60000; k += 1) {
+    let s;
+    if (rnd(4) === 0) {
+      s = '|';
+      for (let j = rnd(20); j > 0; j -= 1) s += pick(toks);
+    } else {
+      s = '|' + ws() + (rnd(2) ? `**${part()}**${ws()}${pick(['', '— ', '-- ', '—', '--', '-'])}${ws()}` : '') + part() + ws();
+      for (let b = rnd(5); b > 0; b -= 1) s += block() + ws();
+      s += pick(['|', '', ' |']) + ws() + link() + ws() + pick(['|', '', ' |', '| x |']) + pick(['', ' | [`B`](q) |', ' x', '<br>|[`C`](r)|']);
+      if (rnd(5) === 0) { const at = rnd(s.length); s = s.slice(0, at) + s.slice(at + 1 + rnd(3)); }
+      if (rnd(8) === 0) { const at = rnd(s.length); s = s.slice(0, at) + pick(toks) + s.slice(at); }
+    }
+    const row = matchRow(s);
+    if (row) matched += 1;
+    assert.deepEqual(row, exact(ROW_PATTERN.exec(s)), JSON.stringify(s));
+    // the first pattern's sub kept no trailing blanks; parseExamples trims it
+    assert.deepEqual(trimmed(row), trimmed(exact(OLD_ROW.exec(s))), JSON.stringify(s));
   }
   assert.ok(matched > 5000, `the generator makes rows that match (${matched})`);
+});
+
+test('markdownLinks finds what the link patterns found, and plain() replaces them alike', () => {
+  const rnd = seeded(5);
+  const toks = ['[', ']', '(', ')', 'a', ' ', '\n', '[a](', '](', '[]', '()', 'b c'];
+  const viaRegex = (re, s) => [...s.matchAll(re)].map((m) => ({ index: m.index, end: m.index + m[0].length, text: m[1], target: m[2] }));
+  let found = 0;
+  for (let k = 0; k < 100000; k += 1) {
+    let s = '';
+    for (let n = rnd(k % 10 === 0 ? 60 : 14); n > 0; n -= 1) s += toks[rnd(toks.length)];
+    const links = markdownLinks(s);
+    assert.deepEqual(links, viaRegex(/\[([^\]]+)\]\(([^)]*)\)/g, s), JSON.stringify(s));
+    assert.deepEqual(markdownLinks(s, { emptyTarget: false }), viaRegex(/\[([^\]]+)\]\(([^)]+)\)/g, s), JSON.stringify(s));
+    if (links.length) found += 1;
+    // the page title goes through plain(): link text kept, targets dropped, as the pattern did
+    const title = ((`# ${s}`.match(/^#\s+(\S.*)?/m) || [])[1] || '').trim();
+    const old = title.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/[*`]/g, '').replace(/\s+/g, ' ').trim();
+    assert.equal(slicePage(`# ${s}`).title, old, JSON.stringify(s));
+  }
+  assert.ok(found > 10000, `the generator makes links (${found})`);
 });
 
 test('headingText is the heading regex: same lines, same text', () => {
@@ -2108,5 +2151,23 @@ test('catalogue rows and doc headings take linear time over a run of blanks', ()
   assert.deepEqual([row.section, row.title, row.sub, row.summary, row.cls], ['S', 'T', 's', 'sum', 'Z_A']);
   const page = slicePage(`# a${blanks}b\n## c${blanks}\r${blanks}\n#${blanks}`);
   assert.equal(page.title, `a b`);
+  assert.ok(Date.now() - t0 < 2000, `took ${Date.now() - t0} ms`);
+});
+
+/* 0.4 s for a 50k row of "|[`A`](" (the link's `\(([^)]+)\)` scanned to the
+ * next parenthesis from every end a block could have), 3 s for 50k `[` in a
+ * docs page (the link text scanned to the next `]` from every `[`) */
+test('catalogue rows and markdown links take linear time over runs of link openers', () => {
+  const n = 400000;
+  const t0 = Date.now();
+  assert.deepEqual(parseExamples(`| a<br>${'|[`A`]('.repeat(n / 7)}\n| a<br>${'|[`A`]('.repeat(n / 7)})`), []);
+  assert.deepEqual(parseExamples(`|${'<br>'.repeat(n / 4)}`), []);
+  const [row] = parseExamples(`| **T** s<br><sub>docs: ${'['.repeat(n)}[a](u)</sub> | [\`Z_A\`](p) |`);
+  assert.deepEqual(row.docs, [{ topic: '['.repeat(n) + 'a', url: 'u' }]);
+  for (const body of ['['.repeat(n), '[a]('.repeat(n / 4), '[a'.repeat(n / 2)]) {
+    assert.equal(slicePage(`# t ${body}`).title.length, 2 + body.length);
+    // the snippet flattens the section body through plain()
+    assert.equal(searchDocs({ query: 'zz', pages: [{ path: 'p', text: `# zz\n${body}` }] }).length, 1);
+  }
   assert.ok(Date.now() - t0 < 2000, `took ${Date.now() - t0} ms`);
 });

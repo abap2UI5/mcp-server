@@ -314,6 +314,15 @@
   per 10,000 acts that a long-running server never gave back. The last 100
   earlier ids are named as earlier states now; an older one is refused as
   an unknown session, naming the open ones.
+- **Catalogue rows and markdown links parse in linear time.** Two patterns
+  were still quadratic in text from a mirrored repository: the SAMPLES.md
+  row tried the sample link after every end a text block could have, and
+  scanned to the next `)` each time (0.4 s for a 50k row of "|[`A`](");
+  the markdown link pattern `docs_search` flattens snippets with (and
+  `examples` reads a row's docs links with) scanned to the next `]` from
+  every `[` (3 s for 50k of them). Both are hand-written scanners now that
+  match what the patterns matched - fuzzed against them, and identical on
+  the real catalogues and the docs site.
 
 ## 1.0.0 - 2026-10-03
 
