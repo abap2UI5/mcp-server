@@ -348,6 +348,15 @@
   nobody else: it is created 0700, one of the user's own that others can
   read is narrowed to 0700, and anything else is refused with the reason and
   `A2UI5_MCP_REMOTE_DIR` (which stays unchecked) as the way out.
+- **Security: the default screenshot dir must be the user's own as well.**
+  `<tmp>/abap2ui5-mcp-screenshots` holds the PNGs of `run_app` and
+  `interact_app` and the persisted build log, under the same fixed name in
+  the shared temp dir: another local user who created it first read every
+  screenshot of the user's apps and handed a restarted server's `build_log`
+  a `last-build.json` of their own, and a link of that name took the writes
+  wherever it led. The default is used only under the same rule as the
+  mirror's base now; otherwise the screenshot is still returned, not saved
+  (`screenshotNotSaved` says why), and no build log is written or read there.
 
 ## 1.0.0 - 2026-10-03
 

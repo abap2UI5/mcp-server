@@ -282,6 +282,49 @@ test('buildLog serves the last build\'s output, sliced, with metadata, persisted
   }
 });
 
+/* The default screenshot dir is <tmp>/abap2ui5-mcp-screenshots - on Linux
+ * under /tmp, which every local user can write. A link of that name planted
+ * by another user received the build log (and the PNGs), and a restarted
+ * server's build_log answered from whatever last-build.json was there. TMPDIR
+ * points os.tmpdir() at a directory of this test's own. */
+test('the default screenshot dir is written and read only when it is the user\'s own', { skip: process.platform === 'win32' && 'POSIX links' }, async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-shotdir-'));
+  const savedTmp = process.env.TMPDIR;
+  try {
+    const theirs = path.join(tmp, 'theirs');
+    fs.mkdirSync(theirs);
+    fs.symlinkSync(theirs, path.join(tmp, 'abap2ui5-mcp-screenshots'));
+    process.env.TMPDIR = tmp;
+    await withFakeRepos('console.log("built"); process.exit(0);', { A2UI5_MCP_SCREENSHOT_DIR: '' }, async () => {
+      assert.equal((await buildBackend({ mode: 'full' })).ok, true);
+    });
+    assert.deepEqual(fs.readdirSync(theirs), [], 'no build log written through the link');
+
+    // a fresh server reads no planted log either
+    fs.writeFileSync(path.join(theirs, 'last-build.json'), JSON.stringify({ lines: ['planted'], ok: true }));
+    const env = { ...process.env, TMPDIR: tmp };
+    delete env.A2UI5_MCP_SCREENSHOT_DIR;
+    const res = await spawnWithTimeout(process.execPath, ['--input-type=module', '-e',
+      `const { buildLog } = await import(${JSON.stringify(new URL('../lib/runtime.mjs', import.meta.url).href)}); console.log(JSON.stringify(buildLog()));`],
+    { env, timeoutMs: 30000 });
+    assert.equal(res.code, 0, res.stderr);
+    assert.equal(res.stdout.trim().split('\n').pop(), 'null');
+
+    // a directory of the user's own is created 0700 and used
+    fs.unlinkSync(path.join(tmp, 'abap2ui5-mcp-screenshots'));
+    await withFakeRepos('console.log("built"); process.exit(0);', { A2UI5_MCP_SCREENSHOT_DIR: '' }, async () => {
+      assert.equal((await buildBackend({ mode: 'full' })).ok, true);
+    });
+    const own = path.join(tmp, 'abap2ui5-mcp-screenshots');
+    assert.equal(fs.statSync(own).mode & 0o777, 0o700);
+    assert.ok(fs.existsSync(path.join(own, 'last-build.json')));
+  } finally {
+    if (savedTmp === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = savedTmp;
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('sliceLog stays within bounds however it is paged', async () => {
   const { sliceLog } = await import('../lib/runtime.mjs');
   const lines = ['a', 'b', 'c'];

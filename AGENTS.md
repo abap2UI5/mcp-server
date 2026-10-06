@@ -69,7 +69,10 @@ the linter's variable, is read after it — then Playwright's managed browser,
 then a system binary, `resolveChromium`),
 `A2UI5_MCP_SCREENSHOT_DIR` (where `run_app` and `interact_app` write their
 PNGs; default `<tmp>/abap2ui5-mcp-screenshots`, and deliberately not the
-install directory — that is inside `node_modules` for an npx/npm install),
+install directory — that is inside `node_modules` for an npx/npm install;
+the default is used only while it is a real directory of the user's own,
+created 0700 - otherwise the PNG is returned but not saved, under
+`screenshotNotSaved`, and no build log is kept there - `lib/private-dir.mjs`),
 `A2UI5_MCP_PREBUILT_URL` (where `build_backend` mode `prebuilt` downloads
 from; default the framework release asset, see below), the mirror knobs
 `A2UI5_MCP_REMOTE=0` / `A2UI5_MCP_REMOTE_DIR` / `A2UI5_MCP_REMOTE_TTL_MS`

@@ -30,13 +30,17 @@ Worth knowing before assessing a report:
   started with `HOST=127.0.0.1`.
 - **A default directory under the shared temp dir is used only when it is
   the user's own.** The GitHub mirror's default base,
-  `<tmp>/abap2ui5-mcp-remote`, has a fixed name under `os.tmpdir()` - `/tmp`
-  on Linux, which every local user can write. It is read and written only
+  `<tmp>/abap2ui5-mcp-remote`, and the default screenshot dir,
+  `<tmp>/abap2ui5-mcp-screenshots` (the PNGs of `run_app` and
+  `interact_app`, and the build log `build_log` reads after a restart), have
+  fixed names under `os.tmpdir()` - `/tmp` on Linux, which every local user
+  can write. Each is read and written only
   when it is a real directory (no symbolic link), owned by the user running
   the server and writable by nobody else; the server creates it 0700 and
   narrows one of its own that others can read (`lib/private-dir.mjs`).
-  Anything else is refused with the reason, and `A2UI5_MCP_REMOTE_DIR` puts
-  the mirror elsewhere (a directory that variable names is not checked).
+  Anything else is refused with the reason - a screenshot is then returned
+  but not saved - and `A2UI5_MCP_REMOTE_DIR` / `A2UI5_MCP_SCREENSHOT_DIR` put
+  them elsewhere (a directory those variables name is not checked).
 - **It runs with the privileges of whoever started it**, over the checkouts
   beside it, and the expensive half of its tool loop (`build_backend`,
   `run_app`) **executes code**: it transpiles the ABAP and boots the resulting

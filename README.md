@@ -505,8 +505,10 @@ duplicates none of their content:
 - **Screenshots:** `run_app` writes its PNG to
   `<tmp>/abap2ui5-mcp-screenshots/<class>.png` and returns the path beside the
   image — deliberately not into the install directory, which is inside
-  `node_modules` when you install from npm. `A2UI5_MCP_SCREENSHOT_DIR` puts them
-  somewhere you keep.
+  `node_modules` when you install from npm. That directory is created 0700 and
+  used only while it is your own (`/tmp` is shared on Linux); otherwise the
+  image is returned but not saved, and `screenshotNotSaved` says why.
+  `A2UI5_MCP_SCREENSHOT_DIR` puts them somewhere you keep.
 - **`scope_of` needs an OpenUI5 checkout** as well as the corpus: it reads the
   JSDoc from `OPENUI5_SRC`, or from `../fork-openui5` beside the
   **samples-controls** checkout when that variable is unset.

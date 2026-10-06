@@ -1214,6 +1214,7 @@ async function handle(name, args = {}, ctx = {}) {
         ok: res.ok,
         errors: res.errors,
         screenshot: res.screenshotPath,
+        ...(res.screenshotNotSaved ? { screenshotNotSaved: res.screenshotNotSaved } : {}),
       };
       const content = [{ type: 'text', text: JSON.stringify(report, null, 2) }];
       if (res.base64) content.push({ type: 'image', data: res.base64, mimeType: 'image/png' });
@@ -1242,6 +1243,7 @@ async function handle(name, args = {}, ctx = {}) {
         ...(res.notPerformed ? { notPerformed: res.notPerformed } : {}),
         errors: res.errors,
         screenshot: res.screenshotPath,
+        ...(res.screenshotNotSaved ? { screenshotNotSaved: res.screenshotNotSaved } : {}),
         ...(res.booted ? {} : { hint: 'the app did not boot, so no action was performed - run_app shows the boot on its own' }),
       };
       const content = [{ type: 'text', text: JSON.stringify(report, null, 2) }];
