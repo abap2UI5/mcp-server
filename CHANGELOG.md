@@ -70,6 +70,10 @@
   whole lines.** Lines were cut at the pipe's chunk boundaries (one line in
   two halves, a UTF-8 character as two replacement characters); each stream
   is decoded as UTF-8 and buffered to its newline now.
+- **The backend's stderr is no longer kept for its whole life.** The start
+  collects the child's output to report a failed start, and went on
+  appending every line the backend wrote to stderr after it was listening -
+  memory the server never released during a session.
 
 ## 1.0.0 - 2026-10-03
 
