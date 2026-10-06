@@ -282,6 +282,12 @@
   `app_start` opened a second one. The refusal ends "(the app is running:
   session <id> - app_describe shows it)" now, as the ABAP agent addon's
   does.
+- **A number field takes a number, not whatever `Number()` makes of a
+  value.** `app_act` read a value for a field whose model holds a number
+  with `Number()`, so `true` went out as 1, `"0x10"` as 16, `"1e3"` as 1000,
+  and `"Infinity"` as `null` - the field's initial value, without a word.
+  A number or a decimal string is taken now, as the agent addon's
+  `describe_arg` reads it; anything else is refused naming the field.
 
 ## 1.0.0 - 2026-10-03
 

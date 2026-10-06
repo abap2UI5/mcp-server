@@ -715,6 +715,24 @@ test('app_start values that are refused name the session the start opened, as th
   assert.deepEqual(be.posts[1].value.MODEL, { NAME: 'Ann' });
 });
 
+test('a number field takes a number or a decimal string, as the agent addon does - nothing Number() would bend into one', async () => {
+  const VIEW = page('<Input value="{/QTY}"/><Button text="Check" press=".eB([\'CHECK\'])"/>');
+  const be = scripted((req, n, value) => (value.S_FRONT.ID ? eventAnswer(n) : { S_FRONT: { ID: 'D1', APP: 'Z_T', S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'display', 'MAIN', VIEW]] } }, MODEL: { QTY: 1 } }));
+  const c = be.client();
+  const s = await c.start('z_t');
+  // Infinity went out as null (the field's initial value), 0x10 as 16, true as 1
+  for (const bad of [true, '0x10', '1e3', 'Infinity', '1e400', '', ' ', '5 apples']) {
+    await rejects(c.act(s.session, { values: { '/QTY': bad } }), /^field f1 \(QTY\) holds a number - .* is none$/);
+  }
+  assert.equal(c.describe(s.session).pending, undefined, 'nothing of it was applied');
+  for (const [given, stored] of [[7, 7], ['-2.5', -2.5], [' 42 ', 42]]) {
+    const a = await c.act(s.session, { values: { '/QTY': given } });
+    assert.equal(a.fields[0].value, stored);
+  }
+  await c.act(s.session, { event: 'CHECK' });
+  assert.deepEqual(be.posts[1].value.MODEL, { QTY: 42 });
+});
+
 test('a field bound through __proto__ writes nothing into this process\'s prototypes', async () => {
   const VIEW = page('<Input value="{/__proto__/a2ui5Polluted}"/><Input value="{/constructor/prototype/a2ui5Polluted}"/><Input value="{/NAME}"/><Button text="Check" press=".eB([\'CHECK\'])"/>');
   const be = scripted((req, n, value) => (value.S_FRONT.ID ? eventAnswer(n) : startAnswer({ S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'display', 'MAIN', VIEW]] } })));

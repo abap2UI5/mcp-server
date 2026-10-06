@@ -338,7 +338,9 @@ The current state from the last response kept — no roundtrip.
      cell disabled in that row → error. Booleans take `true`/`false` (or the
      strings); a `choice` takes one of its `values` keys, a `multichoice` an
      array of them. A value is stored in the type the model holds there (a
-     Number input bound to a string attribute stays a string). A path through
+     Number input bound to a string attribute stays a string); where the
+     model holds a number, the value is a number or a decimal string
+     (`-?[0-9]+(.[0-9]+)?`, as the ABAP addon reads it). A path through
      `__proto__`, `constructor` or `prototype` is refused: the write would
      land on the client process's own prototypes, not in the model.
    - `event` is an action's `event` or its `id`. Unknown → error listing the
