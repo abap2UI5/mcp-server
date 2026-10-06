@@ -276,6 +276,12 @@
   `Object.prototype` and was read as a field spec without properties - a
   TypeError, and `app_start` / `app_describe` / `app_act` failed for that
   screen. Only the tables' own keys are read now.
+- **`app_start` names the session it started when its `values` are
+  refused.** The app was running and kept in the client, but the refusal
+  carried no session id, so it was out of reach and the agent's next
+  `app_start` opened a second one. The refusal ends "(the app is running:
+  session <id> - app_describe shows it)" now, as the ABAP agent addon's
+  does.
 
 ## 1.0.0 - 2026-10-03
 

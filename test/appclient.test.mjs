@@ -704,6 +704,17 @@ test('a model push re-applies an unsent edit only where its parent still exists,
   assert.equal(JSON.stringify(be.posts[2].value.MODEL), '{"NAME":"Ann","T":{"__delta":{"2":{}}}}', 'the delta the frontend builds from that model');
 });
 
+test('app_start values that are refused name the session the start opened, as the agent addon does', async () => {
+  const be = scripted((req, n, value) => (value.S_FRONT.ID ? eventAnswer(n) : startAnswer()));
+  const c = be.client();
+  await rejects(c.start('z_t', { values: { '/NOPE': 'x' } }), /^no field '\/NOPE' on this screen - .* \(the app is running: session D1 - app_describe shows it\)$/);
+  const s = c.describe('D1');
+  assert.equal(s.session, 'D1', 'the started app is reachable');
+  assert.equal(s.pending, undefined, 'and none of the refused values was applied');
+  await c.act('D1', { values: { '/NAME': 'Ann' }, event: 'CHECK' });
+  assert.deepEqual(be.posts[1].value.MODEL, { NAME: 'Ann' });
+});
+
 test('a field bound through __proto__ writes nothing into this process\'s prototypes', async () => {
   const VIEW = page('<Input value="{/__proto__/a2ui5Polluted}"/><Input value="{/constructor/prototype/a2ui5Polluted}"/><Input value="{/NAME}"/><Button text="Check" press=".eB([\'CHECK\'])"/>');
   const be = scripted((req, n, value) => (value.S_FRONT.ID ? eventAnswer(n) : startAnswer({ S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'display', 'MAIN', VIEW]] } })));

@@ -320,7 +320,8 @@ deployed after the last build is not listed. ABAP: the implementers of
 ### `app_start({ app, values?, max_rows? })` → snapshot
 
 Starts the class (the app-start POST). `values` are applied as pending edits
-afterwards (validated against the first snapshot). Node starts the local
+afterwards (validated against the first snapshot); the app runs either way,
+so a refusal of them names the session it started. Node starts the local
 backend first, like `run_app`.
 
 ### `app_describe({ session, max_rows? })` → snapshot
