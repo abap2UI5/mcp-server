@@ -128,6 +128,17 @@ test('the npm sandbox is the workspace\'s, and deploy, list, read and remove wor
   assert.equal(readAppSource('zcl_npm_app').staleInBackend, false);
   assert.equal(removeApp('zcl_npm_app'), 3);
   assert.deepEqual(listDevApps(), []);
+  /* a class deployed with its includes (migrate_report's deploy, an
+   * abap2ui5-unit run) goes whole - an include left behind was still an
+   * object of the next build - and a class whose name merely starts the
+   * same stays */
+  deployApp({ className: 'zcl_npm_app', source: APP('zcl_npm_app') });
+  deployApp({ className: 'zcl_npm_app2', source: APP('zcl_npm_app2') });
+  for (const inc of ['locals_imp', 'locals_def', 'macros']) fs.writeFileSync(path.join(box.dir, `zcl_npm_app.clas.${inc}.abap`), '*\n');
+  assert.equal(removeApp('zcl_npm_app'), 5);
+  assert.deepEqual(fs.readdirSync(box.dir).filter((f) => f.startsWith('zcl_npm_app.')), []);
+  assert.deepEqual(listDevApps(), ['zcl_npm_app2']);
+  removeApp('zcl_npm_app2');
 }));
 
 test('a dev app named like one of the framework\'s own objects is refused, not built as a second copy', withNpm(async (t, { dir }) => {

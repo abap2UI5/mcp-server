@@ -48,6 +48,11 @@
   pre-rename directory names left that one out (lib/repo-dirs.json has it),
   so such a checkout was cloned a second time as `samples-controls`. A test
   now holds the script's lists against the JSON.
+- **`remove_app` removes every file of the class.** It removed the source,
+  the sidecar and the test include, and left the local-class includes
+  (`locals_imp`, `locals_def`, `macros`) that `migrate_report { deploy:
+  true }` writes - the class disappeared from the deployed-apps list while
+  its includes stayed in the next build's input.
 
 ## 1.0.0 - 2026-10-03
 
