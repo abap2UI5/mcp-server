@@ -168,9 +168,10 @@ nearest mapped ancestor (anything below `sap.m.InputBase` is a `text` field).
 Implementations without that metadata use the table alone.
 
 Not fields: controls inside a table template (they are `editableCells`),
-values bound to a named model (`{device>/…}`), to a relative path outside a
-table (an element binding), or to a formatter/composite (listed in
-`unsupported` where relevant).
+values bound to a named model (`{device>/…}`, or `{path: '/…', model:
+'device'}` - the object syntax's `model` key names the model too), to a
+relative path outside a table (an element binding), or to a
+formatter/composite (listed in `unsupported` where relevant).
 
 ### actions
 
@@ -319,7 +320,8 @@ deployed after the last build is not listed. ABAP: the implementers of
 ### `app_start({ app, values?, max_rows? })` → snapshot
 
 Starts the class (the app-start POST). `values` are applied as pending edits
-afterwards (validated against the first snapshot). Node starts the local
+afterwards (validated against the first snapshot); the app runs either way,
+so a refusal of them names the session it started. Node starts the local
 backend first, like `run_app`.
 
 ### `app_describe({ session, max_rows? })` → snapshot
@@ -336,13 +338,27 @@ The current state from the last response kept — no roundtrip.
      cell disabled in that row → error. Booleans take `true`/`false` (or the
      strings); a `choice` takes one of its `values` keys, a `multichoice` an
      array of them. A value is stored in the type the model holds there (a
-     Number input bound to a string attribute stays a string).
+     Number input bound to a string attribute stays a string); where the
+     model holds a number, the value is a number or a decimal string
+     (`-?[0-9]+(.[0-9]+)?`, as the ABAP addon reads it). A path through
+     `__proto__`, `constructor` or `prototype` is refused: the write would
+     land on the client process's own prototypes, not in the model.
    - `event` is an action's `event` or its `id`. Unknown → error listing the
      enabled actions; a disabled action → error. When several actions share
      the event name, the first enabled one wins (the row-scope one when `row`
-     is given) — use the id to pick another.
+     is given) — use the id to pick another. Ids follow the document order,
+     so `values` that show or hide a control can renumber them: the act fires
+     the action it validated - the one action of the screen after the values
+     that is the same (event, control, trigger, scope, arguments) - and is
+     refused when that is not one action any more, also when the values hid
+     it (fill the values without an event first, then fire it from the next
+     snapshot). It is refused as well when the values disable it (a Delete
+     button with `enabled="{/OPEN}"`, `OPEN` set to `false` in the same
+     act): the browser cannot press it then. A refused act sends nothing
+     and leaves the values unapplied.
    - A row action whose arguments read the row needs `row` (0-based, within
-     `rowCount`); a `$parameters`/`$expr` argument the row does not fill (see
+     `rowCount`; a non-negative integer - a number or a string of digits,
+     anything else is refused); a `$parameters`/`$expr` argument the row does not fill (see
      [row event parameters](#row-event-parameters)) and every `$event`
      argument needs its value in `args` (positional, `null` where the client
      fills in); a static argument cannot be overridden.
@@ -355,7 +371,9 @@ The current state from the last response kept — no roundtrip.
 4. **With `event`**: the pending edits **of the model the event's view owns**
    go out as `MODEL` delta with `EVENT` and `T_EVENT_ARG`; the answer is
    folded in; the new snapshot carries the new `session`. Pending edits of
-   another slot's model stay pending, as in the browser.
+   another slot's model stay pending, as in the browser - unless the answer
+   displays that slot's view anew: its model is a new one, and the edits of
+   the old view are dropped with it (a model push keeps them).
 5. A backend error (HTTP status, no JSON, another `PROTOCOL`) → error with
    the backend's text, shown verbatim (a `<b>` in it is text - the body is
    `text/plain`, protocol `spec/errors.md`; only shortened, and control
@@ -433,7 +451,9 @@ abap2UI5's `z2ui5_cl_pop_to_select` and the popups addon's
 answers `sPath` (`<table path>/<row>`, e.g. `/T_TAB/2`), an array its index
 and `length`; a path that ends at an item or a context (the browser sends the
 control marshalled with all its properties) or goes into one any further, or
-names a parameter outside the table above, is refused naming `args[i]`.
+at a value that holds one (`${$parameters>/}` and `${$parameters>}`, the
+whole parameter object), or names a parameter outside the table above, is
+refused naming `args[i]`.
 
 `$expr:` arguments are filled for these shapes on a row-valued parameter `P`
 (whitespace around `.` and inside `()` is allowed), and refused naming
@@ -459,7 +479,8 @@ and `<StandardListItem title="{NAME}"/>` sends the picked row's `NAME`.
 
 The client keeps the last response per session in memory (Node: the 20 most
 recent sessions). Only the **current** draft id of a session is accepted: an
-earlier one is refused naming the current one. A session started on a backend
+earlier one is refused naming the current one (the last 100 earlier ids of a
+session; an older one is an unknown session). A session started on a backend
 process that has since stopped or restarted is refused (its drafts lived in
 that process) — on the local backend; an embedder without a process to watch
 leaves the check out (see below).

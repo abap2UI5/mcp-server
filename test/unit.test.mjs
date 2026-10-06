@@ -5,12 +5,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { stripJsonc, LOCAL_BENIGN, benignRules, deployApp, removeApp } from '../lib/runtime.mjs';
 import { parseCapabilities, searchCapabilities } from '../lib/capabilities.mjs';
-import { parseExamples, searchExamples, catalogueEntries, CATALOGUES } from '../lib/examples.mjs';
+import { parseExamples, searchExamples, catalogueEntries, CATALOGUES, matchRow } from '../lib/examples.mjs';
 import { CORPUS_DIRS, resolveLintConfig, viewCheckCandidates, SERVER_ROOT } from '../lib/repos.mjs';
 import { sliceCatalogue } from '../lib/pitfalls.mjs';
 import { sliceGuide, guideChapters } from '../lib/guide.mjs';
 import { parseApi, searchApi, apiSummary } from '../lib/api.mjs';
-import { searchDocs } from '../lib/docs.mjs';
+import { searchDocs, slicePage, headingText, markdownLinks } from '../lib/docs.mjs';
 import { parseSizes } from '../lib/screenshot.mjs';
 import { oneOf, boundedInt, stringArray, checkStringArgs } from '../lib/args.mjs';
 import { readCached } from '../lib/cache.mjs';
@@ -837,6 +837,28 @@ test('searching the catalogue narrows on every term and ranks a keyword hit firs
   assert.deepEqual(q('bookmark', { area: 'experimental-or-test' }), ['Z2UI5_CL_SMP_APP_321']);
 });
 
+/* abap2UI5/samples flattened src/01 and src/00 into one `src/` package
+ * (2026-09-22). The area used to be read off src/01, so every sample of a
+ * current checkout was filed as experimental-or-test and `area: samples` -
+ * the filter the description recommends - answered nothing. src/00 decides. */
+test('a sample in the flat src/ package is the supported set, not experimental-or-test', () => {
+  const flat = [
+    '## Basics',
+    '',
+    '| **Basics I** — Hello World<br><sub>hello world</sub> | [`Z2UI5_CL_SMP_APP_493`](src/z2ui5_cl_smp_app_493.clas.abap) |',
+  ].join('\n');
+  assert.equal(parseExamples(flat)[0].area, 'samples');
+  assert.deepEqual(searchExamples({ query: 'hello', area: 'samples', rawText: flat }).map((e) => e.cls), ['Z2UI5_CL_SMP_APP_493']);
+  assert.deepEqual(searchExamples({ query: 'hello', area: 'experimental-or-test', rawText: flat }), []);
+  // the JSON adapter too: samples' catalogue.json names the flat paths
+  const [json] = searchExamples({
+    area: 'samples',
+    rawCatalogue: { samples: [{ class: 'z2ui5_cl_smp_app_540', file: 'src/z2ui5_cl_smp_app_540.clas.abap', category: 'AI', title: 'AI' }] },
+  });
+  assert.equal(json.cls, 'Z2UI5_CL_SMP_APP_540');
+  assert.equal(json.area, 'samples');
+});
+
 /* The `docs:` block is a per-sample list of the cookbook chapters somebody
  * decided that app is the worked example of - and this parser knew it only
  * well enough to SKIP it while looking for the keywords. So the agent got a
@@ -1248,6 +1270,24 @@ test('a docs checkout is found through DOCS_HOME and its probe', () => {
   }
 });
 
+/* One dangling symbolic link anywhere under docs/ threw out of the tree walk
+ * (statSync on its target), and every docs_search failed with ENOENT. */
+test('a dangling symbolic link in the docs tree is skipped, not the whole search', { skip: process.platform === 'win32' && 'symbolic links need privileges there' }, () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-docs-link-'));
+  try {
+    fs.mkdirSync(path.join(home, 'docs', 'cookbook'), { recursive: true });
+    fs.writeFileSync(path.join(home, 'docs', 'index.md'), '# docs');
+    fs.writeFileSync(path.join(home, 'docs', 'cookbook', 'value_help.md'), '# Value Help\n\nvalue help text');
+    fs.symlinkSync('gone.md', path.join(home, 'docs', 'cookbook', 'broken.md'));
+    const out = execFileSync(process.execPath, ['-e',
+      "import('./lib/docs.mjs').then(m => process.stdout.write(JSON.stringify(m.searchDocs({ query: 'value help' }).map((e) => e.path))))"],
+    { cwd: ROOT, env: { ...process.env, DOCS_HOME: home }, encoding: 'utf8' });
+    assert.deepEqual(JSON.parse(out), ['cookbook/value_help']);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 // ------------------------------------------------------------------ api ----
 /* The client API (z2ui5_if_client), parsed from a fixture that carries every
  * shape the real interface uses: single-line and multi-line METHODS, ABAP-Doc
@@ -1415,6 +1455,9 @@ test('a viewport is bounded in size and in number', () => {
   assert.throws(() => parseSizes(['99999x99999']), /out of range/);
   assert.throws(() => parseSizes(['4097x100']), /out of range/);
   assert.doesNotThrow(() => parseSizes(['4096x4096']), 'the limit itself is still a viewport');
+  // a zero edge matched the two-digit pattern; Chromium takes 0 as "no override"
+  for (const tiny of ['00x10', '10x00', '09x844']) assert.throws(() => parseSizes([tiny]), /out of range/, tiny);
+  assert.doesNotThrow(() => parseSizes(['10x10']), 'the lower limit itself is still a viewport');
   assert.throws(() => parseSizes(Array(9).fill('390x844')), /too many sizes/);
   assert.doesNotThrow(() => parseSizes(Array(8).fill('390x844')));
 });
@@ -1836,6 +1879,51 @@ test('validate_view falls back to the property gate when the render gate cannot 
   await assert.rejects(withRenderFallback({ render: false, withRender: async () => { throw new Error('parse'); }, withoutRender: async () => ({}) }), /parse/);
 });
 
+/* A warm renderer that THROWS mid-call (a wedged page its dead browser could
+ * not reload) is retired and the check run cold - not handed to the
+ * fallback above, which answered the property findings alone with a note
+ * that the render gate "could not start". Composed the way validate_view
+ * composes them. */
+test('validate_view retries a throwing warm renderer cold before falling back', async () => {
+  const { withRenderFallback, warmThenCold } = await import('../lib/validate.mjs');
+  const calls = [];
+  const rendered = { findings: [], renderErrors: ['Unknown control sap.m.Buton'] };
+  const res = await withRenderFallback({
+    render: true,
+    withRender: () => warmThenCold({
+      warm: async () => { calls.push('warm'); throw new Error('page.reload: Target page, context or browser has been closed'); },
+      cold: async () => { calls.push('cold'); return rendered; },
+      drop: async () => { calls.push('drop'); },
+      looksDead: () => false,
+    }),
+    withoutRender: async () => { calls.push('properties'); return { findings: [] }; },
+  });
+  assert.deepEqual(calls, ['warm', 'drop', 'cold']);
+  assert.equal(res.renderSkipped, null, 'the render gate ran - cold');
+  assert.equal(res.result, rendered);
+
+  // a dead browser that did not throw: dropped and retried cold too
+  const dead = [];
+  const r2 = await warmThenCold({
+    warm: async () => { dead.push('warm'); return { renderErrors: ['HARNESS: browser has been closed'] }; },
+    cold: async () => { dead.push('cold'); return rendered; },
+    drop: async () => { dead.push('drop'); },
+    looksDead: (r) => r.renderErrors.length > 0,
+  });
+  assert.deepEqual(dead, ['warm', 'drop', 'cold']);
+  assert.equal(r2, rendered);
+  // a healthy warm run is the answer, nothing dropped
+  const healthy = await warmThenCold({ warm: async () => rendered, cold: async () => { throw new Error('not called'); }, drop: async () => { throw new Error('not called'); }, looksDead: () => false });
+  assert.equal(healthy, rendered);
+  // a cold run that throws too is the fallback's case, with ITS reason
+  const both = await withRenderFallback({
+    render: true,
+    withRender: () => warmThenCold({ warm: async () => { throw new Error('warm'); }, cold: async () => { throw new Error('no chromium'); }, drop: async () => {}, looksDead: () => false }),
+    withoutRender: async () => ({ findings: [] }),
+  });
+  assert.equal(both.renderSkipped, 'no chromium');
+});
+
 // ------------------------------------------------------- small contracts ----
 
 /* The generation_rules footer linked docs/cookbook/overview, a page the site
@@ -1899,6 +1987,34 @@ test('a string argument that is not a string is refused by name, for every tool'
   }
 });
 
+/* The handlers read booleans as `=== true` / `=== false`, so a client that
+ * stringified them got the default without a word: add_agent_setup with
+ * dry_run "true" WROTE into the project, migrate_report deploy "true"
+ * deployed nothing. And screenshot_view's model "..." was spread into the
+ * derived model one character per key. Both are checked against the schema
+ * like the strings. */
+test('a boolean or object argument of the wrong type is refused by name, for every tool', async () => {
+  const { TOOLS } = await import('../lib/tools.mjs');
+  const tool = (n) => TOOLS.find((x) => x.name === n);
+  assert.throws(() => checkStringArgs(tool('add_agent_setup'), { dry_run: 'true' }), /dry_run must be a boolean.*"true" \(string\)/);
+  assert.throws(() => checkStringArgs(tool('migrate_report'), { source: 'x', deploy: 1 }), /deploy must be a boolean/);
+  assert.throws(() => checkStringArgs(tool('screenshot_view'), { model: 'T_ITEMS' }), /model must be an object/);
+  assert.throws(() => checkStringArgs(tool('screenshot_view'), { model: [{ A: 1 }] }), /model must be an object.*an array/);
+  checkStringArgs(tool('add_agent_setup'), { dry_run: false });
+  checkStringArgs(tool('screenshot_view'), { model: { T_ITEMS: [] } });
+  checkStringArgs(tool('verify_app'), { boot: null, render: undefined });
+  for (const t of TOOLS) {
+    for (const [name, schema] of Object.entries(t.inputSchema.properties || {})) {
+      if (schema.type === 'boolean') {
+        assert.throws(() => checkStringArgs(t, { [name]: 'false' }), new RegExp(`${name} must be a boolean`), `${t.name}.${name}`);
+      }
+      if (schema.type === 'object') {
+        assert.throws(() => checkStringArgs(t, { [name]: 'x' }), new RegExp(`${name} must be an object`), `${t.name}.${name}`);
+      }
+    }
+  }
+});
+
 /* setup_status only knew three hard-coded paths (one of them a sandbox
  * image's /opt/pw-browsers link), so a machine with a perfectly good
  * Playwright-managed Chromium was reported as having none. */
@@ -1916,4 +2032,142 @@ test('the Chromium is the explicit one, then Playwright\'s own, then a system bi
     { path: '/x/chrome', source: 'A2UI5_MCP_CHROMIUM', exists: false }, 'an explicit choice is reported even when it is wrong');
   assert.equal(resolveChromium({ env: { CHROMIUM_BIN: '/y' }, exists: has('/y'), managed }).source, 'CHROMIUM_BIN');
   assert.equal(resolveChromium({ env: {}, exists: has(), managed }), null);
+});
+
+// ------------------------------------------------------------- setup.sh ----
+/* setup.sh reuses an existing checkout under any directory name it carried
+ * before a rename - by its own list, a second copy of lib/repo-dirs.json. It
+ * left out `abap2UI5-api`, so a corpus checked out under that name was cloned
+ * a second time as samples-controls. Pinned against the JSON. */
+test('setup.sh reuses every directory name lib/repo-dirs.json knows for the checkouts it clones', async () => {
+  const { REPO_DIRS } = await import('../lib/repos.mjs');
+  const script = fs.readFileSync(path.join(ROOT, 'setup.sh'), 'utf8');
+  const calls = [...script.matchAll(/^[ \t]*ensure_repo[ \t]+(\S+)[ \t]+(\S+)((?:[ \t]+\S+)*)[ \t]*$/gm)]
+    .map((m) => [m[1], ...m[3].trim().split(/[ \t]+/).filter(Boolean)]);
+  assert.ok(calls.length >= 3, 'setup.sh ensure_repo calls found');
+  for (const dirs of calls) {
+    const entry = Object.values(REPO_DIRS).find((r) => r.dirs[0] === dirs[0]);
+    assert.ok(entry, `setup.sh clones ${dirs[0]}, which repo-dirs.json does not name`);
+    assert.deepEqual(dirs, entry.dirs, `setup.sh's names for ${dirs[0]}`);
+  }
+});
+
+// ------------------------------------- markdown parsers over runs of blanks ----
+
+/* The patterns these parsers used: a lazy group or a \s* in front of another
+ * \s* retried every split of a run of blanks - quadratic for a heading, cubic
+ * for a catalogue row ('| ' + 1000 blanks + '|' took 85 s). The rewrites must
+ * match the same lines and capture the same text. */
+const OLD_ROW = /^\|\s*(?:\*\*(?<title>[^*]+)\*\*\s*(?:(?:—|--)\s*)?)?(?<sub>[^|<]*?)\s*(?<blocks>(?:<br>(?:<[a-z]+>[^<]*<\/[a-z]+>|[^<]*))*)\s*\|\s*\[`(?<cls>[A-Z0-9_]+)`\]\((?<path>[^)]+)\)\s*\|/;
+/* ROW_PATTERN is OLD_ROW with its blanks kept atomically - what lib/examples.mjs
+ * matched with until matchRow spelled it out (its link scan was quadratic). */
+const ROW_PATTERN = /^\|(?=(\s*))\1(?:\*\*(?<title>[^*]+)\*\*(?=(\s*))\3(?:(?:—|--)(?=(\s*))\4)?)?(?=(?<sub>[^|<]*))\k<sub>(?<blocks>(?:<br>(?:<[a-z]+>[^<]*<\/[a-z]+>|[^<]*(?!\s)))*)\s*\|\s*\[`(?<cls>[A-Z0-9_]+)`\]\((?<path>[^)]+)\)\s*\|/;
+/* mulberry32: an LCG over doubles taken mod n loses its low bits (seeded(7)
+ * answered rnd(12) with 0, 4 and 8 only), and the fuzzers then never built
+ * most of the rows they list */
+const seeded = (seed) => (n) => {
+  seed = (seed + 0x6d2b79f5) | 0;
+  let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) % n;
+};
+const LS = String.fromCharCode(0x2028);
+
+test('matchRow matches what the row patterns matched, with the same groups', () => {
+  const rnd = seeded(7);
+  const pick = (a) => a[rnd(a.length)];
+  const ws = () => pick(['', ' ', '  ', '\t', ' \r ', '   ', LS, '\u00a0']);
+  const part = () => pick(['', 'a', 'a b', 'x | y', 'a*b', 'a — b', '--x', '<x', '|', '*', '**', ')', '(', '[`', '`', 'Z', '<br>', '</b>', '<b>']);
+  const block = () => pick(['<br>' + part(), `<br><sub>${part()}</sub>`, `<br><i>${part()}</i>`, '<br>', '<br><sub>docs: [a](b)</sub>', `<br>${part()} | [\`Z\`](z) `,
+    '<br><br>x</b>', `<br><${pick(['br', 'b', 'sub', ''])}>${part()}</${pick(['b', 'sub', '', 'x1'])}>`, '<br> ', '<br>' + ws() + part() + ws()]);
+  const link = () => pick(['[`A`](p)', '[`B_2`](s/y.abap)', '[`A`](p)', '[`A_1`](src/x.abap)', '[`a`](p)', '[`A`]()', '[`A`](p', 'A', '[``](p)', '[`A`] (p)', '[`A`](p))', '[`A`](p|q)']);
+  const toks = ['|', ' ', '<br>', '<b>', '</b>', '[`A`](', 'p)', ')', '**', '—', '--', 'a', '\t', '<', '>', '/', 'Z'];
+  const exact = (m) => m && { title: m.groups.title, sub: m.groups.sub, blocks: m.groups.blocks, cls: m.groups.cls, path: m.groups.path, end: m[0].length };
+  const trimmed = (g) => g && { ...g, sub: (g.sub || '').trim() };
+  let matched = 0;
+  for (let k = 0; k < 60000; k += 1) {
+    let s;
+    if (rnd(4) === 0) {
+      s = '|';
+      for (let j = rnd(20); j > 0; j -= 1) s += pick(toks);
+    } else {
+      s = '|' + ws() + (rnd(2) ? `**${part()}**${ws()}${pick(['', '— ', '-- ', '—', '--', '-'])}${ws()}` : '') + part() + ws();
+      for (let b = rnd(5); b > 0; b -= 1) s += block() + ws();
+      s += pick(['|', '', ' |']) + ws() + link() + ws() + pick(['|', '', ' |', '| x |']) + pick(['', ' | [`B`](q) |', ' x', '<br>|[`C`](r)|']);
+      if (rnd(5) === 0) { const at = rnd(s.length); s = s.slice(0, at) + s.slice(at + 1 + rnd(3)); }
+      if (rnd(8) === 0) { const at = rnd(s.length); s = s.slice(0, at) + pick(toks) + s.slice(at); }
+    }
+    const row = matchRow(s);
+    if (row) matched += 1;
+    assert.deepEqual(row, exact(ROW_PATTERN.exec(s)), JSON.stringify(s));
+    // the first pattern's sub kept no trailing blanks; parseExamples trims it
+    assert.deepEqual(trimmed(row), trimmed(exact(OLD_ROW.exec(s))), JSON.stringify(s));
+  }
+  assert.ok(matched > 5000, `the generator makes rows that match (${matched})`);
+});
+
+test('markdownLinks finds what the link patterns found, and plain() replaces them alike', () => {
+  const rnd = seeded(5);
+  const toks = ['[', ']', '(', ')', 'a', ' ', '\n', '[a](', '](', '[]', '()', 'b c'];
+  const viaRegex = (re, s) => [...s.matchAll(re)].map((m) => ({ index: m.index, end: m.index + m[0].length, text: m[1], target: m[2] }));
+  let found = 0;
+  for (let k = 0; k < 100000; k += 1) {
+    let s = '';
+    for (let n = rnd(k % 10 === 0 ? 60 : 14); n > 0; n -= 1) s += toks[rnd(toks.length)];
+    const links = markdownLinks(s);
+    assert.deepEqual(links, viaRegex(/\[([^\]]+)\]\(([^)]*)\)/g, s), JSON.stringify(s));
+    assert.deepEqual(markdownLinks(s, { emptyTarget: false }), viaRegex(/\[([^\]]+)\]\(([^)]+)\)/g, s), JSON.stringify(s));
+    if (links.length) found += 1;
+    // the page title goes through plain(): link text kept, targets dropped, as the pattern did
+    const title = ((`# ${s}`.match(/^#\s+(\S.*)?/m) || [])[1] || '').trim();
+    const old = title.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/[*`]/g, '').replace(/\s+/g, ' ').trim();
+    assert.equal(slicePage(`# ${s}`).title, old, JSON.stringify(s));
+  }
+  assert.ok(found > 10000, `the generator makes links (${found})`);
+});
+
+test('headingText is the heading regex: same lines, same text', () => {
+  const rnd = seeded(11);
+  const toks = ['#', '#', '#', ' ', ' ', '\t', '\r', LS, 'a', 'b c', '*', '—', ' '];
+  for (let k = 0; k < 60000; k += 1) {
+    let s = '';
+    for (let n = rnd(10); n > 0; n -= 1) s += toks[rnd(toks.length)];
+    for (const [min, max] of [[1, 4], [2, 3]]) {
+      const m = new RegExp(`^#{${min},${max}}\\s+(.+?)\\s*$`).exec(s);
+      assert.equal(headingText(s, min, max), m ? m[1] : null, JSON.stringify(s));
+    }
+    const page = `${s}\n${toks[rnd(toks.length)]}\n# t`;
+    // slicePage hands the title to plain(): links, * and ` dropped, blanks folded
+    const old = (page.match(/^#\s+(.+?)\s*$/m) || [, ''])[1].trim().replace(/[*`]/g, '').replace(/\s+/g, ' ').trim();
+    assert.equal(slicePage(page).title, old, JSON.stringify(page));
+  }
+});
+
+test('catalogue rows and doc headings take linear time over a run of blanks', () => {
+  const blanks = ' '.repeat(100000);
+  const t0 = Date.now();
+  assert.deepEqual(parseExamples(`| ${blanks}|\n## a${blanks}b\n| **t** a${blanks}b |\n| **t** a<br>${blanks}| [\`X\`](p) x`), []);
+  const [row] = parseExamples(`## S${blanks}\n| **T** ${blanks}— s${blanks}<br>sum${blanks}| [\`Z_A\`](src/z_a.clas.abap)${blanks}|`);
+  assert.deepEqual([row.section, row.title, row.sub, row.summary, row.cls], ['S', 'T', 's', 'sum', 'Z_A']);
+  const page = slicePage(`# a${blanks}b\n## c${blanks}\r${blanks}\n#${blanks}`);
+  assert.equal(page.title, `a b`);
+  assert.ok(Date.now() - t0 < 2000, `took ${Date.now() - t0} ms`);
+});
+
+/* 0.4 s for a 50k row of "|[`A`](" (the link's `\(([^)]+)\)` scanned to the
+ * next parenthesis from every end a block could have), 3 s for 50k `[` in a
+ * docs page (the link text scanned to the next `]` from every `[`) */
+test('catalogue rows and markdown links take linear time over runs of link openers', () => {
+  const n = 400000;
+  const t0 = Date.now();
+  assert.deepEqual(parseExamples(`| a<br>${'|[`A`]('.repeat(n / 7)}\n| a<br>${'|[`A`]('.repeat(n / 7)})`), []);
+  assert.deepEqual(parseExamples(`|${'<br>'.repeat(n / 4)}`), []);
+  const [row] = parseExamples(`| **T** s<br><sub>docs: ${'['.repeat(n)}[a](u)</sub> | [\`Z_A\`](p) |`);
+  assert.deepEqual(row.docs, [{ topic: '['.repeat(n) + 'a', url: 'u' }]);
+  for (const body of ['['.repeat(n), '[a]('.repeat(n / 4), '[a'.repeat(n / 2)]) {
+    assert.equal(slicePage(`# t ${body}`).title.length, 2 + body.length);
+    // the snippet flattens the section body through plain()
+    assert.equal(searchDocs({ query: 'zz', pages: [{ path: 'p', text: `# zz\n${body}` }] }).length, 1);
+  }
+  assert.ok(Date.now() - t0 < 2000, `took ${Date.now() - t0} ms`);
 });

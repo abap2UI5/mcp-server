@@ -54,7 +54,7 @@ import { scaffold, readSpec, validClassName, classNameRule, templateFiles, SPEC_
 import { agentTargetProblem, planAgentSetup, writePlan, pinProblems, pinWarning, agentSetupNextSteps } from './lib/agent-setup.mjs';
 import { fixSource } from './lib/fixview.mjs';
 import { lintOptionsFor } from './lib/lintopts.mjs';
-import { withRenderFallback, renderSkippedNote } from './lib/validate.mjs';
+import { withRenderFallback, renderSkippedNote, warmThenCold } from './lib/validate.mjs';
 import { ANSWER_BUDGET, takeWithin, takeSmallestWithin } from './lib/budget.mjs';
 import { getRenderer, dropRenderer, closeRenderers, rendererLooksDead } from './lib/renderer.mjs';
 import { TOOLS } from './lib/tools.mjs';
@@ -166,23 +166,34 @@ async function hydrateRepos(keys) {
  * message and the number of lines seen so far as the (open-ended) progress
  * counter. Only wired up when the client asked for progress by sending a
  * progressToken (the MCP contract); notification failures never fail the
- * build. */
-function progressReporter({ progressToken, sendNotification }) {
+ * build.
+ *
+ * The counter belongs to the REQUEST, not to the reporter: verify_app hands
+ * its one ctx to every stage's handler, and each stage makes a reporter of
+ * its own - with a counter per reporter the progress of one progressToken
+ * went 1, 3 (the deploy lint), then 1 again (the build), and the spec says
+ * the value MUST increase with each notification. */
+const progressCounters = new WeakMap();
+function progressReporter(ctx) {
+  const { progressToken, sendNotification } = ctx;
   if (progressToken === undefined || progressToken === null || !sendNotification) return undefined;
-  let lines = 0;
-  let lastSent = 0;
+  let state = progressCounters.get(ctx);
+  if (!state) {
+    state = { lines: 0, lastSent: 0 };
+    progressCounters.set(ctx, state);
+  }
   // `force` skips the throttle for the milestones a caller must not lose -
   // the start/end marks around a phase, which are the whole progress story
   // for a child that prints little (abaplint answers in one JSON blob)
   return (line, force = false) => {
-    lines += 1;
+    state.lines += 1;
     const now = Date.now();
-    if (!force && now - lastSent < 1000) return;
-    lastSent = now;
+    if (!force && now - state.lastSent < 1000) return;
+    state.lastSent = now;
     Promise.resolve(
       sendNotification({
         method: 'notifications/progress',
-        params: { progressToken, progress: lines, message: String(line).slice(0, 300) },
+        params: { progressToken, progress: state.lines, message: String(line).slice(0, 300) },
       }),
     ).catch(() => {});
   };
@@ -889,18 +900,13 @@ async function handle(name, args = {}, ctx = {}) {
       const checkWithRender = async () => {
         const renderer = opt.render === false ? null : await getRenderer(GATE_POOL);
         if (!renderer) return check(opt);
-        let r;
-        try {
-          r = await check({ ...opt, renderer });
-        } catch (e) {
-          await dropRenderer(GATE_POOL); // whatever threw, a fresh one next call
-          throw e;
-        }
-        if (rendererLooksDead(r.renderErrors)) {
-          await dropRenderer(GATE_POOL);
-          r = await check(opt);
-        }
-        return r;
+        // whatever threw or died, a fresh one next call - and this call cold
+        return warmThenCold({
+          warm: () => check({ ...opt, renderer }),
+          cold: () => check(opt),
+          drop: () => dropRenderer(GATE_POOL, renderer),
+          looksDead: (r) => rendererLooksDead(r.renderErrors),
+        });
       };
       /* A render gate that cannot START (no @abap2ui5/linter-render, a
        * Chromium that will not launch) throws out of the linter; that throw
@@ -1030,11 +1036,11 @@ async function handle(name, args = {}, ctx = {}) {
         try {
           shots = await doShots(warmShot);
         } catch {
-          await dropRenderer(shotPool);
+          await dropRenderer(shotPool, warmShot);
           shots = await doShots(null);
         }
         if (shots && rendererLooksDead(shots.flatMap((s) => s.errors || []))) {
-          await dropRenderer(shotPool);
+          await dropRenderer(shotPool, warmShot);
           shots = await doShots(null);
         }
       } else {
@@ -1101,8 +1107,9 @@ async function handle(name, args = {}, ctx = {}) {
       else if (onNpm) miss = npmModeProblem(kind) ? toolError(npmModeProblem(kind)) : null;
       else if (!cloneable) miss = missingLocalSibling('abap2UI5');
       if (miss) return miss;
-      await stopBackend();
-      const res = await buildBackend({ mode, onLine: progressReporter(ctx), signal: ctx.signal });
+      /* the running backend is stopped once the build really starts: a call
+       * the in-flight build of another mode refuses leaves it running */
+      const res = await buildBackend({ mode, onLine: progressReporter(ctx), signal: ctx.signal, beforeBuild: stopBackend });
       if (res.aborted) return toolError(`build cancelled by the client (mode ${res.mode || mode}):\n${res.tail}`);
       if (!res.ok) return toolError(`build failed (exit ${res.code}, mode ${res.mode || mode}):\n${res.tail}`);
       return text({
@@ -1207,6 +1214,7 @@ async function handle(name, args = {}, ctx = {}) {
         ok: res.ok,
         errors: res.errors,
         screenshot: res.screenshotPath,
+        ...(res.screenshotNotSaved ? { screenshotNotSaved: res.screenshotNotSaved } : {}),
       };
       const content = [{ type: 'text', text: JSON.stringify(report, null, 2) }];
       if (res.base64) content.push({ type: 'image', data: res.base64, mimeType: 'image/png' });
@@ -1235,6 +1243,7 @@ async function handle(name, args = {}, ctx = {}) {
         ...(res.notPerformed ? { notPerformed: res.notPerformed } : {}),
         errors: res.errors,
         screenshot: res.screenshotPath,
+        ...(res.screenshotNotSaved ? { screenshotNotSaved: res.screenshotNotSaved } : {}),
         ...(res.booted ? {} : { hint: 'the app did not boot, so no action was performed - run_app shows the boot on its own' }),
       };
       const content = [{ type: 'text', text: JSON.stringify(report, null, 2) }];
@@ -1274,10 +1283,11 @@ async function handle(name, args = {}, ctx = {}) {
     case 'app_act': {
       const maxRows = boundedInt(args.max_rows, { name: 'max_rows', dflt: undefined, min: 0, max: 200 });
       const format = oneOf(args.format, { name: 'format', allowed: APP_FORMATS, dflt: defaultAppFormat() });
-      const row = args.row === undefined || args.row === null ? undefined : Number(args.row);
+      // the client checks `row` (a non-negative integer) - Number() here made
+      // "", false and [] row 0 and true row 1
       const client = await agentClient();
       return snapshotAnswer(() => client.act(args.session, {
-        values: args.values, event: args.event, args: args.args, row, maxRows,
+        values: args.values, event: args.event, args: args.args, row: args.row, maxRows,
       }), { format, client });
     }
     case 'run_unit_tests': {
@@ -1503,7 +1513,7 @@ function shutdown(reason) {
   shuttingDown = (async () => {
     try {
       killChildren();
-      await Promise.all([stopBackend().catch(() => {}), closeRenderers().catch(() => {})]);
+      await Promise.all([stopBackend({ starting: true }).catch(() => {}), closeRenderers().catch(() => {})]);
     } catch (e) {
       console.error(`abap2ui5 MCP server: shutdown (${reason}) - ${(e && e.message) || e}`);
     }
@@ -1515,6 +1525,13 @@ function shutdown(reason) {
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => shutdown(sig));
 process.stdin.on('end', () => shutdown('stdin ended'));
 process.stdin.on('close', () => shutdown('stdin closed'));
+/* The other half of the pipe: a client whose reading end is gone (EPIPE) can
+ * never receive an answer again. Without a listener the write error was an
+ * uncaught exception, logCrash wrote its report as a logging notification
+ * into the same broken stdout, and that write failed again - a loop that
+ * held a core at 90% and piled up 'drain' listeners for as long as stdin
+ * stayed open. */
+process.stdout.on('error', () => shutdown('stdout closed'));
 
 const transport = new StdioServerTransport();
 await server.connect(transport);

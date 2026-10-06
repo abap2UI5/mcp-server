@@ -156,7 +156,8 @@ via the committed [`.mcp.json`](.mcp.json); the
 `docs_search`, `scaffold_app`, `generation_rules`) read committed files, so
 when no checkout resolves and no env var is set they read them from GitHub
 instead: the files land in a per-user cache (`<tmp>/abap2ui5-mcp-remote`, a
-day at a time) that the server treats as a read-only checkout; `add_agent_setup`
+day at a time - used only while it is a directory of the user's own, created
+0700; `A2UI5_MCP_REMOTE_DIR` moves it) that the server treats as a read-only checkout; `add_agent_setup`
 reads the template from there too, and writes only into the project it is
 given. And the
 expensive half runs on the npm package `@abap2ui5/node-runtime` (below), so
@@ -379,8 +380,9 @@ cd abap-cloud-gui && npm ci
 With `deploy: true` the class is also written into the dev sandbox together
 with the addon's runtime (`src/01`, its database tables included - the
 backend creates a deployed table at boot) and the popups it calls (a checkout of
-[popups](https://github.com/abap2UI5-addons/popups) at `POPUPS_HOME`, the
-addon's `.deps/popups` or `build/popups`, or `../popups`), the backend is
+[popups](https://github.com/abap2UI5-addons/popups) at `POPUPS_HOME`, else
+the addon's `.deps/popups`, `../popups` beside it or the addon's
+`build/popups`, in that order), the backend is
 built, and the answer carries `app_start`'s snapshot of the selection screen —
 `app_act` with `CGUI_EXECUTE` runs the report. The database tables a report
 reads are not in the local backend: the screen runs, a run that reads them
@@ -486,9 +488,17 @@ duplicates none of their content:
   `~/.abap2ui5-mcp` and is safe to delete.
 - **Port:** the backend listens on 3000 (`A2UI5_MCP_PORT` overrides).
 - **Timeouts:** every spawned child is killed (whole process tree) when it
-  exceeds its limit — lint/scope 5 min, build 30 min by default;
-  `A2UI5_MCP_LINT_TIMEOUT_MS`, `A2UI5_MCP_SCOPE_TIMEOUT_MS` and
-  `A2UI5_MCP_BUILD_TIMEOUT_MS` override (values in ms).
+  exceeds its limit — lint/scope 5 min, unit tests 10 min, build (with the
+  prebuilt download and the npm install) 30 min by default;
+  `A2UI5_MCP_LINT_TIMEOUT_MS`, `A2UI5_MCP_SCOPE_TIMEOUT_MS`,
+  `A2UI5_MCP_UNIT_TIMEOUT_MS` and `A2UI5_MCP_BUILD_TIMEOUT_MS` override
+  (values in ms).
+- **Download limits:** what is read from GitHub is capped by size as well as
+  by time - 8 MB for a file of the read-only mirror, the docs tree listing
+  and the release list (the largest today is 0.34 MB), 200 MB for the
+  prebuilt backend archive (2.7 MB for 1.146.0). An answer over the cap is
+  refused (when it declares its size) or cut at the cap, and the tool says
+  so by URL; a cached mirror or the previous build stays in place.
 - **UI5 sources** are served from the samples-controls checkout's `@openui5`
   packages, so booting needs no network. The built theme CSS is not in those
   packages — with network access it loads from the CDN (styled screenshots);
@@ -501,8 +511,10 @@ duplicates none of their content:
 - **Screenshots:** `run_app` writes its PNG to
   `<tmp>/abap2ui5-mcp-screenshots/<class>.png` and returns the path beside the
   image — deliberately not into the install directory, which is inside
-  `node_modules` when you install from npm. `A2UI5_MCP_SCREENSHOT_DIR` puts them
-  somewhere you keep.
+  `node_modules` when you install from npm. That directory is created 0700 and
+  used only while it is your own (`/tmp` is shared on Linux); otherwise the
+  image is returned but not saved, and `screenshotNotSaved` says why.
+  `A2UI5_MCP_SCREENSHOT_DIR` puts them somewhere you keep.
 - **`scope_of` needs an OpenUI5 checkout** as well as the corpus: it reads the
   JSDoc from `OPENUI5_SRC`, or from `../fork-openui5` beside the
   **samples-controls** checkout when that variable is unset.

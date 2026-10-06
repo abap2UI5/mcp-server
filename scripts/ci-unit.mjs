@@ -221,6 +221,10 @@ export function renderSummary({ framework, mode, results }) {
     }
     const tests = r.tests || [];
     ran += tests.filter((t) => !t.skipped).length;
+    if (r.notRun) {
+      lines.push(`- **${r.cls.toUpperCase()}**: not run - ${r.notRun}`);
+      continue;
+    }
     if (!tests.length && !r.failed) {
       lines.push(`- **${r.cls.toUpperCase()}**: a test include, but the runner found no test method - is the local class FOR TESTING?`);
       continue;
@@ -406,6 +410,11 @@ async function main(argv) {
         if (!withTests.includes(r.cls)) continue;
         r.tests = run.tests.filter((t) => t.object === r.cls.toUpperCase());
         r.failed = run.failed && run.failed.object === r.cls.toUpperCase() ? run.failed : null;
+        /* The generated runner stops at the first failure: a class it had
+         * not reached printed no test, which is not "no test method" */
+        if (!run.ok && !r.tests.length && !r.failed) {
+          r.notRun = `the runner stops at the first failure${run.failed ? ` (${run.failed.object})` : ''}, and this class's tests had not started`;
+        }
       }
       if (!run.ok) exit = Math.max(exit, 1);
       if (!run.ok && !run.failed && run.error) log(`the runner failed outside a test:\n${run.error}`);

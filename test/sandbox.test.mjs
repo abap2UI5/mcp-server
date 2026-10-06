@@ -15,7 +15,7 @@ import {
 } from '../lib/runtime.mjs';
 import { workspaceRoot, resolveA2UI5 } from '../lib/repos.mjs';
 
-const ENV = ['A2UI5_HOME', 'SAMPLES_CONTROLS_HOME', 'AI_DEMOKIT_HOME', 'A2UI5_MCP_WORKSPACE', 'APP_TEMPLATE_HOME'];
+const ENV = ['A2UI5_HOME', 'SAMPLES_CONTROLS_HOME', 'AI_DEMOKIT_HOME', 'A2UI5_MCP_WORKSPACE', 'APP_TEMPLATE_HOME', 'A2UI5_MCP_SCREENSHOT_DIR'];
 
 function withFakeFramework(fn) {
   return async (t) => {
@@ -27,6 +27,8 @@ function withFakeFramework(fn) {
     fs.writeFileSync(path.join(a2, 'package.json'), '{"name":"abap2UI5","version":"1.144.0"}');
     process.env.A2UI5_HOME = a2;
     process.env.SAMPLES_CONTROLS_HOME = path.join(root, 'no-corpus');
+    // a build's last-build.json stays here, not in the user's <tmp> default
+    process.env.A2UI5_MCP_SCREENSHOT_DIR = path.join(root, 'shots');
     delete process.env.AI_DEMOKIT_HOME;
     try {
       await fn(t, { root, a2 });
@@ -229,6 +231,20 @@ test('the CI runner reads the project\'s framework pin, collects classes, interf
   assert.match(fixture, /- \*\*FAIL\*\*  ZCL_D setup \(the test class's setup, before its test method ran\)/);
   assert.doesNotMatch(fixture, /found no test method/);
   assert.match(fixture, /1 class\(es\) failing/);
+  /* The runner stops at the first failure: a class after the failing one
+   * printed no test, and was reported as having "no test method" - a
+   * false diagnosis in every CI summary with two test classes and a red one */
+  const stopped = renderSummary({
+    framework: '1.145.0',
+    mode: 'npm',
+    results: [
+      { cls: 'zcl_e', testclasses: true, tests: [{ localClass: 'ltcl', method: 'bad' }], failed: { object: 'ZCL_E', localClass: 'ltcl', method: 'bad', error: 'boom' } },
+      { cls: 'zcl_f', testclasses: true, tests: [], failed: null, notRun: 'the runner stops at the first failure (ZCL_E), and this class\'s tests had not started' },
+    ],
+  });
+  assert.match(stopped, /\*\*ZCL_F\*\*: not run - the runner stops at the first failure \(ZCL_E\)/);
+  assert.doesNotMatch(stopped, /found no test method/);
+  assert.match(stopped, /1 test method\(s\) ran, 1 class\(es\) failing/);
 });
 
 /* abap2ui5-unit runs on the npm package by default: a checkout somebody
@@ -346,7 +362,7 @@ test('dev-app copies in node/downport follow the sandbox, and nothing else there
   assert.deepEqual(fs.readdirSync(down).sort(), ['package.devc.xml', 'zcl_sicf.clas.abap']);
 }));
 
-test('an incremental build after remove_app no longer transpiles the removed class', withFakeFramework(async (t, { a2 }) => {
+test('an incremental build after remove_app no longer transpiles the removed class', withFakeFramework(async (t, { root, a2 }) => {
   // a prior build, the framework's own libs present, and a transpiler that
   // records what node/downport held when it ran
   for (const d of ['node/downport', 'node/output', 'node/setup', 'node/deps/open-abap-core']) fs.mkdirSync(path.join(a2, d), { recursive: true });
@@ -370,6 +386,7 @@ test('an incremental build after remove_app no longer transpiles the removed cla
   assert.equal(two.ok, true, two.tail);
   assert.match(two.tail, /INPUT zcl_keep\.clas\.abap,zcl_keep\.clas\.xml$/m);
   assert.ok(!fs.existsSync(path.join(a2, 'e2e-transpile.json')), 'the temporary config is gone');
+  assert.ok(fs.existsSync(path.join(root, 'shots', 'last-build.json')), 'the build log stays in the test\'s own dir');
 }));
 
 test('two dev apps deployed without a description do not share one', withFakeFramework(async () => {
@@ -450,12 +467,18 @@ test('the framework clone takes the highest plain X.Y.Z release, never the -702 
     const asked = [];
     const fetchImpl = async (url) => {
       asked.push(url);
-      return { ok: true, status: 200, json: async () => releases };
+      return { ok: true, status: 200, text: async () => JSON.stringify(releases) };
     };
     const res = await cloneFramework({ fetchImpl, onLine: () => {} });
     assert.equal(res.ok, false, 'the stand-in git clones nothing');
     assert.ok(asked[0].includes('/releases?'), `the release list is asked, not releases/latest: ${asked[0]}`);
     assert.match(fs.readFileSync(record, 'utf8'), /--branch 1\.145\.0 /);
+    // a release list over the text cap is not read: the default branch then
+    const lines = [];
+    const huge = async () => new Response('[]', { headers: { 'content-length': String(64 * 1048576) } });
+    await cloneFramework({ fetchImpl: huge, onLine: (l) => lines.push(l) });
+    assert.ok(lines.some((l) => /latest release could not be looked up \(the answer for .* is larger than 8 MB/.test(l)), lines.join('\n'));
+    assert.doesNotMatch(fs.readFileSync(record, 'utf8'), /--branch/);
   } finally {
     for (const [k, v] of Object.entries(saved)) {
       if (v === undefined) delete process.env[k];
@@ -566,6 +589,9 @@ fs.appendFileSync('inputs.log', fs.readdirSync(down).filter((f) => !f.startsWith
   fs.writeFileSync(path.join(src, 'zcl_proj_helper.clas.abap'), 'CLASS zcl_proj_helper DEFINITION PUBLIC. ENDCLASS.');
   fs.writeFileSync(path.join(src, 'zcl_proj_helper.clas.testclasses.abap'), `${TESTS} " FAIL`);
   fs.writeFileSync(path.join(src, 'zif_proj_thing.intf.abap'), 'INTERFACE zif_proj_thing PUBLIC. ENDINTERFACE.');
+  // after the failing class in the runner's order: never reached
+  fs.writeFileSync(path.join(src, 'zcl_proj_zlast.clas.abap'), 'CLASS zcl_proj_zlast DEFINITION PUBLIC. ENDCLASS.');
+  fs.writeFileSync(path.join(src, 'zcl_proj_zlast.clas.testclasses.abap'), TESTS);
   const box = sandbox().dir;
   const before = fs.readdirSync(box).sort();
 
@@ -580,6 +606,9 @@ fs.appendFileSync('inputs.log', fs.readdirSync(down).filter((f) => !f.startsWith
   const byClass = Object.fromEntries(report.results.map((r) => [r.cls, r]));
   assert.equal(byClass.zcl_proj_helper.failed.object, 'ZCL_PROJ_HELPER');
   assert.equal(byClass.zcl_proj_app.failed, null);
+  assert.equal(byClass.zcl_proj_app.notRun, undefined, 'it ran, before the failure');
+  assert.deepEqual(byClass.zcl_proj_zlast.tests, []);
+  assert.match(byClass.zcl_proj_zlast.notRun, /the runner stops at the first failure \(ZCL_PROJ_HELPER\)/);
   assert.equal(res.status, 1, res.stderr);
   assert.deepEqual(fs.readdirSync(box).sort(), before, 'the session\'s app stays, the project\'s files are gone');
   assert.ok(!fs.readdirSync(path.join(a2, 'node/downport')).some((f) => f.startsWith('zcl_proj_') || f.startsWith('zif_proj_')), 'no copy of the project left in node/downport');

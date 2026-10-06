@@ -53,7 +53,7 @@ reads it live like a checkout.
 | `SAMPLES_STACK_HOME` | `../samples-stack`, `../abap2UI5-samples-stack` | `catalogue.json` (preferred) + `SAMPLES.md` (fallback) — the stack-dependent catalogue (OData, RAP, APC, launchpad) |
 | `APP_TEMPLATE_HOME` | `../app-template`, `../abap2UI5-app-template` | `template.json` and the files it lists — what `scaffold_app` serves and renames, and what `add_agent_setup` writes into an existing project by the `agentSetup` key (both are dead without this checkout or its mirror) |
 | `DOCS_HOME` | `../docs` | `docs/**/*.md` — the documentation site's sources, searched live by `docs_search` |
-| `ABAP_CLOUD_GUI_HOME` | `../abap-cloud-gui` | `tools/report2cloud/lib/{convert,textpool,report}.mjs` — the report converter `migrate_report` imports in-process, with the checkout's own `node_modules` (`npm ci` there; LOCAL only, no mirror - `resolveCloudGui`, not in `RESOLVERS`); with `deploy: true` also its `src/01`, and the popups beside it (`POPUPS_HOME`, `.deps/popups` or `build/popups` of the checkout, `../popups`) |
+| `ABAP_CLOUD_GUI_HOME` | `../abap-cloud-gui` | `tools/report2cloud/lib/{convert,textpool,report}.mjs` — the report converter `migrate_report` imports in-process, with the checkout's own `node_modules` (`npm ci` there; LOCAL only, no mirror - `resolveCloudGui`, not in `RESOLVERS`); with `deploy: true` also its `src/01`, and the popups beside it (`POPUPS_HOME`, else `.deps/popups` of the checkout, `../popups` beside it, its `build/popups` - in that order, `resolvePopups`) |
 | `AI_VIEW_CHECK_HOME` | `../linter` (legacy aliases: `../abap2UI5-linter`, `../ai-view-check`) — which for an npm/npx install is ALSO where npm hoists the declared peer `@abap2ui5/linter` (`node_modules/@abap2ui5/{mcp-server,linter}`), then an INSTALLED one elsewhere: `<cwd>/node_modules/…` (app-template's devDependency), the server's own `node_modules/…`, then wherever Node's resolver finds the package from `lib/repos.mjs` (`viewCheckCandidates`, `nodeResolvedViewCheck`) | `validate_view` + `fix_view` + `screenshot_view`: dynamic import of the linter's package `exports` entries `.`, `./findings`, `./config`, `./rule-docs` (via `importViewCheck`) |
 
 One more checkout is read but not by this server: **`OPENUI5_SRC`** (default
@@ -69,7 +69,10 @@ the linter's variable, is read after it — then Playwright's managed browser,
 then a system binary, `resolveChromium`),
 `A2UI5_MCP_SCREENSHOT_DIR` (where `run_app` and `interact_app` write their
 PNGs; default `<tmp>/abap2ui5-mcp-screenshots`, and deliberately not the
-install directory — that is inside `node_modules` for an npx/npm install),
+install directory — that is inside `node_modules` for an npx/npm install;
+the default is used only while it is a real directory of the user's own,
+created 0700 - otherwise the PNG is returned but not saved, under
+`screenshotNotSaved`, and no build log is kept there - `lib/private-dir.mjs`),
 `A2UI5_MCP_PREBUILT_URL` (where `build_backend` mode `prebuilt` downloads
 from; default the framework release asset, see below), the mirror knobs
 `A2UI5_MCP_REMOTE=0` / `A2UI5_MCP_REMOTE_DIR` / `A2UI5_MCP_REMOTE_TTL_MS`
@@ -84,8 +87,9 @@ because the backend hands its paths to children running elsewhere), `A2UI5_MCP_B
 framework clone as the answer to "no checkout", the default before the npm
 backend), `A2UI5_MCP_RUNTIME_VERSION` (the `@abap2ui5/node-runtime` release,
 X.Y.Z; default the registry's latest - `A2UI5_MCP_OFFLINE` also stops that
-question), `A2UI5_MCP_SKIP_NETWORK_TESTS` (the two `npm test` files that
-reach the registry - npm-integration and agent-integration - skip themselves), and the child-process timeouts `A2UI5_MCP_LINT_TIMEOUT_MS` /
+question), `A2UI5_MCP_SKIP_NETWORK_TESTS` (the three `npm test` files that
+reach the registry - npm-integration, agent-integration and migrate's
+deploy test - skip themselves), and the child-process timeouts `A2UI5_MCP_LINT_TIMEOUT_MS` /
 `A2UI5_MCP_SCOPE_TIMEOUT_MS` (default 5 min), `A2UI5_MCP_UI` (`auto`/`on`/`off`:
 whether the app tools declare their MCP Apps screen, below),
 `A2UI5_MCP_APP_FORMAT` (`snapshot`/`adaptive-card`: the app tools' default
@@ -114,7 +118,7 @@ literals), `REMOTE_FILES` in `lib/remote.mjs` says which files each mirror
 carries, and `REMOTE_TOOLS` which tools trigger which mirror; `server.mjs`
 hydrates before the tool runs and before a resource read.
 
-Three rules, each pinned by `test/remote.test.mjs` and
+Four rules, each pinned by `test/remote.test.mjs` and
 `test/missing-siblings.test.mjs`:
 
 - **A set env var stays authoritative.** `A2UI5_HOME=/nowhere` is a
@@ -134,6 +138,14 @@ Three rules, each pinned by `test/remote.test.mjs` and
   writes is the project the agent named - and the one piece of the template
   it would run as code, `scripts/check-pin.mjs` for the pin warning, it
   imports from a local checkout only and skips over a mirror.
+- **A download is capped in size, not only in time.** `readCappedText`
+  reads a mirror file, the docs tree listing and the release list up to
+  `TEXT_MAX_BYTES` (8 MB; the largest, samples-controls' `catalogue.json`,
+  is 0.34 MB), `downloadPrebuilt` the backend archive up to
+  `PREBUILT_MAX_BYTES` (200 MB; 2.7 MB for 1.146.0) - refused unread when
+  the answer declares more, cut at the cap when it streams more, said by
+  URL (the archive's cap is pinned in `test/interact.test.mjs`). Raise a
+  cap only with a measured size behind it.
 - **A failed download degrades to what was there before.** With a cached
   mirror the stale copy stands in (`stale: true`); without one the tool
   degrades with its usual message plus the reason (`remoteStatus`). A
@@ -280,7 +292,16 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
   `node/srv/express.mjs`): resolves the package from the runtime directory,
   imports `apps/init.mjs`, puts a `compress` export in front of the handler
   when the release has one (an express middleware, or a factory returning
-  one), serves on 127.0.0.1, prints a banner (release, dev modules,
+  one), serves on 127.0.0.1 - and only requests addressed to a loopback
+  name (Host `127.0.0.1`, `localhost`, `[::1]`) from no page or a loopback
+  one (Origin), a 403 otherwise, so a browser page cannot reach it through
+  DNS rebinding (`loopbackRequest`). Every client of the backend here -
+  the start's port wait, run_app's and interact_app's Chromium, the app
+  tools - connects to that bound address, `BACKEND_HOST` in
+  `lib/runtime.mjs`, and never to the name `localhost`, which can resolve
+  to `::1` first (another local user's port, or none);
+  `test/runtime.test.mjs` fails on a `localhost` in the code of
+  `server.mjs`, `lib/` or `scripts/`. It prints a banner (release, dev modules,
   accelerate, compression - `backend status` shows it) and the "Listening
   on" the start waits for. Start, stop, port and orphan handling are the
   checkout's, unchanged.
@@ -786,9 +807,11 @@ agent) find these artifacts in a dirty sibling worktree, mcp-server caused them:
   — the dev sandbox when there is no corpus checkout (gitignored there;
   `remove_app` deletes them again), and `<abap2UI5>/.abaplint-mcp-dev.jsonc`
   while a lint of it runs (removed in a `finally`, queued like the corpus one).
-- `<abap2UI5>/node/output/index-mcp-<class>.mjs` (or `index-mcp-selection.mjs`
-  for several classes) — the filtered copy of the unit-test runner
-  `run_unit_tests` writes, removed in a `finally`.
+- `<abap2UI5>/node/output/index-mcp-<class>-<pid>-<n>.mjs` (or
+  `index-mcp-selection-<pid>-<n>.mjs` for several classes; on the npm
+  backend in `runtime/<version>/apps/`) — the filtered copy of the unit-test
+  runner `run_unit_tests` writes, one per run (two runs at once must not
+  share one), removed in a `finally`.
 - `~/.abap2ui5-mcp/abap2UI5` (`A2UI5_MCP_WORKSPACE`) — the framework clone
   `build_backend` mode `prebuilt` or `transpile` (or `A2UI5_MCP_BACKEND=clone`)
   makes when no checkout is there at all: a real checkout with its npm
@@ -830,7 +853,11 @@ agent) find these artifacts in a dirty sibling worktree, mcp-server caused them:
 - `<tmp>/abap2ui5-mcp-remote/<repo>/` — the read-only GitHub mirrors (not a
   sibling worktree, but the same question "where did this come from": a
   directory that carries `.abap2ui5-mirror.json` is one, and deleting it is
-  always safe).
+  always safe). The default base is under the shared temp dir by a fixed
+  name, so it is read and written only while it is a real directory of the
+  user's own that nobody else can write - created 0700, refused with the
+  reason otherwise (`remoteBaseProblem`, `lib/private-dir.mjs`); a base
+  `A2UI5_MCP_REMOTE_DIR` names is not checked.
 
 `<samples-controls>/.abaplint-mcp-dev.jsonc` (the patched lint config for
 deployed dev apps, gitignored there) used to be on that list and is not any

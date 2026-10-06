@@ -126,6 +126,42 @@ test('the tools answer for the npm backend, not with "abap2UI5 checkout not foun
   }
 });
 
+/* 127.0.0.1 is reachable from every browser page on this machine: through
+ * DNS rebinding a page reads the dev backend's answers as a same-origin page,
+ * and any page can post to it blind. The host answered both - its framework
+ * checks no Host and no Origin. It serves loopback names and loopback pages
+ * only now, on both serve paths (the release's serve(), the compress app). */
+test('the host refuses a request addressed to another name or sent from another page', async () => {
+  const { startHost, loopbackRequest } = await import('../lib/npm-host.mjs');
+  for (const compress of [false, true]) {
+    const ws = path.join(base, `rebind-${compress}`);
+    const dir = fakeRelease(ws, { compress });
+    const { server } = await startHost({ dir, port: 0 });
+    const port = server.address().port;
+    const ask = (headers) => new Promise((resolve, reject) => {
+      http.get({ host: '127.0.0.1', port, path: '/', headers, timeout: 5000 }, (res) => {
+        res.resume();
+        res.on('end', () => resolve(res.statusCode));
+      }).on('error', reject);
+    });
+    try {
+      assert.equal(await ask({}), 200, 'the app tools: Host 127.0.0.1, no Origin');
+      assert.equal(await ask({ Host: `127.0.0.1:${port}`, Origin: `http://127.0.0.1:${port}` }), 200, 'run_app\'s Chromium (BACKEND_HOST)');
+      assert.equal(await ask({ Host: `localhost:${port}`, Origin: `http://localhost:${port}` }), 200, 'a page the user opens at localhost');
+      assert.equal(await ask({ Host: `rebound.example:${port}` }), 403, 'a rebound name');
+      assert.equal(await ask({ Origin: 'http://evil.example' }), 403, 'a page of another site');
+      assert.equal(await ask({ Origin: 'null' }), 403, 'a sandboxed frame or a file: page');
+    } finally {
+      await new Promise((r) => server.close(r));
+    }
+  }
+  assert.equal(loopbackRequest({ host: '[::1]:3000', origin: 'https://[::1]:3000' }), true);
+  assert.equal(loopbackRequest({ host: 'LOCALHOST' }), true);
+  assert.equal(loopbackRequest({}), false, 'no Host at all');
+  assert.equal(loopbackRequest({ host: '127.0.0.1.rebound.example' }), false);
+  assert.equal(loopbackRequest({ host: '127.0.0.1', origin: 'file:///x' }), false);
+});
+
 test.after(() => {
   fs.rmSync(base, { recursive: true, force: true });
 });

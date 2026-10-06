@@ -22,16 +22,20 @@ const FAKE_EXPRESS = `
 import http from 'http';
 import fs from 'fs';
 const s = http.createServer((req, res) => res.end('ok'));
-const listen = () => s.listen(process.env.PORT, () => {
+let stopping = false; // a SIGTERM before the delayed listen: never listens
+// HOST as the framework's express.mjs reads it: unset binds every interface
+const listen = () => !stopping && s.listen(process.env.PORT, process.env.HOST, () => {
   if (process.env.BOOT_MARKER) fs.appendFileSync(process.env.BOOT_MARKER, process.pid + '\\n');
+  if (process.env.ADDRESS_MARKER) fs.writeFileSync(process.env.ADDRESS_MARKER, s.address().address);
   console.log('Listening on ' + process.env.PORT);
 });
 s.on('error', (e) => {
   if (e.code === 'EADDRINUSE') setTimeout(listen, 100);
   else throw e;
 });
-listen();
+setTimeout(listen, Number(process.env.LISTEN_DELAY_MS || 0));
 process.on('SIGTERM', () => {
+  stopping = true;
   s.close();
   setTimeout(() => process.exit(0), 1000);
 });
@@ -72,6 +76,25 @@ test('two concurrent starts spawn one backend, not two on one port', async () =>
   await stopBackend();
 });
 
+/* The framework's node/srv/express.mjs binds every interface without HOST,
+ * so a checkout's dev backend - any deployed app, run by whoever reaches the
+ * port - was reachable from the LAN; the npm host binds 127.0.0.1. A HOST the
+ * user's environment exports (a host name) must not decide it either. */
+test('the checkout backend is started on the loopback interface only', async () => {
+  const address = path.join(base, 'address.txt');
+  process.env.ADDRESS_MARKER = address;
+  process.env.HOST = '0.0.0.0';
+  try {
+    await startBackend();
+    assert.equal(fs.readFileSync(address, 'utf8'), '127.0.0.1');
+  } finally {
+    await stopBackend();
+    delete process.env.ADDRESS_MARKER;
+    delete process.env.HOST;
+    await sleep(1400); // let the killed child free the port
+  }
+});
+
 test('a stale child exiting late does not orphan the live backend', async () => {
   await startBackend();
   assert.equal(backendStatus().running, true);
@@ -90,6 +113,50 @@ test('a stale child exiting late does not orphan the live backend', async () => 
   assert.equal(backendStatus().running, false);
   await sleep(1400); // let the killed child free the port
   assert.equal(await portOpen(), false, 'the backend survived stopBackend as an orphan');
+});
+
+/* `node` not on the PATH (a desktop client starts its servers with a minimal
+ * one): spawn emits 'error' and no 'exit', which used to be an uncaught
+ * exception and a 30 s wait for a start that had already failed. */
+test('a backend that cannot be spawned fails the start at once, with the reason', { skip: process.platform === 'win32' && 'PATH lookup differs' }, async () => {
+  const savedPath = process.env.PATH;
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-nopath-'));
+  const uncaught = [];
+  const onUncaught = (e) => uncaught.push(e);
+  process.on('uncaughtException', onUncaught);
+  process.env.PATH = empty;
+  const t0 = Date.now();
+  try {
+    await assert.rejects(startBackend(), /could not be started \(node\).*ENOENT/);
+    assert.ok(Date.now() - t0 < 10000, `the start failed only after ${Date.now() - t0} ms`);
+    assert.equal(uncaught.length, 0, `uncaught: ${uncaught.map(String).join(', ')}`);
+    assert.equal(backendStatus().running, false);
+  } finally {
+    process.env.PATH = savedPath;
+    process.off('uncaughtException', onUncaught);
+    fs.rmSync(empty, { recursive: true, force: true });
+  }
+});
+
+/* The server's shutdown during a start: the child is `server` only once it
+ * listens, so stopBackend() had nothing to kill and the server exited with
+ * the child still booting - it then listened as an orphan holding the port.
+ * stopBackend({ starting: true }) (what the shutdown calls) reaches it. */
+test('a shutdown stop kills a backend that has not listened yet', async () => {
+  process.env.LISTEN_DELAY_MS = '700';
+  try {
+    const start = startBackend();
+    start.catch(() => {});
+    await sleep(250); // spawned, not listening yet
+    await stopBackend({ starting: true });
+    await assert.rejects(start, /before listening/);
+    await sleep(900); // past the moment it would have listened
+    assert.equal(await portOpen(), false, 'the backend whose start was cut short listened anyway, as an orphan');
+    assert.equal(backendStatus().running, false);
+  } finally {
+    delete process.env.LISTEN_DELAY_MS;
+    await stopBackend();
+  }
 });
 
 test.after(() => {

@@ -22,6 +22,387 @@
 - `createAppClient` gains `screen(session)`: a copy of a session's folded
   state, for renderers other than the snapshot (additive; the vendored
   copies elsewhere keep working unchanged).
+- **A deploy lint reports the deployed class's findings only.** They were
+  picked from the repository-wide abaplint run by a substring of the path,
+  so `z_app` was handed the findings of `zz_app` (any class whose name ends
+  in its own) and a clean class failed `deploy_app` - and `verify_app`
+  stopped at deploy. Matched on the file name now (`issuesOfClass`).
+- **A backend that cannot be spawned fails its start at once.** With no
+  `node` on the PATH the server was started with (a desktop client's
+  minimal one), the backend child emitted only `error`: an uncaught
+  exception, and `run_app` / `app_start` / `backend start` waited 30 s to
+  report "did not start" with an empty output. The start now fails with
+  the spawn error right away.
+- **`read_example` re-fetches a mirrored sample once it is a day old.** A
+  file fetched on demand into the GitHub mirror was served from the cache
+  whenever the mirror's marker was fresh - and the marker is refreshed by
+  every knowledge tool once a day, the on-demand files never - so a sample
+  read once stayed at that first copy for good. The file's own age counts
+  now (`A2UI5_MCP_REMOTE_TTL_MS`).
+- **`server.json` lists `POPUPS_HOME`.** `migrate_report { deploy: true }`
+  reads it (through an injectable `env` parameter), and
+  `scripts/check-server-json.mjs` only looked for `process.env.X`, so the
+  variable was missing from the registry listing without the gate noticing.
+  The scan reads `env.X` too.
+- **`setup.sh` reuses a corpus checked out as `abap2UI5-api`.** Its list of
+  pre-rename directory names left that one out (lib/repo-dirs.json has it),
+  so such a checkout was cloned a second time as `samples-controls`. A test
+  now holds the script's lists against the JSON.
+- **`remove_app` removes every file of the class.** It removed the source,
+  the sidecar and the test include, and left the local-class includes
+  (`locals_imp`, `locals_def`, `macros`) that `migrate_report { deploy:
+  true }` writes - the class disappeared from the deployed-apps list while
+  its includes stayed in the next build's input.
+- **The incremental build no longer clones open-abap-core synchronously.**
+  The `git clone` (and the corpus' patch script) ran through
+  `execFileSync`: the stdio server answered nothing for the length of the
+  clone, a cancel or the shutdown could not stop it, and a failed clone
+  threw out of `build_backend` without a `build_log` record. Both steps are
+  spawned like every other child now - cancellable, killed with their tree,
+  reported and logged; a failed step takes the half clone with it.
+- **Progress notifications keep their one-per-second throttle.** A child's
+  output was handed to the line callback through `forEach`, which passes the
+  line's index as a second argument - and the server's progress reporter
+  reads its second parameter as `force`. Every line after the first of an
+  output chunk bypassed the throttle, so a chatty lint or unit-test run sent
+  one `notifications/progress` per line.
+- **A child's output reaches the build log and the progress messages in
+  whole lines.** Lines were cut at the pipe's chunk boundaries (one line in
+  two halves, a UTF-8 character as two replacement characters); each stream
+  is decoded as UTF-8 and buffered to its newline now.
+- **The backend's stderr is no longer kept for its whole life.** The start
+  collects the child's output to report a failed start, and went on
+  appending every line the backend wrote to stderr after it was listening -
+  memory the server never released during a session.
+- **`validate_view` / `fix_view` check `allow`.** A bare string instead of
+  the array the schema names was passed to the linter as it was: beside a
+  project config its characters became the allow list (the allowance
+  silently ignored), without one the gate failed on `allow.map is not a
+  function`. Refused by name now, like every other list argument.
+- **`examples { area: "samples" }` finds the samples again.** The area was
+  read off a `src/01` path prefix, and abap2UI5/samples flattened `src/01`
+  and `src/00` into one `src/` package on 2026-09-22 - so every sample of a
+  current checkout was filed as `experimental-or-test`, and the filter the
+  description recommends answered nothing. `src/00` decides now; an older
+  checkout reads as before.
+- **Boolean and object arguments are checked against the schema.** The
+  handlers read booleans as `=== true` / `=== false`, so a client that sent
+  `"true"` got the default without a word: `add_agent_setup { dry_run:
+  "true" }` wrote into the project it was asked only to plan for,
+  `migrate_report { deploy: "true" }` deployed nothing, `verify_app { boot:
+  "false" }` booted. `screenshot_view`'s `model` as a string was spread into
+  the derived model one character per key. Refused by name now, like a
+  string argument that is not a string.
+- **`run_app` / `interact_app` recover from a Chromium that went away.** The
+  browser was kept for the server's whole life: one that crashed or was
+  killed was handed out again, and every later call failed on "browser has
+  been closed" until the server was restarted; a launch that failed (no
+  Chromium installed yet) stayed the answer after the install. A
+  disconnected browser and a failed launch now clear the slot, and the next
+  call launches afresh.
+- **The npm backend's install never rejects, as documented.** A workspace
+  the install could not write into (read-only, a file where the directory
+  belongs, a full disk) threw out of `ensureRuntime`: `build_backend` ended
+  without a `build_log` record, `deploy_app`'s lint answered a bare
+  `ENOTDIR`, and every caller queued behind the failed install was rejected
+  with it. It is the install's reason now, naming the directory.
+- **`docs_search` survives a dangling symbolic link in the docs tree.** The
+  walk statted every entry, and one link to a file that is not there (a
+  half-finished pull, a moved page) threw `ENOENT` out of it - every search
+  failed. Such an entry is skipped now.
+- **A mirror refresh takes out what the repository no longer lists.** The
+  daily refresh of a GitHub mirror wrote the new file list over the old one
+  and removed nothing, so a docs page renamed or deleted upstream stayed in
+  the mirror and `docs_search` - which walks the mirror's tree - kept
+  answering with it (and a URL that 404s). Files the previous refresh listed
+  and this one does not are removed now; a sample read on demand is not one
+  of them.
+- **Two `run_unit_tests` calls at once run their own classes.** The
+  filtered copy of the runner was named after the selection alone
+  (`index-mcp-selection.mjs` for any set of classes), so two runs over
+  different sets wrote one file: the first answered with the second's tests,
+  and the first to finish deleted the file under the other. Each run writes
+  a copy of its own now (`index-mcp-<class|selection>-<pid>-<n>.mjs`).
+- **`npm test` no longer writes into the user's build log.** Four test files
+  ran builds without `A2UI5_MCP_SCREENSHOT_DIR`, so the fake build's
+  `last-build.json` landed in the real `<tmp>/abap2ui5-mcp-screenshots` - a
+  freshly started server's `build_log` then answered with a test's run as
+  the user's last build - and the cancel and progress tests fetched the
+  app-template mirror into the user's cache. Each test keeps both in its own
+  temp dir now; the runtime default is unchanged.
+- **`app_act` fires the action it was asked for when its values renumber
+  the actions.** Action ids follow the document order, and the act re-read
+  its action by id after applying `values`: a value that showed a control
+  in front of the action (a checkbox making a "Delete" button visible) made
+  `{ values: { "/SHOW": true }, event: "SAVE" }` send `DELETE` - an event
+  nobody asked for and no check had seen. The act now fires the action it
+  validated, found again on the new screen, and refuses when that is no
+  longer one action (as the abap2UI5 agent addon does).
+- **An `interact_app` fill of a missing element fails within
+  `action_timeout_ms`.** Before filling, the action looked whether the
+  located element is itself editable - with Playwright's default timeout,
+  so a fill of an id that is not on the page waited 30 s for it and then the
+  fill's own timeout on top (40 s at the default 10 s, whatever the
+  argument said). The look runs within the action's timeout now, and an
+  element that never appears fails the action there.
+- **`verify_app`'s progress only goes up.** Each stage made its own
+  progress reporter for the one request, counting from zero, so the
+  notifications of one `progressToken` went 1, 3 (the deploy lint), then 1
+  again (the build) - the MCP spec says the value MUST increase with each
+  notification. The counter (and the one-per-second throttle) belongs to
+  the request now.
+- **`abap2ui5-unit` no longer reports an unreached class as having no test
+  method.** The generated runner stops at the first failing test, so a test
+  class after it in the runner's order printed nothing - and the summary
+  said "a test include, but the runner found no test method - is the local
+  class FOR TESTING?", sending the reader after a problem that is not there.
+  Such a class is `notRun` now (in `--json` too), naming the failure the run
+  stopped at.
+- **abap2UI5-bench keeps the agent's transcript in whole characters**
+  (`bench/`, not part of the package). Its child-process helper turned each
+  output chunk into a string on its own, so a character the pipe split
+  between two chunks - an em dash in the agent's text - became replacement
+  characters in `transcript.jsonl`, the result text and the grader's
+  output. The streams are decoded as UTF-8 across chunks now, and
+  `verify.mjs` checks it.
+- **The server stops when its client stops reading.** A client whose end
+  of the server's stdout was gone (EPIPE) while stdin stayed open left the
+  server in a loop: the failed write was an uncaught exception, the crash
+  report went out as a logging notification into the same broken pipe and
+  failed again - about 90% of a core and a growing pile of `drain`
+  listeners, for as long as stdin stayed open. A broken stdout now shuts
+  the server down the way a closed stdin does.
+- **`app_act`'s `args` schema declares its items.** It was an array schema
+  without `items` - valid JSON Schema, and refused by clients that check a
+  tool's schema before offering it (VS Code: "array type must have items";
+  OpenAI-backed hosts: "array schema missing items"). `items: {}` - any
+  value, as before - and a test holds every array of every tool schema to it.
+- **Resource and prompt errors carry the JSON-RPC codes the MCP spec
+  names.** An unknown resource URI (or guide chapter) answered -32603, an
+  internal error of this server, where the spec says -32002 (resource not
+  found); an unknown prompt and a missing required prompt argument
+  answered -32603 too, where it says -32602 (invalid params) - as does a
+  chapter URI with broken percent-encoding, which answered a bare
+  "URI malformed". The messages are unchanged; a missing checkout stays
+  -32603.
+- **A late drop of a dead warm renderer no longer closes its successor.**
+  When two `validate_view` / `screenshot_view` calls shared a warm Chromium
+  and both saw it die, the first dropped it and the next call opened a
+  fresh one - and the second drop then closed that fresh renderer under the
+  call using it, which saw a dead browser in turn and fell back to the cold
+  path. A drop now names the renderer it saw die and leaves a newer one in
+  place.
+- **A `build_backend` refused for a build in progress keeps the backend
+  running.** The tool stopped the running backend before the build checked
+  for an in-flight build of another mode, so a call answered "build in
+  progress" had built nothing and still taken the app down. The backend is
+  now stopped once the build really starts (`buildBackend`'s `beforeBuild`).
+- **A `migrate_report { deploy: true }` the sandbox refuses writes nothing.**
+  A `class_name` report2cloud accepts but the sandbox does not (a
+  namespaced `/abc/cl_x`, or one outside `z`/`y`) was refused only after
+  the report runtime's support classes had been copied into the sandbox,
+  so the refused deploy still changed the next build's input. Every name
+  is checked before the first file is written now.
+- **`screenshot_view` refuses a zero-size viewport.** `sizes` checked the
+  digits (`\d{2,5}`) but not their value, so `00x10` passed as a viewport
+  0 pixels wide - which Chromium's device metrics override reads as "no
+  override", a picture of its default window. An edge under 10 pixels is
+  refused by name now, like one over 4096.
+- **`validate_view` renders cold when the warm renderer throws.** A warm
+  Chromium that failed mid-call with a throw (a wedged page its dead
+  browser could not reload) was dropped, but the throw went on to the
+  "render gate could not start" fallback: the answer was the property
+  findings alone - `ok: true` for a view whose render errors were never
+  looked for - with a note to install `@abap2ui5/linter-render`. The call
+  is retried cold now, as it already was for a dead browser that did not
+  throw, and as `screenshot_view` does (`warmThenCold` in
+  `lib/validate.mjs`).
+- **A shutdown during a backend start leaves no backend behind.** The
+  backend child was only tracked once it printed "Listening on", so a
+  client that went away while `backend start` / `run_app` was booting it
+  had the server exit with the child untracked - and the child then
+  listened as an orphan holding the port for the next session. The
+  shutdown now also kills the child of a start in flight
+  (`stopBackend({ starting: true })`); `backend stop` and `restart` are
+  unchanged.
+- **A binding's `model` key names its model in the agent snapshot.** The
+  object syntax `{path: '/A', model: 'other'}` - UI5 binds it to the model
+  `other` - was read as `/A` of the default model: the field was listed
+  editable with the default model's value, a table bound that way got
+  editable cells, and an `app_act` value was written to `/A` (or
+  `/T/0/N`) of the app's own model, which the screen does not edit. It is
+  read like `{other>/A}` now (noted as bound to a named model), as the
+  abap2UI5 agent addon's snapshot already does; docs/agent-snapshot.md
+  says so. The copies the VS Code extension and abap2UI5/protocol vendor
+  pick it up with their next re-vendor.
+- **An edit the old view never sent dies with it when the view is displayed
+  anew.** `app_act` re-applied every unsent edit after each response, also
+  into a page or dialog the response displayed again - where the frontend
+  builds a new model with nothing pending. A value typed into the page
+  behind a popover (or while a roundtrip was in flight) overwrote what the
+  new page was sent, stayed `pending` and went out with its next event,
+  into another app's model too. Only a model push keeps unsent edits now
+  (`rebuiltModels` in lib/snapshot.mjs); docs/agent-snapshot.md says so.
+- **A model push no longer makes up table rows for an unsent edit.** The
+  re-apply of a pending edit created every missing step of its path, so a
+  cell edit of row 5 in a table the push shrank to two rows made it six rows
+  long, with empty rows the snapshot listed and the next delta sent as the
+  edited row. It is re-applied as JSONModel#setProperty does now - only
+  where its parent exists; the path stays pending, as in the frontend.
+- **A backend error body padded with whitespace no longer stalls the
+  server.** The refusal text trimmed its end with `/\s+$/`, which is
+  retried from every position of a whitespace run that is not at the end:
+  quadratic, 15 s of a blocked event loop for a body with 100k blanks and
+  100k newlines inside it. `trimEnd()` removes the same characters in
+  linear time.
+- **The `build-an-abap2ui5-app` prompt names the keys `app_act` takes.** It
+  told the agent to "fill fields by label", and `app_act` resolves a
+  `values` key by field id, model path or attribute name only - every value
+  keyed by its label was refused. The brief says so now.
+- **A view cannot make `app_act` write into the server's prototypes.**
+  `setAt` walked a model path through whatever each step answered, and a
+  plain object answers `__proto__` with `Object.prototype`: a field bound to
+  `{/__proto__/shell}` - view XML is the backend's, a real system's when the
+  client is embedded - turned a value typed into it into
+  `Object.prototype.shell` for every object of the process (the card
+  renderer's way back wrote card payload keys the same way). A path through
+  `__proto__`, `constructor` or `prototype` is refused by `app_act` now and
+  never written by `setAt`; docs/agent-snapshot.md says so. The copies the
+  VS Code extension and abap2UI5/protocol vendor pick it up with their next
+  re-vendor.
+- **An element named `__proto__` no longer breaks the agent snapshot.** The
+  control tables were looked up by plain index, so a table cell or list
+  item element named `__proto__` (or `__defineGetter__`) found
+  `Object.prototype` and was read as a field spec without properties - a
+  TypeError, and `app_start` / `app_describe` / `app_act` failed for that
+  screen. Only the tables' own keys are read now.
+- **`app_start` names the session it started when its `values` are
+  refused.** The app was running and kept in the client, but the refusal
+  carried no session id, so it was out of reach and the agent's next
+  `app_start` opened a second one. The refusal ends "(the app is running:
+  session <id> - app_describe shows it)" now, as the ABAP agent addon's
+  does.
+- **A number field takes a number, not whatever `Number()` makes of a
+  value.** `app_act` read a value for a field whose model holds a number
+  with `Number()`, so `true` went out as 1, `"0x10"` as 16, `"1e3"` as 1000,
+  and `"Infinity"` as `null` - the field's initial value, without a word.
+  A number or a decimal string is taken now, as the agent addon's
+  `describe_arg` reads it; anything else is refused naming the field.
+- **`app_act`'s `row` is a row index, not whatever `Number()` makes of
+  it.** `row: ""`, `false` or `[]` acted on row 0 and `row: true` on row 1
+  - a pick or a row action on a row nobody named. `row` is a non-negative
+  integer now (a number, or a string of digits); anything else is refused.
+- **Catalogue rows, doc headings and view wires parse in linear time.**
+  Their patterns retried every split of a run of blanks between two `\s*`
+  (or a lazy group and `\s*$`): a SAMPLES.md row with 1000 blanks and no
+  sample link - a padded header row - blocked the server for 85 s in
+  `examples` (read from SAMPLES.md where no catalogue.json is), a heading line with 10k blanks took 0.4 s in
+  `docs_search`, and an `.eB(...)` attribute with a long run of blanks after
+  its parenthesis 14 s per 100k in the app tools. The rewrites match the
+  same lines and capture the same text; a test holds them to the old
+  patterns.
+- **`build_backend` prebuilt, transpile and full run npm on Windows.** The
+  framework checkout's `npm ci` (before serving a downloaded backend) and
+  its own build's `npm ci` / `npm run downport` / `npm run auto_transpile`
+  spawned `npm` without a shell. On Windows npm is `npm.cmd`, which spawn
+  does not find that way (ENOENT), so those modes failed at their first npm
+  step there. They go through the npm backend's `spawnNpm` now, as its own
+  installs always did; a test holds every npm spawn of the server to it.
+- **A long app session no longer grows the server's memory with every
+  act.** Each roundtrip answers a new draft id, and the client kept every
+  one a session ever had, to refuse it as "an earlier state" - about 1.5 MB
+  per 10,000 acts that a long-running server never gave back. The last 100
+  earlier ids are named as earlier states now; an older one is refused as
+  an unknown session, naming the open ones.
+- **Catalogue rows and markdown links parse in linear time.** Two patterns
+  were still quadratic in text from a mirrored repository: the SAMPLES.md
+  row tried the sample link after every end a text block could have, and
+  scanned to the next `)` each time (0.4 s for a 50k row of "|[`A`](");
+  the markdown link pattern `docs_search` flattens snippets with (and
+  `examples` reads a row's docs links with) scanned to the next `]` from
+  every `[` (3 s for 50k of them). Both are hand-written scanners now that
+  match what the patterns matched - fuzzed against them, and identical on
+  the real catalogues and the docs site.
+- **A framework checkout's backend listens on 127.0.0.1 only.** Its
+  `node/srv/express.mjs` binds every interface unless `HOST` is set, and the
+  server started it with `PORT` alone: beside a checkout, every deployed app
+  (and the framework's own) could be run by anyone who reached port 3000 on
+  the network, while the npm backend has always bound loopback. The backend
+  is started with `HOST=127.0.0.1` now, also over a `HOST` the user's
+  environment exports.
+- **The README's timeouts and popups lookup match the code.** The timeout
+  note left out `A2UI5_MCP_UNIT_TIMEOUT_MS` (the unit-test runner's 10 min),
+  and `migrate_report`'s popups were said to be looked for in `build/popups`
+  before `../popups` - the server takes `.deps/popups`, `../popups`, then
+  `build/popups`. RELEASING.md's tarball list now names the `abap2ui5-unit`
+  script and `action.yml` it ships. A test holds the three to the code.
+- **Security: the GitHub mirror's default base must be the user's own.**
+  `<tmp>/abap2ui5-mcp-remote` has a fixed name under the temp dir - `/tmp` on
+  Linux, writable by every local user - and the server took whatever it
+  found there. Another user who created the directory first, or a symbolic
+  link of that name, decided what the knowledge tools served (the guide the
+  agent follows, a `template.json` whose files `add_agent_setup` writes into
+  the user's project), and the mirror's writes and the removals a refresh
+  makes followed the link into the user's own files. The default base is now
+  used only while it is a real directory owned by the user and writable by
+  nobody else: it is created 0700, one of the user's own that others can
+  read is narrowed to 0700, and anything else is refused with the reason and
+  `A2UI5_MCP_REMOTE_DIR` (which stays unchecked) as the way out.
+- **Security: the default screenshot dir must be the user's own as well.**
+  `<tmp>/abap2ui5-mcp-screenshots` holds the PNGs of `run_app` and
+  `interact_app` and the persisted build log, under the same fixed name in
+  the shared temp dir: another local user who created it first read every
+  screenshot of the user's apps and handed a restarted server's `build_log`
+  a `last-build.json` of their own, and a link of that name took the writes
+  wherever it led. The default is used only under the same rule as the
+  mirror's base now; otherwise the screenshot is still returned, not saved
+  (`screenshotNotSaved` says why), and no build log is written or read there.
+- **app_act: an act whose values disable or hide its own action is
+  refused.** The action was checked for `enabled` before the values were
+  applied, and fired after them without asking again: `OPEN` set to `false`
+  together with `DEL` pressed a Delete button with `enabled="{/OPEN}"` the
+  browser had just disabled. And values that hid the action left its id
+  with nothing behind it - the old snapshot's entry was fired anyway, a
+  control the screen no longer shows. Both are refused now before anything
+  is sent, with the values taken back; an action that only moved to
+  another id is still fired as itself. The agent addon refuses both the
+  same way.
+- **app_act: the whole event parameter object is asked for in `args`.**
+  `${$parameters>/}` and `${$parameters>}` name the whole parameter object
+  of a row event, which holds the row as an item or a binding context - and
+  the client's internal markers for those (`{"selectedItem":{"$item":0},
+  ...}`, `{"rowIndex":0,"rowContext":{"$ctx":0}}`) went out as the event
+  argument, where the browser sends the controls marshalled. A value that
+  holds an item or a context anywhere is refused naming `args[i]` now, as
+  the agent addon does.
+- **Security: the npm backend's host serves loopback requests only.** It
+  listened on 127.0.0.1 and answered any `Host` and any `Origin`: a web page
+  the user opened could post events to the dev apps, and through DNS
+  rebinding (a name of its own resolving to 127.0.0.1) read the answers as a
+  same-origin page. `lib/npm-host.mjs` now answers only requests addressed to
+  `127.0.0.1`, `localhost` or `[::1]` and, when they carry an `Origin`, sent
+  from a page on one of those - run_app's Chromium and the app tools are;
+  anything else gets a 403.
+- **The server reaches its own backend at 127.0.0.1, never at `localhost`.**
+  The backend binds 127.0.0.1, but run_app's and interact_app's Chromium
+  opened `http://localhost:<port>`, the start waited for the port at Node's
+  default host (`localhost`) and the page's backend errors were picked out
+  by the name `localhost`. Where that name resolves to `::1` first, those
+  connections reached `[::1]:<port>` - which another local user can listen
+  on, serving the page and answering the start - or nothing at all. All of
+  them use `BACKEND_HOST` now (`appStartUrl`, `waitPort`, `isBackendUrl`,
+  `backendBaseUrl`); the npm host's Host/Origin guard accepts what the
+  Chromium sends from that address.
+- **Downloads from GitHub are capped in size, not only in time.** The
+  mirror's files, the docs tree listing and the framework's release list
+  were read whole, and the prebuilt backend archive written whole, within
+  their timeouts - a proxy or mirror answering with a huge or endless body
+  filled the memory or the temp disk first. Text answers are read up to 8 MB
+  (`TEXT_MAX_BYTES`, `readCappedText`; the largest real one is 0.34 MB),
+  the archive up to 200 MB (`PREBUILT_MAX_BYTES`; 2.7 MB for 1.146.0): one
+  that declares more is refused unread, one that streams more is cut at the
+  cap, and the tool says so by URL. A prebuilt download cut before its file
+  was open no longer raises an uncaught ENOENT from the cleanup.
 
 ## 1.0.0 - 2026-10-03
 

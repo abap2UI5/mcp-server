@@ -94,6 +94,10 @@ test('deployFiles: the class, src/01 (its tables and data elements too) and the 
     assert.ok(support.includes('z2ui5_cgui_var'), 'the variant store\'s table goes along');
     assert.ok(support.includes('z2ui5_cl_cgui_report'));
     assert.throws(() => deployFiles({ files: { 'bad.clas.abap': '' }, dir: box, cloudGui: gui, popups, classNameOf: gate }), /invalid class name/);
+    // a refused name refuses the deploy before any file is written
+    const fresh = path.join(base, 'fresh');
+    assert.throws(() => deployFiles({ files: { '#abc#cl_x.clas.abap': '' }, dir: fresh, cloudGui: gui, popups, classNameOf: gate }), /invalid class name/);
+    assert.equal(fs.existsSync(fresh), false, 'the support classes were copied in before the class name was refused');
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }

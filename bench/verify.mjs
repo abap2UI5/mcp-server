@@ -10,6 +10,7 @@
 //      checks its variant.json names, and no other
 //   4. the Claude Code adapter's transcript summary (turns, MCP connection,
 //      contamination) on a recorded stream
+//   5. the child-process helper decodes a character the pipe splits
 //
 //   node verify.mjs [--concurrency 4] [--json verify.json]
 // Exit 0 when all of it holds.
@@ -17,7 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { summarize } from './adapters/claude-code.mjs';
 import { failureReasons, gradeDir, pins, summaryLine } from './lib/grade.mjs';
-import { BENCH_DIR, loadTasks, parseArgs, readJson, writeJson } from './lib/util.mjs';
+import { BENCH_DIR, loadTasks, parseArgs, readJson, run, writeJson } from './lib/util.mjs';
 
 const args = parseArgs(process.argv.slice(2));
 const concurrency = Math.max(1, Number(args.concurrency || 4));
@@ -83,6 +84,16 @@ const adapterOk = s.turns === 3 && s.costUsd === 0.5 && s.mcpToolCalls === 1 && 
   && summarize([], { code: 1, timedOut: false, durationMs: 5, stderr: 'auth' }).infraError !== null;
 say(`\nadapter transcript summary: ${adapterOk ? 'ok' : 'BAD'}`);
 if (!adapterOk) problems.push('claude-code summarize() does not read a recorded stream as expected');
+
+// 5. the child-process helper keeps a character whole when the pipe splits
+//    it between two chunks - the transcript and the grader's output are
+//    UTF-8, and a split em dash came out as replacement characters
+const split = "const b = Buffer.from('a\\u2014b\\n'); process.stdout.write(b.subarray(0, 2)); setTimeout(() => process.stdout.write(b.subarray(2)), 100);";
+const seen = [];
+const splitRun = await run(process.execPath, ['-e', split], { timeoutMs: 30000, onStdout: (d) => seen.push(d) });
+const decodeOk = splitRun.stdout === 'a\u2014b\n' && seen.join('') === 'a\u2014b\n';
+say(`child output decoding: ${decodeOk ? 'ok' : 'BAD'}`);
+if (!decodeOk) problems.push(`run() split a character across chunks: ${JSON.stringify(splitRun.stdout)}`);
 
 if (args.json) writeJson(String(args.json), { references: refGrades, broken: brokenGrades.map(({ name, v, g }) => ({ name, variant: v, grade: g })), problems });
 say(problems.length ? `\nFAILED:\n- ${problems.join('\n- ')}` : `\nverified: ${refGrades.length} references pass, ${brokenGrades.length} broken variants fail as intended`);

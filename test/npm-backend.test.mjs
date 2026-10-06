@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   readRuntimePin, compareVersions, openAbapCoreOf, transpilerOf, expressRangeOf, cliVersionOf, desiredDeps,
   installSpecs, devObjects, devOutputFiles, rewriteImports, strayImports, bootOrder, appsInitSource, transpileConfig, tableSchema, transparentTables,
@@ -208,6 +209,22 @@ test('tables: the sandbox\'s TABL and DTEL objects, their CREATE TABLE out of th
   assert.ok(!/database|execute/.test(plain), 'a sandbox without tables boots exactly as before');
 });
 
+test('every npm the server spawns goes through npmCommand - a bare spawn of npm fails on Windows', () => {
+  /* On Windows npm (and npx) is a .cmd script: spawn without a shell does
+   * not find it (ENOENT - libuv tries .com and .exe only, and Node refuses a
+   * .cmd without a shell since CVE-2024-27980). The npm backend's spawns
+   * went through npmCommand; the framework checkout's prebuilt `npm ci` and
+   * transpileFramework's npm ci / downport / auto_transpile spawned 'npm'
+   * itself, so build_backend prebuilt/transpile/full failed there at once. */
+  const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const files = ['server.mjs', 'scripts/ci-unit.mjs', ...fs.readdirSync(path.join(root, 'lib')).filter((f) => f.endsWith('.mjs')).map((f) => `lib/${f}`)];
+  const bare = /\b(?:spawn|spawnSync|spawnWithTimeout|execFile|execFileSync)\(\s*['"`]np[mx]['"`]|\bcmd:\s*['"`]np[mx]['"`]/;
+  const found = files.flatMap((f) => fs.readFileSync(path.join(root, f), 'utf8').split('\n')
+    .map((line, i) => (bare.test(line) && !/^\s*(\*|\/\/)/.test(line) ? `${f}:${i + 1}: ${line.trim()}` : null)).filter(Boolean)
+    .filter((hit) => !hit.startsWith('lib/npm-backend.mjs:') || !hit.includes("if (platform !== 'win32') return { cmd: 'npm'")));
+  assert.deepEqual(found, [], 'spawn npm through spawnNpm / npmCommand (lib/npm-backend.mjs)');
+});
+
 test('npm is run without a shell, except on Windows where the arguments are quoted for cmd.exe', () => {
   const c = npmCommand(['install', 'express@^4.21.0 || ^5.0.0']);
   if (POSIX) assert.deepEqual(c, { cmd: 'npm', args: ['install', 'express@^4.21.0 || ^5.0.0'], shell: false });
@@ -350,6 +367,21 @@ fs.writeFileSync(path.join(process.cwd(), 'package-lock.json'), '{}');
   fs.chmodSync(path.join(bin, 'npm'), 0o755);
 }
 
+test('the framework checkout\'s own build runs its npm steps through spawnNpm, in the checkout', { skip: !POSIX && 'a POSIX npm stand-in' }, withWorkspace(async (t, { ws }) => {
+  const bin = path.join(ws, 'bin');
+  const log = path.join(ws, 'npm.log');
+  fakeNpm(bin, log);
+  process.env.PATH = `${bin}${path.delimiter}${process.env.PATH}`;
+  const a2 = path.join(ws, 'abap2UI5');
+  fs.mkdirSync(a2, { recursive: true });
+  const { transpileFramework } = await import('../lib/runtime.mjs');
+  const res = await transpileFramework({ a2, timeoutMs: 30_000 });
+  assert.deepEqual(res, { ok: false, reason: 'no node/output after the transpile' }, 'the stand-in builds nothing');
+  const calls = fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.deepEqual(calls.map((c) => c.args), [['ci', '--no-audit', '--no-fund'], ['run', 'downport'], ['run', 'auto_transpile']]);
+  assert.ok(calls.every((c) => fs.realpathSync(c.cwd) === fs.realpathSync(a2)));
+}));
+
 test('the install: exact versions, --ignore-scripts, a lockfile, and nothing twice', { skip: !POSIX && 'a POSIX npm stand-in' }, withWorkspace(async (t, { ws }) => {
   const bin = path.join(ws, 'bin');
   const log = path.join(ws, 'npm.log');
@@ -481,6 +513,24 @@ test('a release the registry does not have is reported as missing', withWorkspac
   assert.equal(res.missing, true);
   assert.match(res.reason, /the registry has no @abap2ui5\/node-runtime@1\.144\.0/);
   assert.equal((await ensureRuntime({ version: '../x' })).ok, false, 'a version is never a path');
+}));
+
+/* ensureRuntime promises never to reject, and the install writes files: a
+ * workspace that cannot be written threw out of it - the build ended
+ * without a build_log record, a deploy's lint answered a bare ENOTDIR, and
+ * a caller queued behind the failed install was rejected with it. */
+test('a workspace the install cannot write into is a reason, not a rejection - for every queued caller', withWorkspace(async (t, { workspace }) => {
+  fs.mkdirSync(path.dirname(workspace), { recursive: true });
+  fs.writeFileSync(workspace, 'a file where the workspace directory belongs');
+  const both = await Promise.allSettled([
+    ensureRuntime({ version: '1.145.0', meta: META_145 }),
+    ensureRuntime({ version: '1.145.0', meta: META_145, withLint: false }),
+  ]);
+  for (const r of both) {
+    assert.equal(r.status, 'fulfilled', r.reason && r.reason.message);
+    assert.equal(r.value.ok, false);
+    assert.match(r.value.reason, /could not be prepared: ENOTDIR/);
+  }
 }));
 
 // --------------------------------------------------------- open-abap-core ----

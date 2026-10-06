@@ -32,6 +32,24 @@ test('every tool has a name, a documenting description and an object schema', ()
   assert.equal(new Set(TOOL_NAMES).size, TOOLS.length, 'tool names must be unique');
 });
 
+/* An array schema without `items` is valid JSON Schema and refused by clients
+ * that check tool schemas before they offer the tool: VS Code reports "array
+ * type must have items" and OpenAI-backed hosts reject the request ("array
+ * schema missing items") - app_act's `args` had none. `items: {}` (any value)
+ * is enough for both. */
+test('every array in a tool schema declares its items', () => {
+  const walk = (schema, at) => {
+    if (!schema || typeof schema !== 'object') return;
+    if (schema.type === 'array' || (Array.isArray(schema.type) && schema.type.includes('array'))) {
+      assert.ok(schema.items && typeof schema.items === 'object', `${at} is an array schema without items`);
+    }
+    for (const [k, v] of Object.entries(schema.properties || {})) walk(v, `${at}.${k}`);
+    if (schema.items) walk(schema.items, `${at}[]`);
+    for (const key of ['anyOf', 'oneOf', 'allOf']) (schema[key] || []).forEach((s, i) => walk(s, `${at}.${key}[${i}]`));
+  };
+  for (const t of TOOLS) walk(t.inputSchema, t.name);
+});
+
 test('the README tool table lists exactly the TOOLS names', () => {
   // the table rows: | `tool_name` | what it does |
   const readme = read('README.md');
@@ -224,6 +242,18 @@ test('every tool a rendered prompt names exists in the TOOLS array', async () =>
         `prompt '${p.name}' sends the agent to '${tool}', which lib/tools.mjs does not define`);
     }
   }
+});
+
+/* app_act resolves a `values` key by field id, model path or attribute name
+ * (resolveTarget in lib/appclient.mjs) - never by label. The build brief told
+ * the agent to "fill fields by label", and every value keyed so was refused. */
+test('the build brief fills fields by the keys app_act resolves', async () => {
+  const { getPrompt } = await import('../lib/prompts.mjs');
+  const text = getPrompt('build-an-abap2ui5-app', { task: 'x' }).messages.map((m) => m.content.text).join('\n').replace(/\s+/g, ' ');
+  const fill = /fill fields by ([^,]*(?:,[^,]*)?),/.exec(text);
+  assert.ok(fill, 'the brief says how app_act fills fields');
+  assert.doesNotMatch(fill[1], /label/, `app_act takes no label as a values key: "${fill[0]}"`);
+  assert.match(fill[1], /model path/);
 });
 
 test('every written-out prompt count matches the PROMPTS array', () => {

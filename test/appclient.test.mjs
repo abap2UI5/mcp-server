@@ -10,7 +10,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createAppClient, buildDelta, errorText, AgentError, PROTOCOL, headerOf, validContextId } from '../lib/appclient.mjs';
+import { createAppClient, buildDelta, errorText, AgentError, PROTOCOL, EARLIER_IDS, headerOf, validContextId } from '../lib/appclient.mjs';
+import { setAt } from '../lib/snapshot.mjs';
 
 const FIX = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'agent');
 const fixture = (name) => JSON.parse(fs.readFileSync(path.join(FIX, `${name}.json`), 'utf8'));
@@ -75,6 +76,16 @@ test('errorText shows the error body verbatim: markup is text, nothing stripped 
   assert.match(cut, /line 39\n\.\.\. \(\d+ more characters\)$/);
   assert.ok(!cut.includes('line 40'));
   assert.ok(errorText(500, 'x'.repeat(10000)).length < 4100, 'and capped in characters');
+});
+
+test('errorText takes linear time over a long run of whitespace inside the body', () => {
+  // /\s+$/ retried each run from every one of its positions: 15 s for this body
+  const body = `a${' '.repeat(100000)}b${'\n'.repeat(100000)}c \n\t `;
+  const t0 = Date.now();
+  const out = errorText(500, body);
+  assert.ok(Date.now() - t0 < 1000, `took ${Date.now() - t0} ms`);
+  assert.ok(out.startsWith('HTTP 500: a   '), 'the body is still shown from its start');
+  assert.equal(errorText(500, 'a 　\n \t'), 'HTTP 500: a', 'trailing whitespace of every kind \\s matched is still trimmed');
 });
 
 // ---------------------------------------------- replay of real sessions ----
@@ -230,6 +241,27 @@ test('sessions: unknown, earlier and orphaned (backend restarted) ids are refuse
   gen = 2;
   assert.throws(() => client.describe(s1.session), /started on a backend that has since stopped or restarted - its drafts are gone; app_start Z2UI5_CL_SMP_APP_011 again/);
   assert.throws(() => client.describe(undefined), /pass `session`/);
+});
+
+test('a long session keeps the last EARLIER_IDS draft ids as earlier states, not every one it ever had', async () => {
+  /* Every roundtrip answers a new draft id, and adopt() kept each in the
+   * session's ids and the client's id index for the session's life: 10,000
+   * acts held ~1.5 MB a long-running server never gave back. */
+  const { client } = fakeApp(page('<Button text="Go" press=".eB([\'GO\'])"/>'), {});
+  const first = await client.start('z_t');
+  const seen = [first.session];
+  let s = first;
+  for (let i = 0; i < 1000; i += 1) {
+    s = await client.act(s.session, { event: 'GO' });
+    seen.push(s.session);
+  }
+  assert.equal(new Set(seen).size, 1001, 'a new draft id per roundtrip');
+  assert.equal(client.describe(s.session).session, s.session);
+  const recent = seen[seen.length - 1 - EARLIER_IDS];
+  assert.throws(() => client.describe(recent), new RegExp(`'${recent}' is an earlier state of this app session - continue with the current one: '${s.session}'`));
+  const gone = seen[seen.length - 2 - EARLIER_IDS];
+  assert.throws(() => client.describe(gone), new RegExp(`unknown session '${gone}' - start one with app_start; open sessions: ${s.session} \\(Z_T\\)$`));
+  assert.throws(() => client.describe(first.session), /unknown session /);
 });
 
 test('a backend error is a refusal with the backend\'s text, and the session is unchanged', async () => {
@@ -399,6 +431,20 @@ test('the pick, single select: the picked row selected, the previous selection c
   assert.deepEqual(bodies[1].MODEL, { T: { __delta: { 1: { SEL: false }, 2: { SEL: true } } } });
 });
 
+test('`row` is a non-negative integer: a JSON number or a string of digits; "", false, [], true, 1.5, -1 are refused', async () => {
+  /* server.mjs read `row` with Number(): "", false and [] became row 0 and
+   * true row 1 - a pick of a row nobody named. The client checks it now. */
+  const { client, bodies } = fakeApp(DIALOG('false', ', ${$parameters>/selectedContexts/0/sPath}'), ROWS());
+  const s = await client.start('z_t');
+  for (const bad of ['', ' ', false, true, [], [0], {}, 1.5, -1, '1.0', '0x1', '1e0', '-0', 'Infinity', Infinity, NaN]) {
+    await rejects(client.act(s.session, { event: 'OK', row: bad }), /^`row` is a row index \(0-based\) - a non-negative integer, not /);
+  }
+  await rejects(client.act(s.session, { row: '' }), /^`row` is a row index/);
+  assert.equal(bodies.length, 1, 'refusals send nothing');
+  await client.act(s.session, { event: 'OK', row: ' 2 ' });
+  assert.deepEqual(bodies[1].S_FRONT.T_EVENT_ARG, ['/T/2']);
+});
+
 test('the pick, multi select: the row joins the selection, selectedItem is the first selected row in model order', async () => {
   const { client, bodies } = fakeApp(DIALOG('true', ', ${$parameters>/selectedContexts/1/sPath}, ${$parameters>/selectedItem}.getCells()[0].getText()'), ROWS());
   const s = await client.start('z_t');
@@ -422,6 +468,75 @@ test('the pick without `row`: multi select confirms what is ticked, and an item 
   assert.equal(empty.bodies.length, 1);
 });
 
+/* Action ids follow the document order, so values that show a control
+ * renumber them. The act re-read its action by id after applying the values:
+ * "check the box, then SAVE" fired DELETE, the button the box made visible
+ * in front of Save - an event nobody asked for, never validated. */
+test('values that renumber the actions fire the action that was asked for, or are refused', async () => {
+  const CHECK = '<CheckBox text="Danger zone" selected="{/SHOW}"/><Button text="Delete all" visible="{/SHOW}" press=".eB([\'DELETE\'])"/>';
+  const one = fakeApp(page(`${CHECK}<Button text="Save" press=".eB(['SAVE'])"/>`), { SHOW: false });
+  let s = await one.client.start('z_t');
+  assert.deepEqual(s.actions.map((a) => `${a.id}:${a.event}`), ['a1:SAVE']);
+  s = await one.client.act(s.session, { values: { '/SHOW': true }, event: 'SAVE' });
+  assert.equal(one.bodies[1].S_FRONT.EVENT, 'SAVE', 'not DELETE, which is a1 once the box is ticked');
+  assert.deepEqual(one.bodies[1].MODEL, { SHOW: true });
+
+  // two Save buttons: which of them a1 was is no longer decidable - refused,
+  // nothing sent, the value not applied
+  const two = fakeApp(page(`${CHECK}<Button text="Save" press=".eB(['SAVE'])"/><Button text="Save" press=".eB(['SAVE'])"/>`), { SHOW: false });
+  s = await two.client.start('z_t');
+  await rejects(two.client.act(s.session, { values: { '/SHOW': true }, event: 'SAVE' }),
+    /^the values change the screen - action a1 is no longer SAVE; fill the values without an event first, then fire it from the next snapshot$/);
+  assert.equal(two.bodies.length, 1, 'nothing sent');
+  const d = two.client.describe(s.session);
+  assert.equal(d.pending, undefined);
+  assert.equal(d.fields[0].value, false);
+  assert.deepEqual(d.actions.map((a) => a.event), ['SAVE', 'SAVE']);
+});
+
+/* The act checked that its action is enabled BEFORE the values and fired
+ * it after them without asking again: OPEN set to false together with DEL
+ * pressed a Delete button whose enabled="{/OPEN}" the browser had just
+ * disabled. And values that hid the action left its id with nothing behind
+ * it - the action of the old snapshot was fired anyway, a control the screen
+ * no longer shows. Both are refused before anything is sent, the values not
+ * applied (the agent addon refuses both the same way). */
+test('values that disable or hide the act\'s own action are refused, nothing sent, the values rolled back', async () => {
+  const DEL = '<CheckBox text="Open" selected="{/OPEN}"/><Button text="Delete" enabled="{/OPEN}" press=".eB([\'DEL\'])"/>';
+  const off = fakeApp(page(DEL), { OPEN: true });
+  let s = await off.client.start('z_t');
+  assert.equal(s.actions[0].enabled, true);
+  await rejects(off.client.act(s.session, { values: { '/OPEN': false }, event: 'DEL' }),
+    /^action a1 \(Delete\) is disabled once the values are filled - this screen offers no action/);
+  assert.equal(off.bodies.length, 1, 'nothing sent');
+  let d = off.client.describe(s.session);
+  assert.equal(d.pending, undefined);
+  assert.equal(d.fields[0].value, true);
+  // the same values without the event are fine, and the button is then disabled
+  d = await off.client.act(s.session, { values: { '/OPEN': false } });
+  assert.equal(d.actions[0].enabled, false);
+
+  const HIDE = '<CheckBox text="More" selected="{/SHOW}"/><Button text="Save" press=".eB([\'SAVE\'])"/><Button text="Close" visible="{/SHOW}" press=".eB([\'C\'])"/>';
+  const gone = fakeApp(page(HIDE), { SHOW: true });
+  s = await gone.client.start('z_t');
+  assert.deepEqual(s.actions.map((a) => `${a.id}:${a.event}`), ['a1:SAVE', 'a2:C']);
+  await rejects(gone.client.act(s.session, { values: { '/SHOW': false }, event: 'C' }),
+    /^the values change the screen - action a2 \(C\) is no longer on it; fill the values without an event first, then fire it from the next snapshot$/);
+  assert.equal(gone.bodies.length, 1, 'nothing sent');
+  d = gone.client.describe(s.session);
+  assert.equal(d.pending, undefined);
+  assert.equal(d.fields[0].value, true);
+
+  // an action whose id went away but which is still there under another
+  // one is fired as itself
+  const moved = fakeApp(page('<CheckBox text="More" selected="{/SHOW}"/><Button text="Close" visible="{/SHOW}" press=".eB([\'C\'])"/><Button text="Save" press=".eB([\'SAVE\'])"/>'), { SHOW: true });
+  s = await moved.client.start('z_t');
+  assert.deepEqual(s.actions.map((a) => `${a.id}:${a.event}`), ['a1:C', 'a2:SAVE']);
+  await moved.client.act(s.session, { values: { '/SHOW': false }, event: 'a2' });
+  assert.equal(moved.bodies[1].S_FRONT.EVENT, 'SAVE');
+  assert.deepEqual(moved.bodies[1].MODEL, { SHOW: false });
+});
+
 test('the pick: a marshalled control, an id or an unknown call is asked for in args, and the refused pick leaves the selection alone', async () => {
   for (const [arg, describe] of [
     ['${$parameters>/selectedItems}', '$parameters:selectedItems'],
@@ -439,6 +554,27 @@ test('the pick: a marshalled control, an id or an unknown call is asked for in a
     assert.deepEqual(after.tables[0].rows.map((r) => r.SEL), [false, true, false]);
     await client.act(s.session, { event: 'OK', row: 0, args: ['given'] });
     assert.deepEqual(bodies[1].S_FRONT.T_EVENT_ARG, ['given']);
+  }
+});
+
+/* `${$parameters>/}` and `${$parameters>}` name the WHOLE parameter object.
+ * It holds the row as an item or a context, which this client models with
+ * markers - and those ({"selectedItem":{"$item":0}, ...}) went out as the
+ * event argument. The browser sends the controls marshalled there; like
+ * the agent addon, the client asks for the value in args. */
+test('the whole parameter object is asked for in args, never sent with the client\'s item markers', async () => {
+  const TABLE = (arg) => page(`<Table items="{/T}" itemPress=".eB(['PRESS'], ${arg})"><columns><Column/></columns><items><ColumnListItem type="Active"><cells><Text text="{A}"/></cells></ColumnListItem></items></Table>`
+    + `<t:Table rows="{/T}" rowSelectionChange=".eB(['SEL'], ${arg})"><t:columns><t:Column><Label text="A"/><t:template><Text text="{A}"/></t:template></t:Column></t:columns></t:Table>`);
+  for (const arg of ['${$parameters>/}', '${$parameters>}']) {
+    for (const [xml, event] of [[DIALOG('false', `, ${arg}`), 'OK'], [TABLE(arg), 'PRESS'], [TABLE(arg), 'SEL']]) {
+      const { client, bodies } = fakeApp(xml, ROWS());
+      const s = await client.start('z_t');
+      await rejects(client.act(s.session, { event, row: 0 }), new RegExp(`^argument 0 of ${event} \\(\\$parameters:\\) is computed in the browser - pass its value in args\\[0\\]$`));
+      assert.equal(bodies.length, 1, `${event} ${arg}: nothing sent`);
+      assert.equal(client.describe(s.session).pending, undefined, 'a refused pick is rolled back');
+      await client.act(s.session, { event, row: 0, args: ['given'] });
+      assert.deepEqual(bodies[1].S_FRONT.T_EVENT_ARG, ['given']);
+    }
   }
 });
 
@@ -623,6 +759,100 @@ test('edits made while a roundtrip is in flight survive its answer and travel wi
   assert.equal(a.fields.find((f) => f.path === '/ZIP').value, '75001', 'the edit survives the model push');
   await c.act(a.session, { event: 'OTHER' });
   assert.deepEqual(be.posts[2].value.MODEL, { ZIP: '75001' }, 'and travels with the next event');
+});
+
+test('a view the response displays anew drops the unsent edits of the old one, as its new model does in the frontend', async () => {
+  const POPOVER = '<core:FragmentDefinition xmlns="sap.m" xmlns:core="sap.ui.core"><Popover title="P"><Button text="OK" press=".eB([\'OK\'])"/></Popover></core:FragmentDefinition>';
+  const be = scripted((req, n, value) => {
+    if (!value.S_FRONT.ID) return startAnswer({ S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'display', 'MAIN', FORM], ['VIEW_SLOTS', 'display', 'POPOVER', POPOVER, { openById: 'x' }]] } });
+    // the popover's OK: the popover goes, the page is displayed again
+    return n === 2 ? { ...eventAnswer(n, { S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'destroy', 'POPOVER'], ['VIEW_SLOTS', 'display', 'MAIN', FORM]] } }), MODEL: { NAME: 'fresh', ZIP: '' } } : eventAnswer(n);
+  });
+  const c = be.client();
+  const s = await c.start('z_t');
+  // the page stays editable behind a popover: typed there, not sent
+  const typed = await c.act(s.session, { values: { '/NAME': 'typed' } });
+  assert.deepEqual(typed.pending, ['/NAME']);
+  const a = await c.act(s.session, { event: 'OK' });
+  assert.equal(be.posts[1].value.MODEL, undefined, 'the popover\'s event carries its own model only');
+  assert.equal(a.pending, undefined, 'the new page has nothing pending');
+  assert.equal(a.fields.find((f) => f.path === '/NAME').value, 'fresh', 'and shows what the backend sent');
+  await c.act(a.session, { event: 'CHECK' });
+  assert.equal(be.posts[2].value.MODEL, undefined, 'the edit of the old page never goes out');
+});
+
+test('a model push re-applies an unsent edit only where its parent still exists, as JSONModel#setProperty does', async () => {
+  const GRID = page('<Input value="{/NAME}"/><Table items="{/T}"><columns><Column/></columns><items><ColumnListItem><cells><Input value="{Q}"/></cells></ColumnListItem></items></Table><Button text="Check" press=".eB([\'CHECK\'])"/>');
+  const POPOVER = '<core:FragmentDefinition xmlns="sap.m" xmlns:core="sap.ui.core"><Popover title="P"><Button text="OK" press=".eB([\'OK\'])"/></Popover></core:FragmentDefinition>';
+  const be = scripted((req, n, value) => {
+    if (!value.S_FRONT.ID) {
+      return { S_FRONT: { ID: 'D1', APP: 'Z_T', S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'display', 'MAIN', GRID], ['VIEW_SLOTS', 'display', 'POPOVER', POPOVER, {}]] } }, MODEL: { NAME: '', T: [{ Q: 1 }, { Q: 2 }, { Q: 3 }] } };
+    }
+    // the popover's OK closes it and pushes a model whose table shrank
+    return n === 2 ? { ...eventAnswer(n, { S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'destroy', 'POPOVER']] } }), MODEL: { NAME: '', T: [{ Q: 1 }] } } : eventAnswer(n);
+  });
+  const c = be.client();
+  const s = await c.start('z_t');
+  await c.act(s.session, { values: { '/NAME': 'Ann', '/T/2/Q': 9 } });
+  const a = await c.act(s.session, { event: 'OK' });
+  assert.equal(a.fields.find((f) => f.path === '/NAME').value, 'Ann', 'an edit whose parent is there is re-applied');
+  assert.equal(a.tables[0].rowCount, 1, 'no row is made up for the one that is gone');
+  assert.deepEqual(a.tables[0].rows, [{ Q: 1 }]);
+  assert.deepEqual(a.pending, ['/NAME', '/T/2/Q'], 'both stay pending, as the frontend\'s changed paths do');
+  await c.act(a.session, { event: 'CHECK' });
+  assert.equal(JSON.stringify(be.posts[2].value.MODEL), '{"NAME":"Ann","T":{"__delta":{"2":{}}}}', 'the delta the frontend builds from that model');
+});
+
+test('app_start values that are refused name the session the start opened, as the agent addon does', async () => {
+  const be = scripted((req, n, value) => (value.S_FRONT.ID ? eventAnswer(n) : startAnswer()));
+  const c = be.client();
+  await rejects(c.start('z_t', { values: { '/NOPE': 'x' } }), /^no field '\/NOPE' on this screen - .* \(the app is running: session D1 - app_describe shows it\)$/);
+  const s = c.describe('D1');
+  assert.equal(s.session, 'D1', 'the started app is reachable');
+  assert.equal(s.pending, undefined, 'and none of the refused values was applied');
+  await c.act('D1', { values: { '/NAME': 'Ann' }, event: 'CHECK' });
+  assert.deepEqual(be.posts[1].value.MODEL, { NAME: 'Ann' });
+});
+
+test('a number field takes a number or a decimal string, as the agent addon does - nothing Number() would bend into one', async () => {
+  const VIEW = page('<Input value="{/QTY}"/><Button text="Check" press=".eB([\'CHECK\'])"/>');
+  const be = scripted((req, n, value) => (value.S_FRONT.ID ? eventAnswer(n) : { S_FRONT: { ID: 'D1', APP: 'Z_T', S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'display', 'MAIN', VIEW]] } }, MODEL: { QTY: 1 } }));
+  const c = be.client();
+  const s = await c.start('z_t');
+  // Infinity went out as null (the field's initial value), 0x10 as 16, true as 1
+  for (const bad of [true, '0x10', '1e3', 'Infinity', '1e400', '', ' ', '5 apples']) {
+    await rejects(c.act(s.session, { values: { '/QTY': bad } }), /^field f1 \(QTY\) holds a number - .* is none$/);
+  }
+  assert.equal(c.describe(s.session).pending, undefined, 'nothing of it was applied');
+  for (const [given, stored] of [[7, 7], ['-2.5', -2.5], [' 42 ', 42]]) {
+    const a = await c.act(s.session, { values: { '/QTY': given } });
+    assert.equal(a.fields[0].value, stored);
+  }
+  await c.act(s.session, { event: 'CHECK' });
+  assert.deepEqual(be.posts[1].value.MODEL, { QTY: 42 });
+});
+
+test('a field bound through __proto__ writes nothing into this process\'s prototypes', async () => {
+  const VIEW = page('<Input value="{/__proto__/a2ui5Polluted}"/><Input value="{/constructor/prototype/a2ui5Polluted}"/><Input value="{/NAME}"/><Button text="Check" press=".eB([\'CHECK\'])"/>');
+  const be = scripted((req, n, value) => (value.S_FRONT.ID ? eventAnswer(n) : startAnswer({ S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'display', 'MAIN', VIEW]] } })));
+  const c = be.client();
+  const s = await c.start('z_t');
+  try {
+    await rejects(c.act(s.session, { values: { f1: 'x' } }), /^\/__proto__\/a2ui5Polluted is no model path a value can be written to/);
+    await rejects(c.act(s.session, { values: { f2: 'x', '/NAME': 'Ann' }, event: 'CHECK' }), /constructor\/prototype\/a2ui5Polluted is no model path/);
+    assert.equal(({}).a2ui5Polluted, undefined, 'Object.prototype is untouched');
+    assert.equal(be.posts.length, 1, 'and nothing was sent');
+    assert.equal(c.describe(s.session).pending, undefined, 'the refused act changed nothing');
+    // the primitive itself, for its other callers (the pick, the rollback, the card renderer's way back)
+    const data = {};
+    assert.equal(setAt(data, '/__proto__/a2ui5Polluted', 1), false);
+    assert.equal(setAt(data, '/X/constructor/prototype/a2ui5Polluted', 1), false);
+    assert.equal(({}).a2ui5Polluted, undefined);
+    assert.equal(setAt(data, '/T/0/Q', 1), true);
+    assert.deepEqual(data, { T: [{ Q: 1 }] });
+  } finally {
+    delete Object.prototype.a2ui5Polluted;
+  }
 });
 
 test('an edit of a sent path made in flight stays pending; a failed roundtrip rolls back only its own edits', async () => {
