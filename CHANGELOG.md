@@ -100,6 +100,12 @@
   Chromium installed yet) stayed the answer after the install. A
   disconnected browser and a failed launch now clear the slot, and the next
   call launches afresh.
+- **The npm backend's install never rejects, as documented.** A workspace
+  the install could not write into (read-only, a file where the directory
+  belongs, a full disk) threw out of `ensureRuntime`: `build_backend` ended
+  without a `build_log` record, `deploy_app`'s lint answered a bare
+  `ENOTDIR`, and every caller queued behind the failed install was rejected
+  with it. It is the install's reason now, naming the directory.
 
 ## 1.0.0 - 2026-10-03
 

@@ -483,6 +483,24 @@ test('a release the registry does not have is reported as missing', withWorkspac
   assert.equal((await ensureRuntime({ version: '../x' })).ok, false, 'a version is never a path');
 }));
 
+/* ensureRuntime promises never to reject, and the install writes files: a
+ * workspace that cannot be written threw out of it - the build ended
+ * without a build_log record, a deploy's lint answered a bare ENOTDIR, and
+ * a caller queued behind the failed install was rejected with it. */
+test('a workspace the install cannot write into is a reason, not a rejection - for every queued caller', withWorkspace(async (t, { workspace }) => {
+  fs.mkdirSync(path.dirname(workspace), { recursive: true });
+  fs.writeFileSync(workspace, 'a file where the workspace directory belongs');
+  const both = await Promise.allSettled([
+    ensureRuntime({ version: '1.145.0', meta: META_145 }),
+    ensureRuntime({ version: '1.145.0', meta: META_145, withLint: false }),
+  ]);
+  for (const r of both) {
+    assert.equal(r.status, 'fulfilled', r.reason && r.reason.message);
+    assert.equal(r.value.ok, false);
+    assert.match(r.value.reason, /could not be prepared: ENOTDIR/);
+  }
+}));
+
 // --------------------------------------------------------- open-abap-core ----
 
 function fakeGit(bin, log, { head }) {
