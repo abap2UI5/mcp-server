@@ -451,7 +451,9 @@ abap2UI5's `z2ui5_cl_pop_to_select` and the popups addon's
 answers `sPath` (`<table path>/<row>`, e.g. `/T_TAB/2`), an array its index
 and `length`; a path that ends at an item or a context (the browser sends the
 control marshalled with all its properties) or goes into one any further, or
-names a parameter outside the table above, is refused naming `args[i]`.
+at a value that holds one (`${$parameters>/}` and `${$parameters>}`, the
+whole parameter object), or names a parameter outside the table above, is
+refused naming `args[i]`.
 
 `$expr:` arguments are filled for these shapes on a row-valued parameter `P`
 (whitespace around `.` and inside `()` is allowed), and refused naming

@@ -557,6 +557,27 @@ test('the pick: a marshalled control, an id or an unknown call is asked for in a
   }
 });
 
+/* `${$parameters>/}` and `${$parameters>}` name the WHOLE parameter object.
+ * It holds the row as an item or a context, which this client models with
+ * markers - and those ({"selectedItem":{"$item":0}, ...}) went out as the
+ * event argument. The browser sends the controls marshalled there; like
+ * the agent addon, the client asks for the value in args. */
+test('the whole parameter object is asked for in args, never sent with the client\'s item markers', async () => {
+  const TABLE = (arg) => page(`<Table items="{/T}" itemPress=".eB(['PRESS'], ${arg})"><columns><Column/></columns><items><ColumnListItem type="Active"><cells><Text text="{A}"/></cells></ColumnListItem></items></Table>`
+    + `<t:Table rows="{/T}" rowSelectionChange=".eB(['SEL'], ${arg})"><t:columns><t:Column><Label text="A"/><t:template><Text text="{A}"/></t:template></t:Column></t:columns></t:Table>`);
+  for (const arg of ['${$parameters>/}', '${$parameters>}']) {
+    for (const [xml, event] of [[DIALOG('false', `, ${arg}`), 'OK'], [TABLE(arg), 'PRESS'], [TABLE(arg), 'SEL']]) {
+      const { client, bodies } = fakeApp(xml, ROWS());
+      const s = await client.start('z_t');
+      await rejects(client.act(s.session, { event, row: 0 }), new RegExp(`^argument 0 of ${event} \\(\\$parameters:\\) is computed in the browser - pass its value in args\\[0\\]$`));
+      assert.equal(bodies.length, 1, `${event} ${arg}: nothing sent`);
+      assert.equal(client.describe(s.session).pending, undefined, 'a refused pick is rolled back');
+      await client.act(s.session, { event, row: 0, args: ['given'] });
+      assert.deepEqual(bodies[1].S_FRONT.T_EVENT_ARG, ['given']);
+    }
+  }
+});
+
 test('row events of tables: listItem, rowIndex/rowContext and a row action item\'s row are filled from `row`', async () => {
   const xml = page(
     '<Table items="{/T}" itemPress=".eB([\'PRESS\'], ${$parameters>/listItem}.getBindingContext().getProperty(\'B\'), ${$parameters>/listItem}.getCells()[0].getText())">'

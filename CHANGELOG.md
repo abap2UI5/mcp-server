@@ -367,6 +367,14 @@
   is sent, with the values taken back; an action that only moved to
   another id is still fired as itself. The agent addon refuses both the
   same way.
+- **app_act: the whole event parameter object is asked for in `args`.**
+  `${$parameters>/}` and `${$parameters>}` name the whole parameter object
+  of a row event, which holds the row as an item or a binding context - and
+  the client's internal markers for those (`{"selectedItem":{"$item":0},
+  ...}`, `{"rowIndex":0,"rowContext":{"$ctx":0}}`) went out as the event
+  argument, where the browser sends the controls marshalled. A value that
+  holds an item or a context anywhere is refused naming `args[i]` now, as
+  the agent addon does.
 
 ## 1.0.0 - 2026-10-03
 
