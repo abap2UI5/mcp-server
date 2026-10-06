@@ -125,6 +125,22 @@ test('a supporting linter gets ONE warm renderer per config, shared and closable
   });
 });
 
+/* Two calls shared a warm renderer and both watched it die. The first drop
+ * clears the slot and the next call opens a fresh renderer; the second drop,
+ * arriving late, closed that fresh one under the call using it - which then
+ * saw a dead browser of its own. A drop names the renderer it saw die. */
+test('a late drop of a dead renderer leaves the fresh one alone', async () => {
+  await withFakeLinter({ withRenderExport: true, checkFilesText: NEW_SHAPE }, async () => {
+    const dead = await getRenderer({ pages: 1 });
+    await dropRenderer({ pages: 1 }, dead); // the first caller that noticed
+    const fresh = await getRenderer({ pages: 1 }); // a third call, meanwhile
+    assert.ok(fresh && fresh !== dead);
+    await dropRenderer({ pages: 1 }, dead); // the second caller that noticed
+    assert.equal(fresh.closed, false, 'the fresh renderer must not be closed by a drop of the dead one');
+    assert.equal(await getRenderer({ pages: 1 }), fresh, 'and it stays the warm one');
+  });
+});
+
 test('rendererLooksDead spots a dead browser and leaves view errors alone', () => {
   assert.equal(rendererLooksDead(['HARNESS: Target page, context or browser has been closed']), true);
   assert.equal(rendererLooksDead(['HARNESS: browser has been closed']), true);

@@ -185,6 +185,13 @@
   chapter URI with broken percent-encoding, which answered a bare
   "URI malformed". The messages are unchanged; a missing checkout stays
   -32603.
+- **A late drop of a dead warm renderer no longer closes its successor.**
+  When two `validate_view` / `screenshot_view` calls shared a warm Chromium
+  and both saw it die, the first dropped it and the next call opened a
+  fresh one - and the second drop then closed that fresh renderer under the
+  call using it, which saw a dead browser in turn and fell back to the cold
+  path. A drop now names the renderer it saw die and leaves a newer one in
+  place.
 
 ## 1.0.0 - 2026-10-03
 

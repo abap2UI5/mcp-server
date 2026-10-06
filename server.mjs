@@ -904,11 +904,11 @@ async function handle(name, args = {}, ctx = {}) {
         try {
           r = await check({ ...opt, renderer });
         } catch (e) {
-          await dropRenderer(GATE_POOL); // whatever threw, a fresh one next call
+          await dropRenderer(GATE_POOL, renderer); // whatever threw, a fresh one next call
           throw e;
         }
         if (rendererLooksDead(r.renderErrors)) {
-          await dropRenderer(GATE_POOL);
+          await dropRenderer(GATE_POOL, renderer);
           r = await check(opt);
         }
         return r;
@@ -1041,11 +1041,11 @@ async function handle(name, args = {}, ctx = {}) {
         try {
           shots = await doShots(warmShot);
         } catch {
-          await dropRenderer(shotPool);
+          await dropRenderer(shotPool, warmShot);
           shots = await doShots(null);
         }
         if (shots && rendererLooksDead(shots.flatMap((s) => s.errors || []))) {
-          await dropRenderer(shotPool);
+          await dropRenderer(shotPool, warmShot);
           shots = await doShots(null);
         }
       } else {
