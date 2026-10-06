@@ -651,6 +651,26 @@ test('edits made while a roundtrip is in flight survive its answer and travel wi
   assert.deepEqual(be.posts[2].value.MODEL, { ZIP: '75001' }, 'and travels with the next event');
 });
 
+test('a view the response displays anew drops the unsent edits of the old one, as its new model does in the frontend', async () => {
+  const POPOVER = '<core:FragmentDefinition xmlns="sap.m" xmlns:core="sap.ui.core"><Popover title="P"><Button text="OK" press=".eB([\'OK\'])"/></Popover></core:FragmentDefinition>';
+  const be = scripted((req, n, value) => {
+    if (!value.S_FRONT.ID) return startAnswer({ S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'display', 'MAIN', FORM], ['VIEW_SLOTS', 'display', 'POPOVER', POPOVER, { openById: 'x' }]] } });
+    // the popover's OK: the popover goes, the page is displayed again
+    return n === 2 ? { ...eventAnswer(n, { S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'destroy', 'POPOVER'], ['VIEW_SLOTS', 'display', 'MAIN', FORM]] } }), MODEL: { NAME: 'fresh', ZIP: '' } } : eventAnswer(n);
+  });
+  const c = be.client();
+  const s = await c.start('z_t');
+  // the page stays editable behind a popover: typed there, not sent
+  const typed = await c.act(s.session, { values: { '/NAME': 'typed' } });
+  assert.deepEqual(typed.pending, ['/NAME']);
+  const a = await c.act(s.session, { event: 'OK' });
+  assert.equal(be.posts[1].value.MODEL, undefined, 'the popover\'s event carries its own model only');
+  assert.equal(a.pending, undefined, 'the new page has nothing pending');
+  assert.equal(a.fields.find((f) => f.path === '/NAME').value, 'fresh', 'and shows what the backend sent');
+  await c.act(a.session, { event: 'CHECK' });
+  assert.equal(be.posts[2].value.MODEL, undefined, 'the edit of the old page never goes out');
+});
+
 test('an edit of a sent path made in flight stays pending; a failed roundtrip rolls back only its own edits', async () => {
   let fail = false;
   const be = scripted((req, n, value) => {

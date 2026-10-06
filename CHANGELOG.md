@@ -235,6 +235,14 @@
   abap2UI5 agent addon's snapshot already does; docs/agent-snapshot.md
   says so. The copies the VS Code extension and abap2UI5/protocol vendor
   pick it up with their next re-vendor.
+- **An edit the old view never sent dies with it when the view is displayed
+  anew.** `app_act` re-applied every unsent edit after each response, also
+  into a page or dialog the response displayed again - where the frontend
+  builds a new model with nothing pending. A value typed into the page
+  behind a popover (or while a roundtrip was in flight) overwrote what the
+  new page was sent, stayed `pending` and went out with its next event,
+  into another app's model too. Only a model push keeps unsent edits now
+  (`rebuiltModels` in lib/snapshot.mjs); docs/agent-snapshot.md says so.
 
 ## 1.0.0 - 2026-10-03
 

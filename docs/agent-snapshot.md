@@ -361,7 +361,9 @@ The current state from the last response kept — no roundtrip.
 4. **With `event`**: the pending edits **of the model the event's view owns**
    go out as `MODEL` delta with `EVENT` and `T_EVENT_ARG`; the answer is
    folded in; the new snapshot carries the new `session`. Pending edits of
-   another slot's model stay pending, as in the browser.
+   another slot's model stay pending, as in the browser - unless the answer
+   displays that slot's view anew: its model is a new one, and the edits of
+   the old view are dropped with it (a model push keeps them).
 5. A backend error (HTTP status, no JSON, another `PROTOCOL`) → error with
    the backend's text, shown verbatim (a `<b>` in it is text - the body is
    `text/plain`, protocol `spec/errors.md`; only shortened, and control
