@@ -130,6 +130,14 @@
   the user's last build - and the cancel and progress tests fetched the
   app-template mirror into the user's cache. Each test keeps both in its own
   temp dir now; the runtime default is unchanged.
+- **`app_act` fires the action it was asked for when its values renumber
+  the actions.** Action ids follow the document order, and the act re-read
+  its action by id after applying `values`: a value that showed a control
+  in front of the action (a checkbox making a "Delete" button visible) made
+  `{ values: { "/SHOW": true }, event: "SAVE" }` send `DELETE` - an event
+  nobody asked for and no check had seen. The act now fires the action it
+  validated, found again on the new screen, and refuses when that is no
+  longer one action (as the abap2UI5 agent addon does).
 
 ## 1.0.0 - 2026-10-03
 

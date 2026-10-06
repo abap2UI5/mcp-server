@@ -340,7 +340,12 @@ The current state from the last response kept — no roundtrip.
    - `event` is an action's `event` or its `id`. Unknown → error listing the
      enabled actions; a disabled action → error. When several actions share
      the event name, the first enabled one wins (the row-scope one when `row`
-     is given) — use the id to pick another.
+     is given) — use the id to pick another. Ids follow the document order,
+     so `values` that show or hide a control can renumber them: the act fires
+     the action it validated - the one action of the screen after the values
+     that is the same (event, control, trigger, scope, arguments) - and is
+     refused when that is not one action any more (fill the values without
+     an event first, then fire it from the next snapshot).
    - A row action whose arguments read the row needs `row` (0-based, within
      `rowCount`); a `$parameters`/`$expr` argument the row does not fill (see
      [row event parameters](#row-event-parameters)) and every `$event`

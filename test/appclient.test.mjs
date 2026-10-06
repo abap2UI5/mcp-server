@@ -422,6 +422,32 @@ test('the pick without `row`: multi select confirms what is ticked, and an item 
   assert.equal(empty.bodies.length, 1);
 });
 
+/* Action ids follow the document order, so values that show a control
+ * renumber them. The act re-read its action by id after applying the values:
+ * "check the box, then SAVE" fired DELETE, the button the box made visible
+ * in front of Save - an event nobody asked for, never validated. */
+test('values that renumber the actions fire the action that was asked for, or are refused', async () => {
+  const CHECK = '<CheckBox text="Danger zone" selected="{/SHOW}"/><Button text="Delete all" visible="{/SHOW}" press=".eB([\'DELETE\'])"/>';
+  const one = fakeApp(page(`${CHECK}<Button text="Save" press=".eB(['SAVE'])"/>`), { SHOW: false });
+  let s = await one.client.start('z_t');
+  assert.deepEqual(s.actions.map((a) => `${a.id}:${a.event}`), ['a1:SAVE']);
+  s = await one.client.act(s.session, { values: { '/SHOW': true }, event: 'SAVE' });
+  assert.equal(one.bodies[1].S_FRONT.EVENT, 'SAVE', 'not DELETE, which is a1 once the box is ticked');
+  assert.deepEqual(one.bodies[1].MODEL, { SHOW: true });
+
+  // two Save buttons: which of them a1 was is no longer decidable - refused,
+  // nothing sent, the value not applied
+  const two = fakeApp(page(`${CHECK}<Button text="Save" press=".eB(['SAVE'])"/><Button text="Save" press=".eB(['SAVE'])"/>`), { SHOW: false });
+  s = await two.client.start('z_t');
+  await rejects(two.client.act(s.session, { values: { '/SHOW': true }, event: 'SAVE' }),
+    /^the values change the screen - action a1 is no longer SAVE; fill the values without an event first, then fire it from the next snapshot$/);
+  assert.equal(two.bodies.length, 1, 'nothing sent');
+  const d = two.client.describe(s.session);
+  assert.equal(d.pending, undefined);
+  assert.equal(d.fields[0].value, false);
+  assert.deepEqual(d.actions.map((a) => a.event), ['SAVE', 'SAVE']);
+});
+
 test('the pick: a marshalled control, an id or an unknown call is asked for in args, and the refused pick leaves the selection alone', async () => {
   for (const [arg, describe] of [
     ['${$parameters>/selectedItems}', '$parameters:selectedItems'],
