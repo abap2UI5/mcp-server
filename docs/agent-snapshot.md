@@ -473,7 +473,8 @@ and `<StandardListItem title="{NAME}"/>` sends the picked row's `NAME`.
 
 The client keeps the last response per session in memory (Node: the 20 most
 recent sessions). Only the **current** draft id of a session is accepted: an
-earlier one is refused naming the current one. A session started on a backend
+earlier one is refused naming the current one (the last 100 earlier ids of a
+session; an older one is an unknown session). A session started on a backend
 process that has since stopped or restarted is refused (its drafts lived in
 that process) — on the local backend; an embedder without a process to watch
 leaves the check out (see below).

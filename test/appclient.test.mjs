@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createAppClient, buildDelta, errorText, AgentError, PROTOCOL, headerOf, validContextId } from '../lib/appclient.mjs';
+import { createAppClient, buildDelta, errorText, AgentError, PROTOCOL, EARLIER_IDS, headerOf, validContextId } from '../lib/appclient.mjs';
 import { setAt } from '../lib/snapshot.mjs';
 
 const FIX = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'agent');
@@ -241,6 +241,27 @@ test('sessions: unknown, earlier and orphaned (backend restarted) ids are refuse
   gen = 2;
   assert.throws(() => client.describe(s1.session), /started on a backend that has since stopped or restarted - its drafts are gone; app_start Z2UI5_CL_SMP_APP_011 again/);
   assert.throws(() => client.describe(undefined), /pass `session`/);
+});
+
+test('a long session keeps the last EARLIER_IDS draft ids as earlier states, not every one it ever had', async () => {
+  /* Every roundtrip answers a new draft id, and adopt() kept each in the
+   * session's ids and the client's id index for the session's life: 10,000
+   * acts held ~1.5 MB a long-running server never gave back. */
+  const { client } = fakeApp(page('<Button text="Go" press=".eB([\'GO\'])"/>'), {});
+  const first = await client.start('z_t');
+  const seen = [first.session];
+  let s = first;
+  for (let i = 0; i < 1000; i += 1) {
+    s = await client.act(s.session, { event: 'GO' });
+    seen.push(s.session);
+  }
+  assert.equal(new Set(seen).size, 1001, 'a new draft id per roundtrip');
+  assert.equal(client.describe(s.session).session, s.session);
+  const recent = seen[seen.length - 1 - EARLIER_IDS];
+  assert.throws(() => client.describe(recent), new RegExp(`'${recent}' is an earlier state of this app session - continue with the current one: '${s.session}'`));
+  const gone = seen[seen.length - 2 - EARLIER_IDS];
+  assert.throws(() => client.describe(gone), new RegExp(`unknown session '${gone}' - start one with app_start; open sessions: ${s.session} \\(Z_T\\)$`));
+  assert.throws(() => client.describe(first.session), /unknown session /);
 });
 
 test('a backend error is a refusal with the backend\'s text, and the session is unchanged', async () => {

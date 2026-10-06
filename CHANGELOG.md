@@ -308,6 +308,12 @@
   does not find that way (ENOENT), so those modes failed at their first npm
   step there. They go through the npm backend's `spawnNpm` now, as its own
   installs always did; a test holds every npm spawn of the server to it.
+- **A long app session no longer grows the server's memory with every
+  act.** Each roundtrip answers a new draft id, and the client kept every
+  one a session ever had, to refuse it as "an earlier state" - about 1.5 MB
+  per 10,000 acts that a long-running server never gave back. The last 100
+  earlier ids are named as earlier states now; an older one is refused as
+  an unknown session, naming the open ones.
 
 ## 1.0.0 - 2026-10-03
 
