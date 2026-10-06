@@ -17,7 +17,9 @@ test('spawnWithTimeout kills a deliberately hung child and reports the timeout',
   const res = await spawnWithTimeout(
     process.execPath,
     ['-e', 'console.log("started"); setInterval(() => {}, 1000);'],
-    { timeoutMs: 300 },
+    /* long enough for a loaded machine's node to start and print: at 300 ms
+     * the kill sometimes came first and "started" was never there to keep */
+    { timeoutMs: 1500 },
   );
   assert.equal(res.timedOut, true);
   assert.ok(Date.now() - t0 < 10000, 'a hung child must not hang the call');
@@ -57,6 +59,26 @@ test('spawnWithTimeout leaves a fast child alone and streams its lines', async (
   assert.equal(res.timedOut, false);
   assert.equal(res.code, 0);
   assert.deepEqual(lines.sort(), ['one', 'three', 'two']);
+});
+
+/* A chunk ends wherever the pipe buffer did: a line - or a UTF-8 character -
+ * written in two pieces reached onLine as two broken halves (the build log,
+ * the progress messages), and onLine got the line's index as a second
+ * argument, which the progress reporter reads as `force`. */
+test('spawnWithTimeout hands onLine whole lines and whole characters, one argument each', async () => {
+  const calls = [];
+  const script = [
+    'process.stdout.write("transpile: hello wor");',
+    'setTimeout(() => process.stdout.write("ld\\nsecond\\nthird"), 100);',
+    'const e = Buffer.from("caf\\u00e9\\n");',
+    'setTimeout(() => process.stderr.write(e.subarray(0, 4)), 200);',
+    'setTimeout(() => process.stderr.write(e.subarray(4)), 300);',
+  ].join('\n');
+  const res = await spawnWithTimeout(process.execPath, ['-e', script], { timeoutMs: 30000, onLine: (...a) => calls.push(a) });
+  assert.equal(res.code, 0);
+  assert.ok(calls.every((a) => a.length === 1), `onLine got extra arguments: ${JSON.stringify(calls)}`);
+  assert.deepEqual(calls.map((a) => a[0]).sort(), ['café', 'second', 'third', 'transpile: hello world']);
+  assert.equal(res.stderr, 'café\n');
 });
 
 /* Cancellation: the MCP request's AbortSignal reaches the child through

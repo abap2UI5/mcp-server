@@ -66,6 +66,10 @@
   reads its second parameter as `force`. Every line after the first of an
   output chunk bypassed the throttle, so a chatty lint or unit-test run sent
   one `notifications/progress` per line.
+- **A child's output reaches the build log and the progress messages in
+  whole lines.** Lines were cut at the pipe's chunk boundaries (one line in
+  two halves, a UTF-8 character as two replacement characters); each stream
+  is decoded as UTF-8 and buffered to its newline now.
 
 ## 1.0.0 - 2026-10-03
 
