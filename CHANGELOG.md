@@ -123,6 +123,13 @@
   different sets wrote one file: the first answered with the second's tests,
   and the first to finish deleted the file under the other. Each run writes
   a copy of its own now (`index-mcp-<class|selection>-<pid>-<n>.mjs`).
+- **`npm test` no longer writes into the user's build log.** Four test files
+  ran builds without `A2UI5_MCP_SCREENSHOT_DIR`, so the fake build's
+  `last-build.json` landed in the real `<tmp>/abap2ui5-mcp-screenshots` - a
+  freshly started server's `build_log` then answered with a test's run as
+  the user's last build - and the cancel and progress tests fetched the
+  app-template mirror into the user's cache. Each test keeps both in its own
+  temp dir now; the runtime default is unchanged.
 
 ## 1.0.0 - 2026-10-03
 

@@ -45,6 +45,11 @@ test('build_backend emits notifications/progress when the client sends a progres
        * a developer whose environment points at a real samples-controls
        * checkout watches this test run the real build instead. */
       SAMPLES_CONTROLS_HOME: '',
+      /* the build log goes to the test's own dir, not the user's
+       * <tmp>/abap2ui5-mcp-screenshots (a live server's build_log reads
+       * it), and no app-template mirror is fetched into the user's cache */
+      A2UI5_MCP_SCREENSHOT_DIR: path.join(base, 'shots'),
+      A2UI5_MCP_REMOTE: '0',
       A2UI5_HOME: a2,
     },
   });
@@ -91,6 +96,7 @@ test('build_backend emits notifications/progress when the client sends a progres
       assert.ok(n.params.progress > 0);
       assert.match(n.params.message, /transpiling step \d+/);
     }
+    assert.ok(fs.existsSync(path.join(base, 'shots', 'last-build.json')), 'the build log stays in the test\'s own dir');
   } finally {
     p.kill();
     fs.rmSync(base, { recursive: true, force: true });
@@ -123,6 +129,11 @@ test('deploy_app reports the lint start and end when a progressToken is sent', {
       ...process.env,
       AI_DEMOKIT_HOME: demokit,
       SAMPLES_CONTROLS_HOME: '',
+      /* the build log goes to the test's own dir, not the user's
+       * <tmp>/abap2ui5-mcp-screenshots (a live server's build_log reads
+       * it), and no app-template mirror is fetched into the user's cache */
+      A2UI5_MCP_SCREENSHOT_DIR: path.join(base, 'shots'),
+      A2UI5_MCP_REMOTE: '0',
     },
   });
   let buf = '';
@@ -202,6 +213,11 @@ test('build_backend sends no progress notifications without a progressToken', as
        * a developer whose environment points at a real samples-controls
        * checkout watches this test run the real build instead. */
       SAMPLES_CONTROLS_HOME: '',
+      /* the build log goes to the test's own dir, not the user's
+       * <tmp>/abap2ui5-mcp-screenshots (a live server's build_log reads
+       * it), and no app-template mirror is fetched into the user's cache */
+      A2UI5_MCP_SCREENSHOT_DIR: path.join(base, 'shots'),
+      A2UI5_MCP_REMOTE: '0',
       A2UI5_HOME: a2,
     },
   });

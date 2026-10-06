@@ -180,7 +180,11 @@ async function withFakeRepos(buildScript, extraEnv, fn) {
    * environment points at a real samples-controls checkout runs the REAL
    * e2e-build here. The precedence itself is correct and stays; what was
    * wrong was this test leaving the competing var in place. */
-  const wanted = { AI_DEMOKIT_HOME: demokit, SAMPLES_CONTROLS_HOME: '', A2UI5_HOME: a2, ...extraEnv };
+  /* The build log (last-build.json) goes under A2UI5_MCP_SCREENSHOT_DIR, whose
+   * default is the user's own <tmp>/abap2ui5-mcp-screenshots - the file a
+   * live server's build_log answers from after a restart. Each test keeps it
+   * in its own temp dir, or a test's fake build becomes the user's last one. */
+  const wanted = { AI_DEMOKIT_HOME: demokit, SAMPLES_CONTROLS_HOME: '', A2UI5_HOME: a2, A2UI5_MCP_SCREENSHOT_DIR: path.join(base, 'shots'), ...extraEnv };
   for (const [k, v] of Object.entries(wanted)) {
     saved[k] = process.env[k];
     process.env[k] = v;

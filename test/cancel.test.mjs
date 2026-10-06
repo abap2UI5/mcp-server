@@ -41,6 +41,11 @@ test('a cancelled build_backend kills the build child', async () => {
       // the older var on purpose; a surrounding SAMPLES_CONTROLS_HOME would
       // outrank it (newest-first, first SET wins), so it is cleared
       SAMPLES_CONTROLS_HOME: '',
+      /* the build log goes to the test's own dir, not the user's
+       * <tmp>/abap2ui5-mcp-screenshots (a live server's build_log reads
+       * it), and no app-template mirror is fetched into the user's cache */
+      A2UI5_MCP_SCREENSHOT_DIR: path.join(base, 'shots'),
+      A2UI5_MCP_REMOTE: '0',
       A2UI5_HOME: a2,
     },
   });

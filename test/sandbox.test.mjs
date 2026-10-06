@@ -15,7 +15,7 @@ import {
 } from '../lib/runtime.mjs';
 import { workspaceRoot, resolveA2UI5 } from '../lib/repos.mjs';
 
-const ENV = ['A2UI5_HOME', 'SAMPLES_CONTROLS_HOME', 'AI_DEMOKIT_HOME', 'A2UI5_MCP_WORKSPACE', 'APP_TEMPLATE_HOME'];
+const ENV = ['A2UI5_HOME', 'SAMPLES_CONTROLS_HOME', 'AI_DEMOKIT_HOME', 'A2UI5_MCP_WORKSPACE', 'APP_TEMPLATE_HOME', 'A2UI5_MCP_SCREENSHOT_DIR'];
 
 function withFakeFramework(fn) {
   return async (t) => {
@@ -27,6 +27,8 @@ function withFakeFramework(fn) {
     fs.writeFileSync(path.join(a2, 'package.json'), '{"name":"abap2UI5","version":"1.144.0"}');
     process.env.A2UI5_HOME = a2;
     process.env.SAMPLES_CONTROLS_HOME = path.join(root, 'no-corpus');
+    // a build's last-build.json stays here, not in the user's <tmp> default
+    process.env.A2UI5_MCP_SCREENSHOT_DIR = path.join(root, 'shots');
     delete process.env.AI_DEMOKIT_HOME;
     try {
       await fn(t, { root, a2 });
@@ -346,7 +348,7 @@ test('dev-app copies in node/downport follow the sandbox, and nothing else there
   assert.deepEqual(fs.readdirSync(down).sort(), ['package.devc.xml', 'zcl_sicf.clas.abap']);
 }));
 
-test('an incremental build after remove_app no longer transpiles the removed class', withFakeFramework(async (t, { a2 }) => {
+test('an incremental build after remove_app no longer transpiles the removed class', withFakeFramework(async (t, { root, a2 }) => {
   // a prior build, the framework's own libs present, and a transpiler that
   // records what node/downport held when it ran
   for (const d of ['node/downport', 'node/output', 'node/setup', 'node/deps/open-abap-core']) fs.mkdirSync(path.join(a2, d), { recursive: true });
@@ -370,6 +372,7 @@ test('an incremental build after remove_app no longer transpiles the removed cla
   assert.equal(two.ok, true, two.tail);
   assert.match(two.tail, /INPUT zcl_keep\.clas\.abap,zcl_keep\.clas\.xml$/m);
   assert.ok(!fs.existsSync(path.join(a2, 'e2e-transpile.json')), 'the temporary config is gone');
+  assert.ok(fs.existsSync(path.join(root, 'shots', 'last-build.json')), 'the build log stays in the test\'s own dir');
 }));
 
 test('two dev apps deployed without a description do not share one', withFakeFramework(async () => {
