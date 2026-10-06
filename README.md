@@ -388,6 +388,90 @@ built, and the answer carries `app_start`'s snapshot of the selection screen —
 reads are not in the local backend: the screen runs, a run that reads them
 does not.
 
+## System mode: operating apps on a real SAP system
+
+Everything above runs without a system. With `A2UI5_MCP_SYSTEM_URL` set, the
+same server is something else: the app tools against a **real SAP system**,
+logged on as the configured user — for MCP clients that are not the VS Code
+extension (whose own system server does this for the clients of its window):
+Claude Desktop, Claude Code, Cursor, any stdio client. The sandbox tools are
+not offered in this mode; register the server twice, once with and once
+without the variable, to have both.
+
+| Tool | What it does |
+|---|---|
+| `system_status` | The endpoint and user (never the password) and ONE request that shows whether the host answers, the certificate is accepted and the logon works — call it first |
+| `app_list` | Class names on the system, from the ADT quick search (`filter`: start of the name, `*` as wildcard; at most 50) |
+| `app_start` | Start an app on the system and get its agent snapshot — the same snapshot, arguments and refusals as the sandbox's `app_start` |
+| `app_describe` | The current snapshot of a session, from memory — nothing is sent |
+| `app_act` | Fill fields and fire an event, validated against the snapshot, sent as the real model delta — **runs for real** |
+
+Claude Desktop (`claude_desktop_config.json`: Settings → Developer → Edit
+Config), the sandbox server beside the system one:
+
+```json
+{
+  "mcpServers": {
+    "abap2ui5": {
+      "command": "npx",
+      "args": ["--yes", "-p", "@abap2ui5/mcp-server", "abap2ui5-mcp"]
+    },
+    "abap2ui5-dev-system": {
+      "command": "npx",
+      "args": ["--yes", "-p", "@abap2ui5/mcp-server", "abap2ui5-mcp"],
+      "env": {
+        "A2UI5_MCP_SYSTEM_URL": "https://host:44300/sap/bc/z2ui5?app_start={class}&sap-client=100",
+        "A2UI5_MCP_SYSTEM_USER": "DEVELOPER",
+        "A2UI5_MCP_SYSTEM_PASSWORD_CMD": "security find-generic-password -s abap2ui5-dev -w"
+      }
+    }
+  }
+}
+```
+
+Claude Code, the same as one command:
+
+```sh
+claude mcp add abap2ui5-dev-system \
+  -e A2UI5_MCP_SYSTEM_URL='https://host:44300/sap/bc/z2ui5?app_start={class}&sap-client=100' \
+  -e A2UI5_MCP_SYSTEM_USER=DEVELOPER \
+  -e A2UI5_MCP_SYSTEM_PASSWORD_CMD='security find-generic-password -s abap2ui5-dev -w' \
+  -- npx --yes -p @abap2ui5/mcp-server abap2ui5-mcp
+```
+
+| Variable | |
+|---|---|
+| `A2UI5_MCP_SYSTEM_URL` | The launch URL as the VS Code extension's F9 knows it, `{class}` as a query parameter — or the endpoint without the class. Switches the mode on |
+| `A2UI5_MCP_SYSTEM_USER` | The SAP user (Basic authentication) |
+| `A2UI5_MCP_SYSTEM_PASSWORD` | Its password — in the client's configuration file, in plain text |
+| `A2UI5_MCP_SYSTEM_PASSWORD_CMD` | Instead: a shell command that prints the password, run once and kept in memory. macOS keychain: store it with `security add-generic-password -s abap2ui5-dev -a DEVELOPER -w`, read it as above; Linux: `secret-tool lookup service abap2ui5-dev` |
+| `A2UI5_MCP_SYSTEM_INSECURE_TLS` | `1` accepts a certificate that cannot be verified (a development system's self-signed one). Better: `NODE_EXTRA_CA_CERTS` pointing at the system's CA certificate (PEM) |
+
+What to know before switching it on:
+
+- **It acts for real.** An `app_act` event runs on the system as the
+  configured user and may save, post or delete data. Use a development
+  system and a user whose authorizations fit what the agent may do; the
+  agent sees only what that user may see.
+- **A rejected logon is sent once.** SAP locks a user after a few failed
+  logons, and an agent retries. After a `401` nothing more is sent with that
+  password — every tool says so — until the server is restarted with the
+  corrected one (Claude Desktop: quit and reopen), or the password command
+  answers a different one.
+- **Basic authentication only.** SAML, X.509 or SSO logons are not
+  supported in this mode; the VS Code extension's system server (its auth
+  proxy) is the way there.
+- **One system per registration.** Two systems are two entries with two
+  names.
+- **No proxy support.** The requests go straight to the host;
+  `HTTPS_PROXY` is not read.
+- The protocol client is the sandbox's (`lib/appclient.mjs`): it does the
+  CSRF token handshake and keeps the stateful session's `sap-contextid`
+  itself; this mode adds the logon, the system's cookies and the start
+  location (`lib/system.mjs`). `app_list` needs the ADT services and the
+  user's authorization for them — `app_start` works without both when the
+  class name is known.
+
 ## Unit tests in CI, without a system
 
 The same runtime runs an app repository's ABAP Unit tests in GitHub Actions

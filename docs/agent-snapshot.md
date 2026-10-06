@@ -557,7 +557,8 @@ on the card.
 
 `lib/appclient.mjs` is written to be copied: the VS Code extension vendors it
 with `lib/snapshot.mjs` and `lib/viewxml.mjs`, unchanged, and runs it against
-a real SAP system. Every assumption about the local backend is therefore an
+a real SAP system. This server embeds it the same way in its system mode
+(`lib/system.mjs`, `createSystemClient`). Every assumption about the local backend is therefore an
 option of `createAppClient`, with the local backend's behaviour as the
 default:
 

@@ -26,6 +26,10 @@
  * does). run_app boots the REAL app against the transpiled backend, which
  * costs a build first. Reach for the cheap one while writing the view and the
  * expensive one to prove the app.
+ *
+ * With A2UI5_MCP_SYSTEM_URL set the server is the other half instead: the
+ * app tools against a REAL SAP system (lib/system.mjs, SYSTEM_TOOLS in
+ * lib/system-tools.mjs) - see handleSystem below.
  */
 import path from 'path';
 import fs from 'fs';
@@ -96,6 +100,8 @@ import { toolsWithUi, uiEnabled } from './lib/mcp-app.mjs';
 import { appCard, cardContent, defaultAppFormat, APP_FORMATS } from './lib/adaptive-card.mjs';
 import { migrateReport, deployFiles, resolvePopups, validTargetClass, SetupError } from './lib/migrate.mjs';
 import { explicitEnv } from './lib/repos.mjs';
+import { systemConfig, createSystemHttp, createSystemClient, systemClassName, searchClasses, checkSystem } from './lib/system.mjs';
+import { SYSTEM_TOOLS } from './lib/system-tools.mjs';
 
 function text(s) {
   return { content: [{ type: 'text', text: typeof s === 'string' ? s : JSON.stringify(s, null, 2) }] };
@@ -265,7 +271,7 @@ async function flagFixable(findings) {
  * the whole knowledge (it never needs the linter). */
 let appClient = null;
 let uiMetadata;
-async function agentClient() {
+async function loadUiMetadata() {
   if (uiMetadata === undefined) {
     try {
       const { loadSnapshot } = await importViewCheck('./properties');
@@ -274,6 +280,9 @@ async function agentClient() {
       uiMetadata = null;
     }
   }
+}
+async function agentClient() {
+  await loadUiMetadata();
   if (!appClient) {
     appClient = createAppClient({ baseUrl: backendBaseUrl(), generation: backendGeneration, metadata: () => uiMetadata });
   }
@@ -303,6 +312,81 @@ async function snapshotAnswer(run, { format = 'snapshot', client = null } = {}) 
   } catch (e) {
     if (e instanceof AgentError) return toolError(e.message);
     throw e;
+  }
+}
+
+/* The SYSTEM MODE (lib/system.mjs): with A2UI5_MCP_SYSTEM_URL set, this
+ * server is the app tools against a real SAP system and nothing else -
+ * SYSTEM_TOOLS instead of TOOLS, no prompts (both orchestrate the sandbox
+ * loop). The sandbox tools stay with a second registration of the server
+ * without the variable; the two never share a tool name inside one server.
+ * Read once: a desktop client restarts the server to change it. */
+const SYSTEM = systemConfig(process.env);
+const ACTIVE_TOOLS = SYSTEM ? SYSTEM_TOOLS : TOOLS;
+
+let systemHttp = null;
+let systemClient = null;
+async function systemSide() {
+  await loadUiMetadata();
+  if (!systemHttp) systemHttp = createSystemHttp(SYSTEM);
+  if (!systemClient) systemClient = createSystemClient(SYSTEM, systemHttp, { metadata: () => uiMetadata });
+  return { sys: systemHttp, client: systemClient };
+}
+
+/* The system mode's tools. The app tools answer through snapshotAnswer like
+ * the sandbox's (the same snapshot, the same Adaptive Card); a refusal of
+ * the configuration or of the breaker comes back before anything is sent. */
+async function handleSystem(name, args = {}) {
+  const { sys, client } = await systemSide();
+  switch (name) {
+    case 'system_status':
+      return text(await checkSystem(SYSTEM, sys));
+    case 'app_list': {
+      const filter = String(args.filter || '').trim();
+      let refs;
+      try {
+        await sys.ready();
+        refs = await searchClasses(sys, SYSTEM.endpoint, filter);
+      } catch (e) {
+        if (e instanceof AgentError) return toolError(e.message);
+        throw e;
+      }
+      return text({
+        count: refs.length,
+        apps: refs.map((r) => ({ app: r.name, source: 'system', ...(r.description ? { description: r.description } : {}), ...(r.packageName ? { package: r.packageName } : {}) })),
+        hint: refs.length
+          ? 'app_start { app } starts one and answers with its agent snapshot; the names come from a class-name search, '
+            + 'so a class that is no abap2UI5 app is refused by app_start with the backend\'s error'
+          : `no class on ${sys.host} matches '${filter || 'Z'}*'`,
+      });
+    }
+    case 'app_start': {
+      const cls = systemClassName(args.app);
+      const format = oneOf(args.format, { name: 'format', allowed: APP_FORMATS, dflt: defaultAppFormat() });
+      const maxRows = boundedInt(args.max_rows, { name: 'max_rows', dflt: 20, min: 0, max: 200 });
+      return snapshotAnswer(async () => {
+        await sys.ready();
+        return client.start(cls, { values: args.values, maxRows });
+      }, { format, client });
+    }
+    case 'app_describe': {
+      const maxRows = boundedInt(args.max_rows, { name: 'max_rows', dflt: undefined, min: 0, max: 200 });
+      const format = oneOf(args.format, { name: 'format', allowed: APP_FORMATS, dflt: defaultAppFormat() });
+      return snapshotAnswer(async () => client.describe(args.session, { maxRows }), { format, client });
+    }
+    case 'app_act': {
+      const maxRows = boundedInt(args.max_rows, { name: 'max_rows', dflt: undefined, min: 0, max: 200 });
+      const format = oneOf(args.format, { name: 'format', allowed: APP_FORMATS, dflt: defaultAppFormat() });
+      return snapshotAnswer(async () => {
+        /* a pending-only act sends nothing, so it needs no logon either */
+        if (args.event !== undefined && args.event !== null && args.event !== '') await sys.ready();
+        // `row` as given: the client checks it (as the sandbox's app_act does)
+        return client.act(args.session, { values: args.values, event: args.event, args: args.args, row: args.row, maxRows });
+      }, { format, client });
+    }
+    default:
+      return toolError(`unknown tool: ${name}${TOOLS.some((t) => t.name === name) ? ' - this server runs in system mode (A2UI5_MCP_SYSTEM_URL is set), '
+        + 'which serves the app tools against the SAP system only; the sandbox tools are a second registration of the server without that variable' : ''}`);
   }
 }
 
@@ -1418,7 +1502,7 @@ function diagnostic(level, message) {
  * initialize - or always/never, by A2UI5_MCP_UI. The TOOLS array stays the
  * one source; only the metadata is added here. */
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: toolsWithUi(TOOLS, uiEnabled(server.getClientCapabilities())),
+  tools: toolsWithUi(ACTIVE_TOOLS, uiEnabled(server.getClientCapabilities())),
 }));
 
 /* The knowledge documents, as resources (lib/resources.mjs): listing is free
@@ -1435,8 +1519,11 @@ server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
 /* The two workflow prompts (lib/prompts.mjs): orchestration scripts over the
  * existing tools — build-an-abap2ui5-app and port-a-ui5-sample. They read no
  * sibling checkout; the tools they send the agent to do. */
-server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: PROMPTS }));
-server.setRequestHandler(GetPromptRequestSchema, async (req) => getPrompt(req.params.name, req.params.arguments || {}));
+server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: SYSTEM ? [] : PROMPTS }));
+server.setRequestHandler(GetPromptRequestSchema, async (req) => {
+  if (SYSTEM) throw new Error('no prompts in system mode - both orchestrate the sandbox loop, which a registration without A2UI5_MCP_SYSTEM_URL serves');
+  return getPrompt(req.params.name, req.params.arguments || {});
+});
 
 /* Completion for the one resource template: abap2ui5://guide/{chapter}. The
  * chapters are the guide's own `## ` headings (guideChapters), read live like
@@ -1459,7 +1546,8 @@ server.setRequestHandler(CompleteRequestSchema, async (req) => {
 });
 server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
   try {
-    checkStringArgs(TOOLS.find((t) => t.name === req.params.name), req.params.arguments || {});
+    checkStringArgs(ACTIVE_TOOLS.find((t) => t.name === req.params.name), req.params.arguments || {});
+    if (SYSTEM) return await handleSystem(req.params.name, req.params.arguments || {});
     await hydrateRepos(REMOTE_TOOLS[req.params.name]);
     return await handle(req.params.name, req.params.arguments || {}, {
       progressToken: req.params._meta && req.params._meta.progressToken,
@@ -1535,5 +1623,8 @@ process.stdout.on('error', () => shutdown('stdout closed'));
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-diagnostic('info', `abap2ui5 MCP server ready (samples-controls: ${resolveSamplesControls({ local: true })}, backend built: ${backendBuilt()}, `
+if (SYSTEM) {
+  diagnostic(SYSTEM.problems.length ? 'warning' : 'info', `abap2ui5 MCP server ready in SYSTEM MODE (${SYSTEM.endpoint || SYSTEM.url}, user ${SYSTEM.user || '-'})`
+    + (SYSTEM.problems.length ? ` - misconfigured: ${SYSTEM.problems.join('; ')}` : ''));
+} else diagnostic('info', `abap2ui5 MCP server ready (samples-controls: ${resolveSamplesControls({ local: true })}, backend built: ${backendBuilt()}, `
   + `GitHub mirror for missing checkouts: ${Object.keys(RESOLVERS).some((k) => !resolveKey(k, { local: true })) ? 'on demand' : 'not needed'})`);

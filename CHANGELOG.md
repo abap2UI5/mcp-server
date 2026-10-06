@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **System mode: the app tools against a real SAP system.** With
+  `A2UI5_MCP_SYSTEM_URL` (the launch URL, `{class}` as a query parameter),
+  `A2UI5_MCP_SYSTEM_USER` and `A2UI5_MCP_SYSTEM_PASSWORD` - or
+  `A2UI5_MCP_SYSTEM_PASSWORD_CMD`, a command that prints it (a keychain
+  lookup) - the server offers `system_status`, `app_list` (an ADT class-name
+  search), `app_start`, `app_describe` and `app_act` against that system
+  instead of the sandbox loop, logged on with Basic authentication: what the
+  VS Code extension's system server does for its own window, for Claude
+  Desktop, Claude Code, Cursor and any other stdio client. Same snapshot,
+  arguments and refusals as the sandbox's app tools. A rejected logon is
+  sent once and then refused without a request, so an agent's retries cannot
+  lock the user. `A2UI5_MCP_SYSTEM_INSECURE_TLS=1` accepts a certificate that
+  cannot be verified. Without the variable nothing changes.
 - **The app screen in the chat (MCP Apps).** `app_start`, `app_describe` and
   `app_act` name the new UI resource `ui://abap2ui5/app-screen`
   (`text/html;profile=mcp-app`, SEP-1865 stable 2026-01-26) when the client

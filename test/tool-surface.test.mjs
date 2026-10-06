@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TOOLS, TOOL_NAMES } from '../lib/tools.mjs';
+import { SYSTEM_TOOLS, SYSTEM_TOOL_NAMES } from '../lib/system-tools.mjs';
 import { RESOURCES, RESOURCE_URIS, RESOURCE_TEMPLATES } from '../lib/resources.mjs';
 import { PROMPTS, PROMPT_NAMES } from '../lib/prompts.mjs';
 
@@ -32,6 +33,17 @@ test('every tool has a name, a documenting description and an object schema', ()
   assert.equal(new Set(TOOL_NAMES).size, TOOLS.length, 'tool names must be unique');
 });
 
+/** The `## ` section of a document that starts with `heading`, up to the next one. */
+function section(doc, heading) {
+  const start = doc.indexOf(`\n## ${heading}`);
+  assert.ok(start >= 0, `README.md has no "## ${heading}" section`);
+  const end = doc.indexOf('\n## ', start + 1);
+  return doc.slice(start, end < 0 ? undefined : end);
+}
+
+/** The tool names of a section's table rows: | `tool_name` | what it does | */
+const tableNames = (text) => [...text.matchAll(/^\| `([a-z0-9_]+)` \|/gm)].map((m) => m[1]).sort();
+
 /* An array schema without `items` is valid JSON Schema and refused by clients
  * that check tool schemas before they offer the tool: VS Code reports "array
  * type must have items" and OpenAI-backed hosts reject the request ("array
@@ -47,15 +59,20 @@ test('every array in a tool schema declares its items', () => {
     if (schema.items) walk(schema.items, `${at}[]`);
     for (const key of ['anyOf', 'oneOf', 'allOf']) (schema[key] || []).forEach((s, i) => walk(s, `${at}.${key}[${i}]`));
   };
-  for (const t of TOOLS) walk(t.inputSchema, t.name);
+  for (const t of [...TOOLS, ...SYSTEM_TOOLS]) walk(t.inputSchema, t.name);
 });
 
 test('the README tool table lists exactly the TOOLS names', () => {
-  // the table rows: | `tool_name` | what it does |
-  const readme = read('README.md');
-  const listed = [...readme.matchAll(/^\| `([a-z0-9_]+)` \|/gm)].map((m) => m[1]).sort();
-  assert.deepEqual(listed, TOOL_NAMES,
+  assert.deepEqual(tableNames(section(read('README.md'), 'Tools')), TOOL_NAMES,
     'README.md "Tools" table and lib/tools.mjs disagree - update the table (one row per tool, `name` in backticks)');
+});
+
+test('the README system-mode table lists exactly the SYSTEM_TOOLS names, and no other section has a tool table', () => {
+  const readme = read('README.md');
+  assert.deepEqual(tableNames(section(readme, 'System mode')), SYSTEM_TOOL_NAMES,
+    'README.md "System mode" table and lib/system-tools.mjs disagree - update the table (one row per tool, `name` in backticks)');
+  assert.equal(tableNames(readme).length, TOOL_NAMES.length + SYSTEM_TOOL_NAMES.length,
+    'a tool table row outside the "Tools" and "System mode" sections is checked by nothing');
 });
 
 /* Anywhere a document writes the COUNT out ("14 tools"), it is making a claim
