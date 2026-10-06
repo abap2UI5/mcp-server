@@ -32,6 +32,24 @@ test('every tool has a name, a documenting description and an object schema', ()
   assert.equal(new Set(TOOL_NAMES).size, TOOLS.length, 'tool names must be unique');
 });
 
+/* An array schema without `items` is valid JSON Schema and refused by clients
+ * that check tool schemas before they offer the tool: VS Code reports "array
+ * type must have items" and OpenAI-backed hosts reject the request ("array
+ * schema missing items") - app_act's `args` had none. `items: {}` (any value)
+ * is enough for both. */
+test('every array in a tool schema declares its items', () => {
+  const walk = (schema, at) => {
+    if (!schema || typeof schema !== 'object') return;
+    if (schema.type === 'array' || (Array.isArray(schema.type) && schema.type.includes('array'))) {
+      assert.ok(schema.items && typeof schema.items === 'object', `${at} is an array schema without items`);
+    }
+    for (const [k, v] of Object.entries(schema.properties || {})) walk(v, `${at}.${k}`);
+    if (schema.items) walk(schema.items, `${at}[]`);
+    for (const key of ['anyOf', 'oneOf', 'allOf']) (schema[key] || []).forEach((s, i) => walk(s, `${at}.${key}[${i}]`));
+  };
+  for (const t of TOOLS) walk(t.inputSchema, t.name);
+});
+
 test('the README tool table lists exactly the TOOLS names', () => {
   // the table rows: | `tool_name` | what it does |
   const readme = read('README.md');

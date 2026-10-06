@@ -172,6 +172,11 @@
   failed again - about 90% of a core and a growing pile of `drain`
   listeners, for as long as stdin stayed open. A broken stdout now shuts
   the server down the way a closed stdin does.
+- **`app_act`'s `args` schema declares its items.** It was an array schema
+  without `items` - valid JSON Schema, and refused by clients that check a
+  tool's schema before offering it (VS Code: "array type must have items";
+  OpenAI-backed hosts: "array schema missing items"). `items: {}` - any
+  value, as before - and a test holds every array of every tool schema to it.
 
 ## 1.0.0 - 2026-10-03
 
