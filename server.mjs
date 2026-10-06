@@ -1526,6 +1526,13 @@ function shutdown(reason) {
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => shutdown(sig));
 process.stdin.on('end', () => shutdown('stdin ended'));
 process.stdin.on('close', () => shutdown('stdin closed'));
+/* The other half of the pipe: a client whose reading end is gone (EPIPE) can
+ * never receive an answer again. Without a listener the write error was an
+ * uncaught exception, logCrash wrote its report as a logging notification
+ * into the same broken stdout, and that write failed again - a loop that
+ * held a core at 90% and piled up 'drain' listeners for as long as stdin
+ * stayed open. */
+process.stdout.on('error', () => shutdown('stdout closed'));
 
 const transport = new StdioServerTransport();
 await server.connect(transport);

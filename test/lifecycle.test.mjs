@@ -55,6 +55,20 @@ test('the server exits when the client closes stdin', async () => {
   }
 });
 
+test('the server exits when the client stops reading its stdout', async () => {
+  const { child, initialized, exited } = startServer();
+  try {
+    await within(initialized, 15000, 'initialize');
+    // the reading end is gone, stdin stays open: the next answer hits EPIPE
+    child.stdout.destroy();
+    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }) + '\n');
+    const { code } = await within(exited, 10000, 'exit after stdout broke');
+    assert.equal(code, 0);
+  } finally {
+    child.kill('SIGKILL');
+  }
+});
+
 test('the server exits on SIGHUP, like SIGINT and SIGTERM', { skip: process.platform === 'win32' && 'no SIGHUP on Windows' }, async () => {
   const { child, initialized, exited } = startServer();
   try {

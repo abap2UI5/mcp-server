@@ -165,6 +165,13 @@
   characters in `transcript.jsonl`, the result text and the grader's
   output. The streams are decoded as UTF-8 across chunks now, and
   `verify.mjs` checks it.
+- **The server stops when its client stops reading.** A client whose end
+  of the server's stdout was gone (EPIPE) while stdin stayed open left the
+  server in a loop: the failed write was an uncaught exception, the crash
+  report went out as a logging notification into the same broken pipe and
+  failed again - about 90% of a core and a growing pile of `drain`
+  listeners, for as long as stdin stayed open. A broken stdout now shuts
+  the server down the way a closed stdin does.
 
 ## 1.0.0 - 2026-10-03
 
