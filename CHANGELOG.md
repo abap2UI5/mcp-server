@@ -39,6 +39,11 @@
   every knowledge tool once a day, the on-demand files never - so a sample
   read once stayed at that first copy for good. The file's own age counts
   now (`A2UI5_MCP_REMOTE_TTL_MS`).
+- **`server.json` lists `POPUPS_HOME`.** `migrate_report { deploy: true }`
+  reads it (through an injectable `env` parameter), and
+  `scripts/check-server-json.mjs` only looked for `process.env.X`, so the
+  variable was missing from the registry listing without the gate noticing.
+  The scan reads `env.X` too.
 
 ## 1.0.0 - 2026-10-03
 
