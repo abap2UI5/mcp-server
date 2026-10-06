@@ -138,6 +138,13 @@
   nobody asked for and no check had seen. The act now fires the action it
   validated, found again on the new screen, and refuses when that is no
   longer one action (as the abap2UI5 agent addon does).
+- **An `interact_app` fill of a missing element fails within
+  `action_timeout_ms`.** Before filling, the action looked whether the
+  located element is itself editable - with Playwright's default timeout,
+  so a fill of an id that is not on the page waited 30 s for it and then the
+  fill's own timeout on top (40 s at the default 10 s, whatever the
+  argument said). The look runs within the action's timeout now, and an
+  element that never appears fails the action there.
 
 ## 1.0.0 - 2026-10-03
 
