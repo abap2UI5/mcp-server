@@ -117,6 +117,12 @@
   answering with it (and a URL that 404s). Files the previous refresh listed
   and this one does not are removed now; a sample read on demand is not one
   of them.
+- **Two `run_unit_tests` calls at once run their own classes.** The
+  filtered copy of the runner was named after the selection alone
+  (`index-mcp-selection.mjs` for any set of classes), so two runs over
+  different sets wrote one file: the first answered with the second's tests,
+  and the first to finish deleted the file under the other. Each run writes
+  a copy of its own now (`index-mcp-<class|selection>-<pid>-<n>.mjs`).
 
 ## 1.0.0 - 2026-10-03
 

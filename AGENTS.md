@@ -786,9 +786,11 @@ agent) find these artifacts in a dirty sibling worktree, mcp-server caused them:
   — the dev sandbox when there is no corpus checkout (gitignored there;
   `remove_app` deletes them again), and `<abap2UI5>/.abaplint-mcp-dev.jsonc`
   while a lint of it runs (removed in a `finally`, queued like the corpus one).
-- `<abap2UI5>/node/output/index-mcp-<class>.mjs` (or `index-mcp-selection.mjs`
-  for several classes) — the filtered copy of the unit-test runner
-  `run_unit_tests` writes, removed in a `finally`.
+- `<abap2UI5>/node/output/index-mcp-<class>-<pid>-<n>.mjs` (or
+  `index-mcp-selection-<pid>-<n>.mjs` for several classes; on the npm
+  backend in `runtime/<version>/apps/`) — the filtered copy of the unit-test
+  runner `run_unit_tests` writes, one per run (two runs at once must not
+  share one), removed in a `finally`.
 - `~/.abap2ui5-mcp/abap2UI5` (`A2UI5_MCP_WORKSPACE`) — the framework clone
   `build_backend` mode `prebuilt` or `transpile` (or `A2UI5_MCP_BACKEND=clone`)
   makes when no checkout is there at all: a real checkout with its npm

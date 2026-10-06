@@ -241,6 +241,27 @@ test('build_backend on the package: the sandbox transpiled, the dev tests run al
   assert.ok(fs.existsSync(path.join(appsDir(dir), 'zcl_npm_a.clas.mjs')));
 }));
 
+/* The filtered runner copy was named after the selection alone
+ * (`index-mcp-selection.mjs` for any set of classes): two run_unit_tests
+ * calls at once over different sets wrote the same file, and the first
+ * child loaded the SECOND call's filter - it answered with tests nobody
+ * asked it for - while the first call to finish deleted the file under the
+ * other. Each run writes a copy of its own now. */
+test('two concurrent unit runs over different class sets each run their own set', withNpm(async () => {
+  deployApp({ className: 'zcl_npm_a', source: APP('zcl_npm_a'), testclasses: TESTS() });
+  deployApp({ className: 'zcl_npm_b', source: APP('zcl_npm_b'), testclasses: TESTS() });
+  deployApp({ className: 'zcl_npm_c', source: APP('zcl_npm_c'), testclasses: TESTS() });
+  const built = await buildBackend({ mode: 'auto' });
+  assert.equal(built.ok, true, built.tail);
+  const [ab, bc] = await Promise.all([
+    runUnitTests({ classNames: ['zcl_npm_a', 'zcl_npm_b'] }),
+    runUnitTests({ classNames: ['zcl_npm_b', 'zcl_npm_c'] }),
+  ]);
+  const objects = (r) => [...new Set(r.tests.map((x) => x.object))].sort();
+  assert.deepEqual(objects(ab), ['ZCL_NPM_A', 'ZCL_NPM_B'], JSON.stringify(ab));
+  assert.deepEqual(objects(bc), ['ZCL_NPM_B', 'ZCL_NPM_C'], JSON.stringify(bc));
+}));
+
 test('mode npm is refused while a framework checkout is the backend, and says how to choose it', withNpm(async (t, { root }) => {
   delete process.env.A2UI5_MCP_BACKEND;
   const a2 = path.join(root, 'abap2UI5');
