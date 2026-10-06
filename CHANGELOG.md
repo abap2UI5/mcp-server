@@ -357,6 +357,16 @@
   wherever it led. The default is used only under the same rule as the
   mirror's base now; otherwise the screenshot is still returned, not saved
   (`screenshotNotSaved` says why), and no build log is written or read there.
+- **app_act: an act whose values disable or hide its own action is
+  refused.** The action was checked for `enabled` before the values were
+  applied, and fired after them without asking again: `OPEN` set to `false`
+  together with `DEL` pressed a Delete button with `enabled="{/OPEN}"` the
+  browser had just disabled. And values that hid the action left its id
+  with nothing behind it - the old snapshot's entry was fired anyway, a
+  control the screen no longer shows. Both are refused now before anything
+  is sent, with the values taken back; an action that only moved to
+  another id is still fired as itself. The agent addon refuses both the
+  same way.
 
 ## 1.0.0 - 2026-10-03
 

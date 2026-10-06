@@ -494,6 +494,49 @@ test('values that renumber the actions fire the action that was asked for, or ar
   assert.deepEqual(d.actions.map((a) => a.event), ['SAVE', 'SAVE']);
 });
 
+/* The act checked that its action is enabled BEFORE the values and fired
+ * it after them without asking again: OPEN set to false together with DEL
+ * pressed a Delete button whose enabled="{/OPEN}" the browser had just
+ * disabled. And values that hid the action left its id with nothing behind
+ * it - the action of the old snapshot was fired anyway, a control the screen
+ * no longer shows. Both are refused before anything is sent, the values not
+ * applied (the agent addon refuses both the same way). */
+test('values that disable or hide the act\'s own action are refused, nothing sent, the values rolled back', async () => {
+  const DEL = '<CheckBox text="Open" selected="{/OPEN}"/><Button text="Delete" enabled="{/OPEN}" press=".eB([\'DEL\'])"/>';
+  const off = fakeApp(page(DEL), { OPEN: true });
+  let s = await off.client.start('z_t');
+  assert.equal(s.actions[0].enabled, true);
+  await rejects(off.client.act(s.session, { values: { '/OPEN': false }, event: 'DEL' }),
+    /^action a1 \(Delete\) is disabled once the values are filled - this screen offers no action/);
+  assert.equal(off.bodies.length, 1, 'nothing sent');
+  let d = off.client.describe(s.session);
+  assert.equal(d.pending, undefined);
+  assert.equal(d.fields[0].value, true);
+  // the same values without the event are fine, and the button is then disabled
+  d = await off.client.act(s.session, { values: { '/OPEN': false } });
+  assert.equal(d.actions[0].enabled, false);
+
+  const HIDE = '<CheckBox text="More" selected="{/SHOW}"/><Button text="Save" press=".eB([\'SAVE\'])"/><Button text="Close" visible="{/SHOW}" press=".eB([\'C\'])"/>';
+  const gone = fakeApp(page(HIDE), { SHOW: true });
+  s = await gone.client.start('z_t');
+  assert.deepEqual(s.actions.map((a) => `${a.id}:${a.event}`), ['a1:SAVE', 'a2:C']);
+  await rejects(gone.client.act(s.session, { values: { '/SHOW': false }, event: 'C' }),
+    /^the values change the screen - action a2 \(C\) is no longer on it; fill the values without an event first, then fire it from the next snapshot$/);
+  assert.equal(gone.bodies.length, 1, 'nothing sent');
+  d = gone.client.describe(s.session);
+  assert.equal(d.pending, undefined);
+  assert.equal(d.fields[0].value, true);
+
+  // an action whose id went away but which is still there under another
+  // one is fired as itself
+  const moved = fakeApp(page('<CheckBox text="More" selected="{/SHOW}"/><Button text="Close" visible="{/SHOW}" press=".eB([\'C\'])"/><Button text="Save" press=".eB([\'SAVE\'])"/>'), { SHOW: true });
+  s = await moved.client.start('z_t');
+  assert.deepEqual(s.actions.map((a) => `${a.id}:${a.event}`), ['a1:C', 'a2:SAVE']);
+  await moved.client.act(s.session, { values: { '/SHOW': false }, event: 'a2' });
+  assert.equal(moved.bodies[1].S_FRONT.EVENT, 'SAVE');
+  assert.deepEqual(moved.bodies[1].MODEL, { SHOW: false });
+});
+
 test('the pick: a marshalled control, an id or an unknown call is asked for in args, and the refused pick leaves the selection alone', async () => {
   for (const [arg, describe] of [
     ['${$parameters>/selectedItems}', '$parameters:selectedItems'],

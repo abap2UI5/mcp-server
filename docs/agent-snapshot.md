@@ -350,8 +350,12 @@ The current state from the last response kept — no roundtrip.
      so `values` that show or hide a control can renumber them: the act fires
      the action it validated - the one action of the screen after the values
      that is the same (event, control, trigger, scope, arguments) - and is
-     refused when that is not one action any more (fill the values without
-     an event first, then fire it from the next snapshot).
+     refused when that is not one action any more, also when the values hid
+     it (fill the values without an event first, then fire it from the next
+     snapshot). It is refused as well when the values disable it (a Delete
+     button with `enabled="{/OPEN}"`, `OPEN` set to `false` in the same
+     act): the browser cannot press it then. A refused act sends nothing
+     and leaves the values unapplied.
    - A row action whose arguments read the row needs `row` (0-based, within
      `rowCount`; a non-negative integer - a number or a string of digits,
      anything else is refused); a `$parameters`/`$expr` argument the row does not fill (see
