@@ -255,6 +255,10 @@
   quadratic, 15 s of a blocked event loop for a body with 100k blanks and
   100k newlines inside it. `trimEnd()` removes the same characters in
   linear time.
+- **The `build-an-abap2ui5-app` prompt names the keys `app_act` takes.** It
+  told the agent to "fill fields by label", and `app_act` resolves a
+  `values` key by field id, model path or attribute name only - every value
+  keyed by its label was refused. The brief says so now.
 
 ## 1.0.0 - 2026-10-03
 

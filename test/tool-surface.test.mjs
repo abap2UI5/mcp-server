@@ -244,6 +244,18 @@ test('every tool a rendered prompt names exists in the TOOLS array', async () =>
   }
 });
 
+/* app_act resolves a `values` key by field id, model path or attribute name
+ * (resolveTarget in lib/appclient.mjs) - never by label. The build brief told
+ * the agent to "fill fields by label", and every value keyed so was refused. */
+test('the build brief fills fields by the keys app_act resolves', async () => {
+  const { getPrompt } = await import('../lib/prompts.mjs');
+  const text = getPrompt('build-an-abap2ui5-app', { task: 'x' }).messages.map((m) => m.content.text).join('\n').replace(/\s+/g, ' ');
+  const fill = /fill fields by ([^,]*(?:,[^,]*)?),/.exec(text);
+  assert.ok(fill, 'the brief says how app_act fills fields');
+  assert.doesNotMatch(fill[1], /label/, `app_act takes no label as a values key: "${fill[0]}"`);
+  assert.match(fill[1], /model path/);
+});
+
 test('every written-out prompt count matches the PROMPTS array', () => {
   for (const file of COUNT_FILES) {
     for (const { phrase, count } of surfaceCounts(read(file), 'prompt')) {
