@@ -85,6 +85,14 @@
   current checkout was filed as `experimental-or-test`, and the filter the
   description recommends answered nothing. `src/00` decides now; an older
   checkout reads as before.
+- **Boolean and object arguments are checked against the schema.** The
+  handlers read booleans as `=== true` / `=== false`, so a client that sent
+  `"true"` got the default without a word: `add_agent_setup { dry_run:
+  "true" }` wrote into the project it was asked only to plan for,
+  `migrate_report { deploy: "true" }` deployed nothing, `verify_app { boot:
+  "false" }` booted. `screenshot_view`'s `model` as a string was spread into
+  the derived model one character per key. Refused by name now, like a
+  string argument that is not a string.
 
 ## 1.0.0 - 2026-10-03
 

@@ -1921,6 +1921,34 @@ test('a string argument that is not a string is refused by name, for every tool'
   }
 });
 
+/* The handlers read booleans as `=== true` / `=== false`, so a client that
+ * stringified them got the default without a word: add_agent_setup with
+ * dry_run "true" WROTE into the project, migrate_report deploy "true"
+ * deployed nothing. And screenshot_view's model "..." was spread into the
+ * derived model one character per key. Both are checked against the schema
+ * like the strings. */
+test('a boolean or object argument of the wrong type is refused by name, for every tool', async () => {
+  const { TOOLS } = await import('../lib/tools.mjs');
+  const tool = (n) => TOOLS.find((x) => x.name === n);
+  assert.throws(() => checkStringArgs(tool('add_agent_setup'), { dry_run: 'true' }), /dry_run must be a boolean.*"true" \(string\)/);
+  assert.throws(() => checkStringArgs(tool('migrate_report'), { source: 'x', deploy: 1 }), /deploy must be a boolean/);
+  assert.throws(() => checkStringArgs(tool('screenshot_view'), { model: 'T_ITEMS' }), /model must be an object/);
+  assert.throws(() => checkStringArgs(tool('screenshot_view'), { model: [{ A: 1 }] }), /model must be an object.*an array/);
+  checkStringArgs(tool('add_agent_setup'), { dry_run: false });
+  checkStringArgs(tool('screenshot_view'), { model: { T_ITEMS: [] } });
+  checkStringArgs(tool('verify_app'), { boot: null, render: undefined });
+  for (const t of TOOLS) {
+    for (const [name, schema] of Object.entries(t.inputSchema.properties || {})) {
+      if (schema.type === 'boolean') {
+        assert.throws(() => checkStringArgs(t, { [name]: 'false' }), new RegExp(`${name} must be a boolean`), `${t.name}.${name}`);
+      }
+      if (schema.type === 'object') {
+        assert.throws(() => checkStringArgs(t, { [name]: 'x' }), new RegExp(`${name} must be an object`), `${t.name}.${name}`);
+      }
+    }
+  }
+});
+
 /* setup_status only knew three hard-coded paths (one of them a sandbox
  * image's /opt/pw-browsers link), so a machine with a perfectly good
  * Playwright-managed Chromium was reported as having none. */
