@@ -301,6 +301,13 @@
   its parenthesis 14 s per 100k in the app tools. The rewrites match the
   same lines and capture the same text; a test holds them to the old
   patterns.
+- **`build_backend` prebuilt, transpile and full run npm on Windows.** The
+  framework checkout's `npm ci` (before serving a downloaded backend) and
+  its own build's `npm ci` / `npm run downport` / `npm run auto_transpile`
+  spawned `npm` without a shell. On Windows npm is `npm.cmd`, which spawn
+  does not find that way (ENOENT), so those modes failed at their first npm
+  step there. They go through the npm backend's `spawnNpm` now, as its own
+  installs always did; a test holds every npm spawn of the server to it.
 
 ## 1.0.0 - 2026-10-03
 
