@@ -23,8 +23,10 @@ import http from 'http';
 import fs from 'fs';
 const s = http.createServer((req, res) => res.end('ok'));
 let stopping = false; // a SIGTERM before the delayed listen: never listens
-const listen = () => !stopping && s.listen(process.env.PORT, () => {
+// HOST as the framework's express.mjs reads it: unset binds every interface
+const listen = () => !stopping && s.listen(process.env.PORT, process.env.HOST, () => {
   if (process.env.BOOT_MARKER) fs.appendFileSync(process.env.BOOT_MARKER, process.pid + '\\n');
+  if (process.env.ADDRESS_MARKER) fs.writeFileSync(process.env.ADDRESS_MARKER, s.address().address);
   console.log('Listening on ' + process.env.PORT);
 });
 s.on('error', (e) => {
@@ -72,6 +74,25 @@ test('two concurrent starts spawn one backend, not two on one port', async () =>
   const boots = fs.readFileSync(marker, 'utf8').split('\n').filter(Boolean);
   assert.equal(boots.length, 1, `expected one spawned backend, saw pids: ${boots.join(', ')}`);
   await stopBackend();
+});
+
+/* The framework's node/srv/express.mjs binds every interface without HOST,
+ * so a checkout's dev backend - any deployed app, run by whoever reaches the
+ * port - was reachable from the LAN; the npm host binds 127.0.0.1. A HOST the
+ * user's environment exports (a host name) must not decide it either. */
+test('the checkout backend is started on the loopback interface only', async () => {
+  const address = path.join(base, 'address.txt');
+  process.env.ADDRESS_MARKER = address;
+  process.env.HOST = '0.0.0.0';
+  try {
+    await startBackend();
+    assert.equal(fs.readFileSync(address, 'utf8'), '127.0.0.1');
+  } finally {
+    await stopBackend();
+    delete process.env.ADDRESS_MARKER;
+    delete process.env.HOST;
+    await sleep(1400); // let the killed child free the port
+  }
 });
 
 test('a stale child exiting late does not orphan the live backend', async () => {

@@ -23,7 +23,11 @@ Worth knowing before assessing a report:
 - **It is a local stdio server, not a network service.** The transport is
   `StdioServerTransport` — it speaks to the MCP client that started it over its
   own stdin and stdout. It opens no socket and listens on no port, so it has no
-  attack surface reachable from another machine.
+  attack surface reachable from another machine. The backend it starts for
+  `run_app` and the app tools is a child listening on 127.0.0.1 only - the
+  npm host binds loopback itself, and a framework checkout's
+  `node/srv/express.mjs` (which binds every interface without `HOST`) is
+  started with `HOST=127.0.0.1`.
 - **It runs with the privileges of whoever started it**, over the checkouts
   beside it, and the expensive half of its tool loop (`build_backend`,
   `run_app`) **executes code**: it transpiles the ABAP and boots the resulting

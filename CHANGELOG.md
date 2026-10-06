@@ -323,6 +323,13 @@
   every `[` (3 s for 50k of them). Both are hand-written scanners now that
   match what the patterns matched - fuzzed against them, and identical on
   the real catalogues and the docs site.
+- **A framework checkout's backend listens on 127.0.0.1 only.** Its
+  `node/srv/express.mjs` binds every interface unless `HOST` is set, and the
+  server started it with `PORT` alone: beside a checkout, every deployed app
+  (and the framework's own) could be run by anyone who reached port 3000 on
+  the network, while the npm backend has always bound loopback. The backend
+  is started with `HOST=127.0.0.1` now, also over a `HOST` the user's
+  environment exports.
 
 ## 1.0.0 - 2026-10-03
 
