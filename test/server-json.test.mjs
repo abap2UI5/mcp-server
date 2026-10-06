@@ -56,6 +56,13 @@ test('the environment variable list is checked in both directions', () => {
   assert.ok(problems.some((p) => /has a default/.test(p)));
 });
 
+/* resolvePopups reads POPUPS_HOME through an injectable `env` parameter, not
+ * as process.env.POPUPS_HOME - the scan missed that shape, and so did the
+ * listing, the drift this gate exists to catch. */
+test('a variable read through an injected env object is seen by the scan', () => {
+  assert.ok(envVarsReadByServer().has('POPUPS_HOME'), 'lib/migrate.mjs resolvePopups reads env.POPUPS_HOME');
+});
+
 test('the exemption lists name variables that exist on the side they claim', () => {
   const envRead = envVarsReadByServer();
   for (const name of Object.keys(NOT_LISTED)) assert.ok(envRead.has(name), `NOT_LISTED names ${name}, which the server no longer reads - drop it`);

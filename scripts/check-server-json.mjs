@@ -55,6 +55,11 @@ const ENV_PATTERNS = [
   /process\.env\[\s*['"]([A-Z][A-Z0-9_]*)['"]\s*\]/g,
   // the timeouts are read through a helper by name (timeoutOf('A2UI5_MCP_...'))
   /\b(A2UI5_MCP_[A-Z0-9_]+)\b/g,
+  // an injectable environment (`env = process.env` as a parameter, for the
+  // tests): resolvePopups reads POPUPS_HOME that way, and the two patterns
+  // above never saw it
+  /\benv\.([A-Z][A-Z0-9_]*)/g,
+  /\benv\[\s*['"]([A-Z][A-Z0-9_]*)['"]\s*\]/g,
 ];
 
 /** Every environment variable server.mjs and lib/ read, plus the repo-dirs.json overrides. */

@@ -98,6 +98,17 @@ test('parseWire reads eB, eBP and eF handlers and describes every argument kind'
   assert.deepEqual(describeArg("'a\\'b'"), { static: true, value: "a'b" });
 });
 
+test('parseWire takes linear time over a run of blanks after a parenthesis, and still takes one semicolon', () => {
+  // \)\s*;?\s*$ retried both \s* splits of the run after every ')'
+  const blanks = ' '.repeat(100000);
+  const t0 = Date.now();
+  assert.equal(parseWire(`.eB(['X'])${blanks}x`), null);
+  assert.equal(parseWire(`.eB(['X']${') '.repeat(50000)}x`), null);
+  assert.ok(Date.now() - t0 < 1000, `took ${Date.now() - t0} ms`);
+  for (const ok of [".eB(['X'])", ".eB(['X']);", ".eB(['X']) \t;", ` .eB(['X'])${blanks};${blanks}`, ".eB(['X'], 'a)') ;"]) assert.equal(parseWire(ok)?.event, 'X', JSON.stringify(ok.slice(0, 30)));
+  for (const no of [".eB(['X']);;", ".eB(['X']) ; ;", ".eB(['X'])x", ".eB(['X']) ;x"]) assert.equal(parseWire(no), null, no);
+});
+
 test('nameOfPath derives the ABAP-ish name, without the old /XX/ two-way prefix', () => {
   assert.equal(nameOfPath('/MS_HEAD/KUNNR'), 'MS_HEAD-KUNNR');
   assert.equal(nameOfPath('/XX/MS_HEAD/KUNNR'), 'MS_HEAD-KUNNR');
@@ -494,6 +505,25 @@ test('custom controls, named-model fields and unknown frontend actions are liste
   assert.equal(byEvent(s, 'TICK').control, 'z2ui5.cc.Timer', 'a wire on a custom control is still an action');
 });
 
+/* The object syntax names a model with its model key as {other>/A} does.
+ * Read as the default model, the field was listed editable with the default
+ * model's /A, the table got editable cells, and an act's value landed on /A
+ * and /T/0/N of the app's own model - which the screen does not edit. */
+test('a binding\'s model key names its model: no field, no table rows of the default model', () => {
+  assert.deepEqual(parseBinding("{ path: '/A', model: 'other' }"), { kind: 'path', path: '/A', model: 'other', relative: false, type: '', formatter: false });
+  assert.equal(parseBinding("{path: '/A', model: ''}").model, '', 'an empty model key is the default model');
+  const s = buildSnapshot({
+    response: respond(view(
+      `<Input value="{path:'/A', model:'other'}"/>`
+      + `<Table items="{path:'/T', model:'other'}"><columns><Column><Text text="N"/></Column></columns>`
+      + '<items><ColumnListItem><cells><Input value="{N}"/></cells></ColumnListItem></items></Table>',
+    ), { A: 'a', T: [{ N: 1 }] }),
+  });
+  assert.deepEqual(s.fields, []);
+  assert.deepEqual(s.tables, []);
+  assert.ok(s.unsupported.includes("field Input bound to the named model 'other' (main) - not editable here"), s.unsupported.join(' | '));
+});
+
 test('message box with onClose: an action whose $action argument lists the choices; START_TIMER is a timer action', () => {
   const s = buildSnapshot({
     response: respond(view('<Text text="x"/>'), {}, {
@@ -562,4 +592,19 @@ test('selection dialogs: multiSelect is Multi, a bound selected is the selection
   assert.deepEqual(t.columns, [{ name: 'A', label: 'Col A' }, { name: 'B', label: 'Col B' }]);
   assert.deepEqual(s.actions.map((a) => `${a.event}:${a.scope}:${a.table || ''}:${a.label}`), ['OK:row:t1:Pick: confirm', 'NO:screen::Pick: cancel']);
   assert.equal(s.title, 'T', 'on the page, the page titles the layer');
+});
+
+test('an element named like an Object.prototype member is a custom control, not a spec the snapshot trips over', () => {
+  // lookupSpec read FIELD_SPECS['__proto__'] - Object.prototype, a "spec" without props: a TypeError out of the snapshot
+  for (const tag of ['__proto__', '__defineGetter__']) {
+    const s = buildSnapshot({
+      response: respond(view(
+        `<Table items="{/T}"><items><ColumnListItem><cells><${tag} xmlns="" text="{Q}"/><Input value="{R}"/></cells></ColumnListItem></items></Table>`
+        + `<List items="{/T}"><CustomListItem><${tag} xmlns="" text="{Q}"/></CustomListItem></List>`,
+      ), { T: [{ Q: 1, R: 'r' }] }),
+    });
+    assert.deepEqual(s.tables[0].columns.map((c) => c.name), ['Q', 'R'], tag);
+    assert.deepEqual(s.tables[0].editableCells, ['R'], `${tag}: no editable cell for an element that is no input`);
+    assert.deepEqual(s.tables[1].rows, [{ Q: 1 }]);
+  }
 });

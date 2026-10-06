@@ -54,3 +54,15 @@ test('forceNoRender pins render off against a config that turns it on', { skip }
     assert.equal(opt.render, false, 'fix_view runs the property gate only, whatever the config says');
   });
 });
+
+/* The schema says array of strings; a client need not send one. A bare string
+ * was spread into its characters by applyConfig (the allowance silently
+ * gone) - refused by name now, before the linter sees it. */
+test('allow must be an array of strings', { skip }, async () => {
+  await withProject({ allow: ['sap.m.FromConfig.prop'] }, async (dir) => {
+    await assert.rejects(lintOptionsFor({ project_dir: dir, allow: 'sap.m.GenericTile.systemInfo' }), /allow must be an array of strings/);
+    await assert.rejects(lintOptionsFor({ project_dir: dir, allow: [42] }), /every allow entry must be a non-empty string/);
+    const { opt } = await lintOptionsFor({ project_dir: dir, allow: [] });
+    assert.deepEqual(opt.allow, ['sap.m.FromConfig.prop'], 'an empty list allows nothing more');
+  });
+});

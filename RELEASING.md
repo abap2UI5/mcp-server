@@ -147,8 +147,10 @@ over the npx-installed tarball, which resolved the hoisted linter):
   no `exports`, deliberately: this is a program, not a library. `server.json`
   is not in `files`: the registry reads it from the checkout at publish time,
   not from the tarball.
-- **The tarball is `server.mjs`, `lib/`, `README.md`, `LICENSE` and
-  `package.json`** — no tests, no workflows, no lockfile. `AGENTS.md` used to
+- **The tarball is `server.mjs`, `lib/`, `scripts/ci-unit.mjs` (the
+  `abap2ui5-unit` bin), `action.yml`, `README.md`, `LICENSE` and
+  `package.json`** — no tests, no workflows, no lockfile, none of the other
+  scripts (`npm pack --dry-run` lists it; `package.json` `files` is the list). `AGENTS.md` used to
   ship too, on the reasoning that an agent could read the contract of the thing
   it is driving; it cannot, because that file is written for an agent working
   ON this repository (build & verify, the sibling checkouts the server writes

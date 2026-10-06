@@ -69,6 +69,12 @@
           "isRequired": false
         },
         {
+          "name": "POPUPS_HOME",
+          "description": "abap2UI5-addons/popups checkout whose popups migrate_report with deploy: true writes into the dev sandbox beside the converted class. Default: .deps/popups of the abap-cloud-gui checkout, ../popups beside it, then its build/popups.",
+          "format": "filepath",
+          "isRequired": false
+        },
+        {
           "name": "OPENUI5_SRC",
           "description": "OpenUI5 source checkout scope_of reads the JSDoc from (via samples-controls). Default: ../fork-openui5 next to samples-controls.",
           "format": "filepath",

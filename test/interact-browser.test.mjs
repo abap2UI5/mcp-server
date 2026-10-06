@@ -97,6 +97,12 @@ test('the four actions drive a page the way a UI5 view expects', async (t) => {
     // Playwright's message - what interact_app records per action
     const [missing] = parseActions([{ action: 'click', text: 'No such button' }]);
     await assert.rejects(performAction(page, missing, 300), /Timeout|waiting for/);
+    // a fill too: its look for the editable element waited Playwright's 30 s
+    // default before the fill's own timeout began
+    const [fillMissing] = parseActions([{ action: 'fill', id: 'no-such-field', value: 'x' }]);
+    const t0 = Date.now();
+    await assert.rejects(performAction(page, fillMissing, 300), /Timeout/);
+    assert.ok(Date.now() - t0 < 5000, `a fill of a missing element fails within the action timeout, took ${Date.now() - t0} ms`);
     assert.equal(typeof locate(page, { text: 'Save' }).click, 'function', 'locate answers a Playwright locator');
   } finally {
     await page.close().catch(() => {});

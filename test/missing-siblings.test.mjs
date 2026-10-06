@@ -268,6 +268,28 @@ test('every sibling-dependent tool degrades with an actionable error when the ch
     assert.ok(screen.result, `the UI resource must read without checkouts: ${JSON.stringify(screen.error)}`);
     assert.equal(screen.result.contents[0].mimeType, 'text/html;profile=mcp-app');
 
+    /* The client's own mistakes carry the codes the MCP spec names for them,
+     * not -32603 (an internal error of this server): a URI this server does
+     * not serve is -32002, a malformed one, an unknown prompt and a missing
+     * required argument -32602. A missing checkout is the server's side and
+     * stays -32603. */
+    const errorOf = async (method, params) => {
+      const reqId = ++id + 300;
+      send({ jsonrpc: '2.0', id: reqId, method, params });
+      const msg = await until((m) => m.id === reqId);
+      assert.ok(msg.error, `${method} ${JSON.stringify(params)} must be a JSON-RPC error: ${JSON.stringify(msg)}`);
+      return msg.error;
+    };
+    const unknown = await errorOf('resources/read', { uri: 'abap2ui5://nothing-here' });
+    assert.equal(unknown.code, -32002);
+    assert.match(unknown.message, /unknown resource/);
+    assert.equal((await errorOf('resources/read', { uri: 'abap2ui5://guide/%E0%A4%A' })).code, -32602);
+    assert.equal((await errorOf('resources/read', { uri: 'abap2ui5://guide' })).code, -32603);
+    assert.equal((await errorOf('prompts/get', { name: 'no-such-prompt' })).code, -32602);
+    const noArg = await errorOf('prompts/get', { name: 'port-a-ui5-sample', arguments: {} });
+    assert.equal(noArg.code, -32602);
+    assert.match(noArg.message, /needs the argument 'sample'/);
+
     /* Completion is ADVISORY: with the abap2UI5 checkout absent, completing
      * the guide-chapter template answers an empty list, never an error - the
      * client is typing ahead, and the read itself carries the degradation. */

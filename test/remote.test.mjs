@@ -9,9 +9,10 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   hydrate, fetchRemoteFile, safeRelPath, isRemoteCheckout, readMarker, remoteRoot, remoteEnabled,
-  mirrorFresh, remoteStatus, lastHydrate, resetRemote, REMOTE_FILES, REMOTE_TOOLS, resourceRepos, MARKER,
+  mirrorFresh, remoteStatus, lastHydrate, resetRemote, REMOTE_FILES, REMOTE_TOOLS, resourceRepos, MARKER, TEXT_MAX_BYTES,
 } from '../lib/remote.mjs';
 import { resolveKey, REPO_DIRS } from '../lib/repos.mjs';
+import { privateDirProblem } from '../lib/private-dir.mjs';
 import { TOOL_NAMES } from '../lib/tools.mjs';
 import { RESOURCE_URIS } from '../lib/resources.mjs';
 
@@ -194,6 +195,30 @@ test('the template mirror follows template.json, the docs mirror the repository 
   if (!resolveKey('docs', { local: true })) assert.equal(resolveKey('docs'), d.root);
 }));
 
+/* A refresh wrote the new list over the old one and never took anything
+ * out: a docs page removed upstream stayed in the mirror, and docs_search
+ * (which walks the mirror's tree) kept answering with it. */
+test('a refresh takes out the files the repository no longer lists, and keeps the ones read on demand', withEnv(async () => {
+  const tree = (paths) => JSON.stringify({ tree: paths.map((p) => ({ type: 'blob', path: p })) });
+  const first = await hydrate('docs', { local: null, fetchImpl: fakeFetch({
+    'git/trees/main?recursive=1': tree(['docs/index.md', 'docs/old.md']),
+    '/package.json': '{"name":"abap2ui5-docs"}',
+    '/docs/index.md': '# Home',
+    '/docs/old.md': '# A page that moves',
+  }) });
+  assert.ok(fs.existsSync(path.join(first.root, 'docs/old.md')));
+  const onDemand = await fetchRemoteFile('docs', 'docs/extra.md', { fetchImpl: fakeFetch({ '/docs/extra.md': '# read on demand' }) });
+  const again = await hydrate('docs', { local: null, force: true, fetchImpl: fakeFetch({
+    'git/trees/main?recursive=1': tree(['docs/index.md']),
+    '/package.json': '{"name":"abap2ui5-docs"}',
+    '/docs/index.md': '# Home',
+  }) });
+  assert.equal(again.fetched, true);
+  assert.ok(!fs.existsSync(path.join(again.root, 'docs/old.md')), 'a page gone upstream is gone from the mirror');
+  assert.ok(fs.existsSync(path.join(again.root, 'docs/index.md')));
+  assert.ok(fs.existsSync(onDemand), 'a file the marker never listed is not the refresh\'s to remove');
+}));
+
 test('fetchRemoteFile reads one file on demand, from the cache while fresh', withEnv(async () => {
   const src = 'CLASS z2ui5_cl_smp_app_493 DEFINITION PUBLIC.';
   const impl = fakeFetch({ '/src/01/z2ui5_cl_smp_app_493.clas.abap': src });
@@ -207,6 +232,17 @@ test('fetchRemoteFile reads one file on demand, from the cache while fresh', wit
   await hydrate('samples', { local: null, fetchImpl: fakeFetch({ '/catalogue.json': '{}', '/SAMPLES.md': '' }) });
   await fetchRemoteFile('samples', 'src/01/z2ui5_cl_smp_app_493.clas.abap', { fetchImpl: impl });
   assert.equal(impl.calls.length, 2, 'a fresh mirror serves the file it has');
+  /* hydrate refreshes the marker and the files of its list, never a file
+   * fetched on demand: a fresh marker alone kept serving that file's first
+   * fetch for as long as the mirror was refreshed daily */
+  const file = path.join(remoteRoot('samples'), 'src/01/z2ui5_cl_smp_app_493.clas.abap');
+  const old = (Date.now() - 2 * 24 * 60 * 60_000) / 1000;
+  fs.utimesSync(file, old, old);
+  assert.equal(mirrorFresh('samples'), true);
+  await fetchRemoteFile('samples', 'src/01/z2ui5_cl_smp_app_493.clas.abap', { fetchImpl: impl });
+  assert.equal(impl.calls.length, 3, 'a file older than the TTL is fetched again, fresh marker or not');
+  await fetchRemoteFile('samples', 'src/01/z2ui5_cl_smp_app_493.clas.abap', { fetchImpl: impl });
+  assert.equal(impl.calls.length, 3, 'and served from the cache once it is fresh');
   await assert.rejects(fetchRemoteFile('samples', '../escape', { fetchImpl: impl }), /refusing path/);
   await assert.rejects(fetchRemoteFile('samples', 'src/none.abap', { fetchImpl: impl }), /could not fetch abap2UI5\/samples\/src\/none\.abap/);
 }));
@@ -288,4 +324,134 @@ test('a template.json entry that escapes the repository refuses the whole mirror
     assert.ok(!fs.existsSync(path.join(dir, 'escaped.txt')) && !fs.existsSync(path.join(path.dirname(dir), 'escaped.txt')));
     assert.ok(!isRemoteCheckout(remoteRoot('appTemplate')), 'no half mirror either');
   }
+}));
+
+/* The default base is <tmp>/abap2ui5-mcp-remote - on Linux under /tmp, which
+ * every local user can write. Another user who made that name first (or
+ * linked it) decided what every knowledge tool served, and add_agent_setup
+ * wrote the files of their template.json into the user's project. TMPDIR
+ * points os.tmpdir() at a directory of this test's own, so nothing here
+ * touches the real shared temp dir. */
+const POSIX = process.platform !== 'win32';
+test('the default mirror base is used only when it is this user\'s own directory', { skip: !POSIX && 'POSIX modes and links' }, withEnv(async (t, dir) => {
+  const savedTmp = process.env.TMPDIR;
+  delete process.env.A2UI5_MCP_REMOTE_DIR;
+  process.env.TMPDIR = dir;
+  try {
+    assert.equal(os.tmpdir(), dir);
+    const base = path.join(dir, 'abap2ui5-mcp-remote');
+    // what another user would plant: a fresh template mirror behind a link
+    const planted = path.join(dir, 'theirs');
+    const tpl = path.join(planted, REPO_DIRS.appTemplate.dirs[0]);
+    fs.mkdirSync(tpl, { recursive: true });
+    fs.writeFileSync(path.join(tpl, 'template.json'), JSON.stringify({ files: { shared: ['.claude/settings.json'] } }));
+    fs.writeFileSync(path.join(tpl, MARKER), JSON.stringify({ fetchedAt: new Date().toISOString(), files: ['template.json'] }));
+    fs.symlinkSync(planted, base);
+    assert.equal(remoteRoot('appTemplate'), path.join(base, REPO_DIRS.appTemplate.dirs[0]));
+    const local = resolveKey('appTemplate', { local: true });
+    if (!local) assert.equal(resolveKey('appTemplate'), null, 'a linked base is no mirror');
+    const impl = fakeFetch({ '/template.json': '{"files":{}}' });
+    const res = await hydrate('appTemplate', { local: null, fetchImpl: impl });
+    assert.equal(res.root, null);
+    assert.match(res.error, /symbolic link/);
+    assert.match(remoteStatus('appTemplate'), /A2UI5_MCP_REMOTE_DIR/);
+    assert.equal(impl.calls.length, 0, 'nothing fetched, nothing written through the link');
+    await assert.rejects(fetchRemoteFile('appTemplate', 'README.md', { fetchImpl: impl }), /symbolic link/);
+    assert.deepEqual(fs.readdirSync(tpl).sort(), [MARKER, 'template.json'].sort());
+
+    // a real directory everybody can write is refused the same way
+    fs.unlinkSync(base);
+    fs.mkdirSync(base);
+    fs.chmodSync(base, 0o777);
+    fs.cpSync(tpl, path.join(base, REPO_DIRS.appTemplate.dirs[0]), { recursive: true });
+    resetRemote();
+    if (!local) assert.equal(resolveKey('appTemplate'), null, 'a world-writable base is no mirror');
+    assert.match((await hydrate('appTemplate', { local: null, fetchImpl: impl })).error, /writable by every user/);
+
+    // absent, it is created 0700 and used; one of ours readable by others is narrowed
+    fs.rmSync(base, { recursive: true, force: true });
+    resetRemote();
+    const spec = { files: { shared: ['package.json'], named: [] } };
+    const ok = await hydrate('appTemplate', { local: null, fetchImpl: fakeFetch({ '/template.json': JSON.stringify(spec), '/package.json': '{}' }) });
+    assert.equal(ok.fetched, true, ok.error);
+    assert.equal(fs.statSync(base).mode & 0o777, 0o700);
+    fs.chmodSync(base, 0o755);
+    assert.equal(privateDirProblem(base), null);
+    assert.equal(fs.statSync(base).mode & 0o777, 0o700);
+    // owned by somebody else (the uid is a parameter: no test can chown)
+    assert.match(privateDirProblem(base, { uid: fs.statSync(base).uid + 1 }), /belongs to another user/);
+    // an absent directory is nothing to distrust; a file is no directory
+    assert.equal(privateDirProblem(path.join(dir, 'absent')), null);
+    fs.writeFileSync(path.join(dir, 'file'), '');
+    assert.match(privateDirProblem(path.join(dir, 'file')), /not a directory/);
+    // a base the user names is the user's choice
+    process.env.A2UI5_MCP_REMOTE_DIR = planted;
+    assert.equal(remoteRoot('appTemplate'), tpl);
+  } finally {
+    if (savedTmp === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = savedTmp;
+  }
+}));
+
+/* A response stream of `total` bytes in 1 MB chunks of `fill`, made as they
+ * are pulled - `pulled()` says how much the reader asked for, `cancelled()`
+ * whether it let go of the rest. */
+function bigBody(total, { fill = 0x61 } = {}) {
+  let sent = 0;
+  let cancelled = false;
+  const stream = new ReadableStream({
+    pull(c) {
+      if (sent >= total) return c.close();
+      const n = Math.min(1048576, total - sent);
+      sent += n;
+      c.enqueue(new Uint8Array(n).fill(fill));
+    },
+    cancel() {
+      cancelled = true;
+    },
+  }, { highWaterMark: 0 });
+  return { stream, pulled: () => sent, cancelled: () => cancelled };
+}
+
+/* fetchText had timeouts and no size limit: a proxy or mirror answering a
+ * file with a huge or endless body filled the server's memory before the
+ * 20 s were up. It reads up to TEXT_MAX_BYTES (8 MB, over twenty times the
+ * largest file a mirror carries) and stops there, by URL. */
+test('a GitHub answer over the text cap is cut at the cap and reported, one under it is read whole', withEnv(async () => {
+  assert.equal(TEXT_MAX_BYTES, 8 * 1024 * 1024);
+  const big = bigBody(64 * 1048576);
+  await assert.rejects(
+    fetchRemoteFile('samples', 'src/zcl_big.clas.abap', { fetchImpl: async () => new Response(big.stream) }),
+    (e) => /could not fetch abap2UI5\/samples\/src\/zcl_big\.clas\.abap/.test(e.message) && /larger than 8 MB - stopped reading/.test(e.message),
+  );
+  assert.ok(big.pulled() <= TEXT_MAX_BYTES + 2 * 1048576, `read ${big.pulled()} bytes of an oversized answer`);
+  assert.equal(big.cancelled(), true, 'the rest of the answer is let go');
+  assert.equal(fs.existsSync(path.join(remoteRoot('samples'), 'src/zcl_big.clas.abap')), false, 'nothing is written');
+
+  // declared too large: refused before a byte is read
+  const declared = bigBody(1024);
+  await assert.rejects(
+    fetchRemoteFile('samples', 'src/zcl_decl.clas.abap', {
+      fetchImpl: async () => new Response(declared.stream, { headers: { 'content-length': String(100 * 1048576) } }),
+    }),
+    /larger than 8 MB/,
+  );
+  assert.equal(declared.pulled(), 0);
+
+  // under the cap: read whole and decoded as text() decodes, a character
+  // split across two chunks included
+  const bytes = Buffer.from('\ufeffCLASS zcl_ok \u00e4\u00f6\u00fc.', 'utf8');
+  const split = new ReadableStream({
+    start(c) {
+      c.enqueue(new Uint8Array(bytes.subarray(0, 17)));
+      c.enqueue(new Uint8Array(bytes.subarray(17)));
+      c.close();
+    },
+  });
+  const at = await fetchRemoteFile('samples', 'src/zcl_ok.clas.abap', { fetchImpl: async () => new Response(split) });
+  assert.equal(fs.readFileSync(at, 'utf8'), await new Response(bytes).text());
+  // an answer just under the cap is still the file
+  const near = bigBody(TEXT_MAX_BYTES - 10);
+  const nearAt = await fetchRemoteFile('samples', 'src/zcl_near.clas.abap', { fetchImpl: async () => new Response(near.stream) });
+  assert.equal(fs.statSync(nearAt).size, TEXT_MAX_BYTES - 10);
 }));

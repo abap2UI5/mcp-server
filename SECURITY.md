@@ -23,13 +23,47 @@ Worth knowing before assessing a report:
 - **It is a local stdio server, not a network service.** The transport is
   `StdioServerTransport` — it speaks to the MCP client that started it over its
   own stdin and stdout. It opens no socket and listens on no port, so it has no
-  attack surface reachable from another machine.
+  attack surface reachable from another machine. The backend it starts for
+  `run_app` and the app tools is a child listening on 127.0.0.1 only - the
+  npm host binds loopback itself, and a framework checkout's
+  `node/srv/express.mjs` (which binds every interface without `HOST`) is
+  started with `HOST=127.0.0.1`. Loopback is reachable from every browser
+  page on the machine, though, so the npm host also answers only requests
+  addressed to `127.0.0.1`, `localhost` or `[::1]` (the `Host` header) and,
+  when they carry an `Origin`, sent from a page there - a page cannot drive
+  or read the dev apps through DNS rebinding. The server's own clients of
+  that backend (the start's port wait, `run_app`'s Chromium, the app tools)
+  connect to `127.0.0.1` itself, never to the name `localhost`, which can
+  resolve to `::1` - a port another local user may hold. A framework checkout's
+  `express.mjs` checks neither header; that check belongs to the framework.
+- **A default directory under the shared temp dir is used only when it is
+  the user's own.** The GitHub mirror's default base,
+  `<tmp>/abap2ui5-mcp-remote`, and the default screenshot dir,
+  `<tmp>/abap2ui5-mcp-screenshots` (the PNGs of `run_app` and
+  `interact_app`, and the build log `build_log` reads after a restart), have
+  fixed names under `os.tmpdir()` - `/tmp` on Linux, which every local user
+  can write. Each is read and written only
+  when it is a real directory (no symbolic link), owned by the user running
+  the server and writable by nobody else; the server creates it 0700 and
+  narrows one of its own that others can read (`lib/private-dir.mjs`).
+  Anything else is refused with the reason - a screenshot is then returned
+  but not saved - and `A2UI5_MCP_REMOTE_DIR` / `A2UI5_MCP_SCREENSHOT_DIR` put
+  them elsewhere (a directory those variables name is not checked).
 - **It runs with the privileges of whoever started it**, over the checkouts
   beside it, and the expensive half of its tool loop (`build_backend`,
   `run_app`) **executes code**: it transpiles the ABAP and boots the resulting
   app. A tool call is therefore as trusted as the repository it is pointed at.
   Treat an MCP client that can reach this server the way you would treat a
   shell in the same directory.
+- **What it downloads from GitHub is capped in size, not only in time.**
+  A file of the read-only mirror, the docs tree listing and the framework's
+  release list are read up to 8 MB (the largest is 0.34 MB today), the
+  prebuilt backend archive up to 200 MB (2.7 MB today) - so a proxy or
+  mirror in between that answers with a huge or endless body cannot fill
+  the memory or the temp disk. An answer that declares more is refused
+  unread, one that streams more is cut at the cap; either is reported by URL
+  (`TEXT_MAX_BYTES` in `lib/remote.mjs`, `PREBUILT_MAX_BYTES` in
+  `lib/runtime.mjs`).
 - **Every spawned child gets a hard timeout and is killed as a process group**
   (`lib/runtime.mjs`), so a hung or forking build cannot outlive the call that
   started it.

@@ -128,6 +128,17 @@ test('the npm sandbox is the workspace\'s, and deploy, list, read and remove wor
   assert.equal(readAppSource('zcl_npm_app').staleInBackend, false);
   assert.equal(removeApp('zcl_npm_app'), 3);
   assert.deepEqual(listDevApps(), []);
+  /* a class deployed with its includes (migrate_report's deploy, an
+   * abap2ui5-unit run) goes whole - an include left behind was still an
+   * object of the next build - and a class whose name merely starts the
+   * same stays */
+  deployApp({ className: 'zcl_npm_app', source: APP('zcl_npm_app') });
+  deployApp({ className: 'zcl_npm_app2', source: APP('zcl_npm_app2') });
+  for (const inc of ['locals_imp', 'locals_def', 'macros']) fs.writeFileSync(path.join(box.dir, `zcl_npm_app.clas.${inc}.abap`), '*\n');
+  assert.equal(removeApp('zcl_npm_app'), 5);
+  assert.deepEqual(fs.readdirSync(box.dir).filter((f) => f.startsWith('zcl_npm_app.')), []);
+  assert.deepEqual(listDevApps(), ['zcl_npm_app2']);
+  removeApp('zcl_npm_app2');
 }));
 
 test('a dev app named like one of the framework\'s own objects is refused, not built as a second copy', withNpm(async (t, { dir }) => {
@@ -228,6 +239,27 @@ test('build_backend on the package: the sandbox transpiled, the dev tests run al
   assert.equal(broken.ok, false);
   assert.match(broken.tail, /check_syntax, Method "nope" not found/);
   assert.ok(fs.existsSync(path.join(appsDir(dir), 'zcl_npm_a.clas.mjs')));
+}));
+
+/* The filtered runner copy was named after the selection alone
+ * (`index-mcp-selection.mjs` for any set of classes): two run_unit_tests
+ * calls at once over different sets wrote the same file, and the first
+ * child loaded the SECOND call's filter - it answered with tests nobody
+ * asked it for - while the first call to finish deleted the file under the
+ * other. Each run writes a copy of its own now. */
+test('two concurrent unit runs over different class sets each run their own set', withNpm(async () => {
+  deployApp({ className: 'zcl_npm_a', source: APP('zcl_npm_a'), testclasses: TESTS() });
+  deployApp({ className: 'zcl_npm_b', source: APP('zcl_npm_b'), testclasses: TESTS() });
+  deployApp({ className: 'zcl_npm_c', source: APP('zcl_npm_c'), testclasses: TESTS() });
+  const built = await buildBackend({ mode: 'auto' });
+  assert.equal(built.ok, true, built.tail);
+  const [ab, bc] = await Promise.all([
+    runUnitTests({ classNames: ['zcl_npm_a', 'zcl_npm_b'] }),
+    runUnitTests({ classNames: ['zcl_npm_b', 'zcl_npm_c'] }),
+  ]);
+  const objects = (r) => [...new Set(r.tests.map((x) => x.object))].sort();
+  assert.deepEqual(objects(ab), ['ZCL_NPM_A', 'ZCL_NPM_B'], JSON.stringify(ab));
+  assert.deepEqual(objects(bc), ['ZCL_NPM_B', 'ZCL_NPM_C'], JSON.stringify(bc));
 }));
 
 test('mode npm is refused while a framework checkout is the backend, and says how to choose it', withNpm(async (t, { root }) => {
