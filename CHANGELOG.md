@@ -177,6 +177,14 @@
   tool's schema before offering it (VS Code: "array type must have items";
   OpenAI-backed hosts: "array schema missing items"). `items: {}` - any
   value, as before - and a test holds every array of every tool schema to it.
+- **Resource and prompt errors carry the JSON-RPC codes the MCP spec
+  names.** An unknown resource URI (or guide chapter) answered -32603, an
+  internal error of this server, where the spec says -32002 (resource not
+  found); an unknown prompt and a missing required prompt argument
+  answered -32603 too, where it says -32602 (invalid params) - as does a
+  chapter URI with broken percent-encoding, which answered a bare
+  "URI malformed". The messages are unchanged; a missing checkout stays
+  -32603.
 
 ## 1.0.0 - 2026-10-03
 
