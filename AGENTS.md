@@ -284,7 +284,10 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
   `node/srv/express.mjs`): resolves the package from the runtime directory,
   imports `apps/init.mjs`, puts a `compress` export in front of the handler
   when the release has one (an express middleware, or a factory returning
-  one), serves on 127.0.0.1, prints a banner (release, dev modules,
+  one), serves on 127.0.0.1 - and only requests addressed to a loopback
+  name (Host `127.0.0.1`, `localhost`, `[::1]`) from no page or a loopback
+  one (Origin), a 403 otherwise, so a browser page cannot reach it through
+  DNS rebinding (`loopbackRequest`) - prints a banner (release, dev modules,
   accelerate, compression - `backend status` shows it) and the "Listening
   on" the start waits for. Start, stop, port and orphan handling are the
   checkout's, unchanged.

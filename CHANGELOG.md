@@ -375,6 +375,14 @@
   argument, where the browser sends the controls marshalled. A value that
   holds an item or a context anywhere is refused naming `args[i]` now, as
   the agent addon does.
+- **Security: the npm backend's host serves loopback requests only.** It
+  listened on 127.0.0.1 and answered any `Host` and any `Origin`: a web page
+  the user opened could post events to the dev apps, and through DNS
+  rebinding (a name of its own resolving to 127.0.0.1) read the answers as a
+  same-origin page. `lib/npm-host.mjs` now answers only requests addressed to
+  `127.0.0.1`, `localhost` or `[::1]` and, when they carry an `Origin`, sent
+  from a page on one of those - run_app's Chromium and the app tools are;
+  anything else gets a 403.
 
 ## 1.0.0 - 2026-10-03
 

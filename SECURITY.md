@@ -27,7 +27,12 @@ Worth knowing before assessing a report:
   `run_app` and the app tools is a child listening on 127.0.0.1 only - the
   npm host binds loopback itself, and a framework checkout's
   `node/srv/express.mjs` (which binds every interface without `HOST`) is
-  started with `HOST=127.0.0.1`.
+  started with `HOST=127.0.0.1`. Loopback is reachable from every browser
+  page on the machine, though, so the npm host also answers only requests
+  addressed to `127.0.0.1`, `localhost` or `[::1]` (the `Host` header) and,
+  when they carry an `Origin`, sent from a page there - a page cannot drive
+  or read the dev apps through DNS rebinding. A framework checkout's
+  `express.mjs` checks neither header; that check belongs to the framework.
 - **A default directory under the shared temp dir is used only when it is
   the user's own.** The GitHub mirror's default base,
   `<tmp>/abap2ui5-mcp-remote`, and the default screenshot dir,
