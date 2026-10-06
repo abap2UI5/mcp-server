@@ -259,6 +259,17 @@
   told the agent to "fill fields by label", and `app_act` resolves a
   `values` key by field id, model path or attribute name only - every value
   keyed by its label was refused. The brief says so now.
+- **A view cannot make `app_act` write into the server's prototypes.**
+  `setAt` walked a model path through whatever each step answered, and a
+  plain object answers `__proto__` with `Object.prototype`: a field bound to
+  `{/__proto__/shell}` - view XML is the backend's, a real system's when the
+  client is embedded - turned a value typed into it into
+  `Object.prototype.shell` for every object of the process (the card
+  renderer's way back wrote card payload keys the same way). A path through
+  `__proto__`, `constructor` or `prototype` is refused by `app_act` now and
+  never written by `setAt`; docs/agent-snapshot.md says so. The copies the
+  VS Code extension and abap2UI5/protocol vendor pick it up with their next
+  re-vendor.
 
 ## 1.0.0 - 2026-10-03
 

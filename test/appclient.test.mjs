@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAppClient, buildDelta, errorText, AgentError, PROTOCOL, headerOf, validContextId } from '../lib/appclient.mjs';
+import { setAt } from '../lib/snapshot.mjs';
 
 const FIX = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'agent');
 const fixture = (name) => JSON.parse(fs.readFileSync(path.join(FIX, `${name}.json`), 'utf8'));
@@ -701,6 +702,29 @@ test('a model push re-applies an unsent edit only where its parent still exists,
   assert.deepEqual(a.pending, ['/NAME', '/T/2/Q'], 'both stay pending, as the frontend\'s changed paths do');
   await c.act(a.session, { event: 'CHECK' });
   assert.equal(JSON.stringify(be.posts[2].value.MODEL), '{"NAME":"Ann","T":{"__delta":{"2":{}}}}', 'the delta the frontend builds from that model');
+});
+
+test('a field bound through __proto__ writes nothing into this process\'s prototypes', async () => {
+  const VIEW = page('<Input value="{/__proto__/a2ui5Polluted}"/><Input value="{/constructor/prototype/a2ui5Polluted}"/><Input value="{/NAME}"/><Button text="Check" press=".eB([\'CHECK\'])"/>');
+  const be = scripted((req, n, value) => (value.S_FRONT.ID ? eventAnswer(n) : startAnswer({ S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'display', 'MAIN', VIEW]] } })));
+  const c = be.client();
+  const s = await c.start('z_t');
+  try {
+    await rejects(c.act(s.session, { values: { f1: 'x' } }), /^\/__proto__\/a2ui5Polluted is no model path a value can be written to/);
+    await rejects(c.act(s.session, { values: { f2: 'x', '/NAME': 'Ann' }, event: 'CHECK' }), /constructor\/prototype\/a2ui5Polluted is no model path/);
+    assert.equal(({}).a2ui5Polluted, undefined, 'Object.prototype is untouched');
+    assert.equal(be.posts.length, 1, 'and nothing was sent');
+    assert.equal(c.describe(s.session).pending, undefined, 'the refused act changed nothing');
+    // the primitive itself, for its other callers (the pick, the rollback, the card renderer's way back)
+    const data = {};
+    assert.equal(setAt(data, '/__proto__/a2ui5Polluted', 1), false);
+    assert.equal(setAt(data, '/X/constructor/prototype/a2ui5Polluted', 1), false);
+    assert.equal(({}).a2ui5Polluted, undefined);
+    assert.equal(setAt(data, '/T/0/Q', 1), true);
+    assert.deepEqual(data, { T: [{ Q: 1 }] });
+  } finally {
+    delete Object.prototype.a2ui5Polluted;
+  }
 });
 
 test('an edit of a sent path made in flight stays pending; a failed roundtrip rolls back only its own edits', async () => {
