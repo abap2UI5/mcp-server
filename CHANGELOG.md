@@ -192,6 +192,11 @@
   call using it, which saw a dead browser in turn and fell back to the cold
   path. A drop now names the renderer it saw die and leaves a newer one in
   place.
+- **A `build_backend` refused for a build in progress keeps the backend
+  running.** The tool stopped the running backend before the build checked
+  for an in-flight build of another mode, so a call answered "build in
+  progress" had built nothing and still taken the app down. The backend is
+  now stopped once the build really starts (`buildBackend`'s `beforeBuild`).
 
 ## 1.0.0 - 2026-10-03
 

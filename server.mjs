@@ -1112,8 +1112,9 @@ async function handle(name, args = {}, ctx = {}) {
       else if (onNpm) miss = npmModeProblem(kind) ? toolError(npmModeProblem(kind)) : null;
       else if (!cloneable) miss = missingLocalSibling('abap2UI5');
       if (miss) return miss;
-      await stopBackend();
-      const res = await buildBackend({ mode, onLine: progressReporter(ctx), signal: ctx.signal });
+      /* the running backend is stopped once the build really starts: a call
+       * the in-flight build of another mode refuses leaves it running */
+      const res = await buildBackend({ mode, onLine: progressReporter(ctx), signal: ctx.signal, beforeBuild: stopBackend });
       if (res.aborted) return toolError(`build cancelled by the client (mode ${res.mode || mode}):\n${res.tail}`);
       if (!res.ok) return toolError(`build failed (exit ${res.code}, mode ${res.mode || mode}):\n${res.tail}`);
       return text({
