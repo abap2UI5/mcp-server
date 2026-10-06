@@ -22,6 +22,11 @@
 - `createAppClient` gains `screen(session)`: a copy of a session's folded
   state, for renderers other than the snapshot (additive; the vendored
   copies elsewhere keep working unchanged).
+- **A deploy lint reports the deployed class's findings only.** They were
+  picked from the repository-wide abaplint run by a substring of the path,
+  so `z_app` was handed the findings of `zz_app` (any class whose name ends
+  in its own) and a clean class failed `deploy_app` - and `verify_app`
+  stopped at deploy. Matched on the file name now (`issuesOfClass`).
 
 ## 1.0.0 - 2026-10-03
 

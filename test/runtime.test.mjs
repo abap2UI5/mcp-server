@@ -340,6 +340,33 @@ test('two concurrent lints do not delete each other\'s config', async () => {
   }
 });
 
+/* A lint covers the whole repository; the class's own findings are picked by
+ * FILE NAME. A substring test on the path used to give `z_app` the findings
+ * of `zz_app` (and `yz_app`), so a clean class failed its deploy lint. */
+test('a lint reports the deployed class\'s findings only, not those of a class whose name ends in its own', async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-lintown-'));
+  const corpus = fakeLintCorpus(base);
+  const findings = [
+    { file: './src/zz_dev/zz_app.clas.abap', key: 'other_class', description: 'not mine', start: { row: 1 } },
+    { file: './src/zz_dev/yz_app.clas.xml', key: 'other_xml', description: 'not mine either', start: { row: 1 } },
+    { file: './src/zz_dev/z_app.clas.testclasses.abap', key: 'mine', description: 'my test include', start: { row: 3 } },
+  ];
+  fakeAbaplint(corpus, `console.log(${JSON.stringify(JSON.stringify(findings))});`);
+  try {
+    await withLintEnv(corpus, {}, async () => {
+      const { lintApp, issuesOfClass } = await import('../lib/runtime.mjs');
+      const r = await lintApp('z_app');
+      assert.deepEqual(r.issues.map((i) => i.rule), ['mine']);
+      assert.equal(r.totalRepoIssues, 3);
+      const clean = await lintApp('zz_ap');
+      assert.equal(clean.ok, true, `no finding is zz_ap's: ${JSON.stringify(clean.issues)}`);
+      assert.deepEqual(issuesOfClass([{ file: 'src\\zz_dev\\z_app.clas.abap' }, { file: 'z_app.clas.xml' }], 'z_app').length, 2);
+    });
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
 /* `npx abaplint` / `npx abap_transpile` fell back to the REGISTRY when the
  * checkout had no local bin (stdin is no TTY under an MCP client, so npx
  * answered its own install prompt), and `abap_transpile` is an unclaimed npm
