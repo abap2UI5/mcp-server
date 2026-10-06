@@ -1879,6 +1879,51 @@ test('validate_view falls back to the property gate when the render gate cannot 
   await assert.rejects(withRenderFallback({ render: false, withRender: async () => { throw new Error('parse'); }, withoutRender: async () => ({}) }), /parse/);
 });
 
+/* A warm renderer that THROWS mid-call (a wedged page its dead browser could
+ * not reload) is retired and the check run cold - not handed to the
+ * fallback above, which answered the property findings alone with a note
+ * that the render gate "could not start". Composed the way validate_view
+ * composes them. */
+test('validate_view retries a throwing warm renderer cold before falling back', async () => {
+  const { withRenderFallback, warmThenCold } = await import('../lib/validate.mjs');
+  const calls = [];
+  const rendered = { findings: [], renderErrors: ['Unknown control sap.m.Buton'] };
+  const res = await withRenderFallback({
+    render: true,
+    withRender: () => warmThenCold({
+      warm: async () => { calls.push('warm'); throw new Error('page.reload: Target page, context or browser has been closed'); },
+      cold: async () => { calls.push('cold'); return rendered; },
+      drop: async () => { calls.push('drop'); },
+      looksDead: () => false,
+    }),
+    withoutRender: async () => { calls.push('properties'); return { findings: [] }; },
+  });
+  assert.deepEqual(calls, ['warm', 'drop', 'cold']);
+  assert.equal(res.renderSkipped, null, 'the render gate ran - cold');
+  assert.equal(res.result, rendered);
+
+  // a dead browser that did not throw: dropped and retried cold too
+  const dead = [];
+  const r2 = await warmThenCold({
+    warm: async () => { dead.push('warm'); return { renderErrors: ['HARNESS: browser has been closed'] }; },
+    cold: async () => { dead.push('cold'); return rendered; },
+    drop: async () => { dead.push('drop'); },
+    looksDead: (r) => r.renderErrors.length > 0,
+  });
+  assert.deepEqual(dead, ['warm', 'drop', 'cold']);
+  assert.equal(r2, rendered);
+  // a healthy warm run is the answer, nothing dropped
+  const healthy = await warmThenCold({ warm: async () => rendered, cold: async () => { throw new Error('not called'); }, drop: async () => { throw new Error('not called'); }, looksDead: () => false });
+  assert.equal(healthy, rendered);
+  // a cold run that throws too is the fallback's case, with ITS reason
+  const both = await withRenderFallback({
+    render: true,
+    withRender: () => warmThenCold({ warm: async () => { throw new Error('warm'); }, cold: async () => { throw new Error('no chromium'); }, drop: async () => {}, looksDead: () => false }),
+    withoutRender: async () => ({ findings: [] }),
+  });
+  assert.equal(both.renderSkipped, 'no chromium');
+});
+
 // ------------------------------------------------------- small contracts ----
 
 /* The generation_rules footer linked docs/cookbook/overview, a page the site

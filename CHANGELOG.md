@@ -208,6 +208,15 @@
   0 pixels wide - which Chromium's device metrics override reads as "no
   override", a picture of its default window. An edge under 10 pixels is
   refused by name now, like one over 4096.
+- **`validate_view` renders cold when the warm renderer throws.** A warm
+  Chromium that failed mid-call with a throw (a wedged page its dead
+  browser could not reload) was dropped, but the throw went on to the
+  "render gate could not start" fallback: the answer was the property
+  findings alone - `ok: true` for a view whose render errors were never
+  looked for - with a note to install `@abap2ui5/linter-render`. The call
+  is retried cold now, as it already was for a dead browser that did not
+  throw, and as `screenshot_view` does (`warmThenCold` in
+  `lib/validate.mjs`).
 
 ## 1.0.0 - 2026-10-03
 

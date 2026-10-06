@@ -54,7 +54,7 @@ import { scaffold, readSpec, validClassName, classNameRule, templateFiles, SPEC_
 import { agentTargetProblem, planAgentSetup, writePlan, pinProblems, pinWarning, agentSetupNextSteps } from './lib/agent-setup.mjs';
 import { fixSource } from './lib/fixview.mjs';
 import { lintOptionsFor } from './lib/lintopts.mjs';
-import { withRenderFallback, renderSkippedNote } from './lib/validate.mjs';
+import { withRenderFallback, renderSkippedNote, warmThenCold } from './lib/validate.mjs';
 import { ANSWER_BUDGET, takeWithin, takeSmallestWithin } from './lib/budget.mjs';
 import { getRenderer, dropRenderer, closeRenderers, rendererLooksDead } from './lib/renderer.mjs';
 import { TOOLS } from './lib/tools.mjs';
@@ -900,18 +900,13 @@ async function handle(name, args = {}, ctx = {}) {
       const checkWithRender = async () => {
         const renderer = opt.render === false ? null : await getRenderer(GATE_POOL);
         if (!renderer) return check(opt);
-        let r;
-        try {
-          r = await check({ ...opt, renderer });
-        } catch (e) {
-          await dropRenderer(GATE_POOL, renderer); // whatever threw, a fresh one next call
-          throw e;
-        }
-        if (rendererLooksDead(r.renderErrors)) {
-          await dropRenderer(GATE_POOL, renderer);
-          r = await check(opt);
-        }
-        return r;
+        // whatever threw or died, a fresh one next call - and this call cold
+        return warmThenCold({
+          warm: () => check({ ...opt, renderer }),
+          cold: () => check(opt),
+          drop: () => dropRenderer(GATE_POOL, renderer),
+          looksDead: (r) => rendererLooksDead(r.renderErrors),
+        });
       };
       /* A render gate that cannot START (no @abap2ui5/linter-render, a
        * Chromium that will not launch) throws out of the linter; that throw
