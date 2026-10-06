@@ -671,6 +671,28 @@ test('a view the response displays anew drops the unsent edits of the old one, a
   assert.equal(be.posts[2].value.MODEL, undefined, 'the edit of the old page never goes out');
 });
 
+test('a model push re-applies an unsent edit only where its parent still exists, as JSONModel#setProperty does', async () => {
+  const GRID = page('<Input value="{/NAME}"/><Table items="{/T}"><columns><Column/></columns><items><ColumnListItem><cells><Input value="{Q}"/></cells></ColumnListItem></items></Table><Button text="Check" press=".eB([\'CHECK\'])"/>');
+  const POPOVER = '<core:FragmentDefinition xmlns="sap.m" xmlns:core="sap.ui.core"><Popover title="P"><Button text="OK" press=".eB([\'OK\'])"/></Popover></core:FragmentDefinition>';
+  const be = scripted((req, n, value) => {
+    if (!value.S_FRONT.ID) {
+      return { S_FRONT: { ID: 'D1', APP: 'Z_T', S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'display', 'MAIN', GRID], ['VIEW_SLOTS', 'display', 'POPOVER', POPOVER, {}]] } }, MODEL: { NAME: '', T: [{ Q: 1 }, { Q: 2 }, { Q: 3 }] } };
+    }
+    // the popover's OK closes it and pushes a model whose table shrank
+    return n === 2 ? { ...eventAnswer(n, { S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'destroy', 'POPOVER']] } }), MODEL: { NAME: '', T: [{ Q: 1 }] } } : eventAnswer(n);
+  });
+  const c = be.client();
+  const s = await c.start('z_t');
+  await c.act(s.session, { values: { '/NAME': 'Ann', '/T/2/Q': 9 } });
+  const a = await c.act(s.session, { event: 'OK' });
+  assert.equal(a.fields.find((f) => f.path === '/NAME').value, 'Ann', 'an edit whose parent is there is re-applied');
+  assert.equal(a.tables[0].rowCount, 1, 'no row is made up for the one that is gone');
+  assert.deepEqual(a.tables[0].rows, [{ Q: 1 }]);
+  assert.deepEqual(a.pending, ['/NAME', '/T/2/Q'], 'both stay pending, as the frontend\'s changed paths do');
+  await c.act(a.session, { event: 'CHECK' });
+  assert.equal(JSON.stringify(be.posts[2].value.MODEL), '{"NAME":"Ann","T":{"__delta":{"2":{}}}}', 'the delta the frontend builds from that model');
+});
+
 test('an edit of a sent path made in flight stays pending; a failed roundtrip rolls back only its own edits', async () => {
   let fail = false;
   const be = scripted((req, n, value) => {

@@ -243,6 +243,12 @@
   new page was sent, stayed `pending` and went out with its next event,
   into another app's model too. Only a model push keeps unsent edits now
   (`rebuiltModels` in lib/snapshot.mjs); docs/agent-snapshot.md says so.
+- **A model push no longer makes up table rows for an unsent edit.** The
+  re-apply of a pending edit created every missing step of its path, so a
+  cell edit of row 5 in a table the push shrank to two rows made it six rows
+  long, with empty rows the snapshot listed and the next delta sent as the
+  edited row. It is re-applied as JSONModel#setProperty does now - only
+  where its parent exists; the path stays pending, as in the frontend.
 
 ## 1.0.0 - 2026-10-03
 
