@@ -1510,7 +1510,7 @@ function shutdown(reason) {
   shuttingDown = (async () => {
     try {
       killChildren();
-      await Promise.all([stopBackend().catch(() => {}), closeRenderers().catch(() => {})]);
+      await Promise.all([stopBackend({ starting: true }).catch(() => {}), closeRenderers().catch(() => {})]);
     } catch (e) {
       console.error(`abap2ui5 MCP server: shutdown (${reason}) - ${(e && e.message) || e}`);
     }

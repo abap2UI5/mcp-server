@@ -22,7 +22,8 @@ const FAKE_EXPRESS = `
 import http from 'http';
 import fs from 'fs';
 const s = http.createServer((req, res) => res.end('ok'));
-const listen = () => s.listen(process.env.PORT, () => {
+let stopping = false; // a SIGTERM before the delayed listen: never listens
+const listen = () => !stopping && s.listen(process.env.PORT, () => {
   if (process.env.BOOT_MARKER) fs.appendFileSync(process.env.BOOT_MARKER, process.pid + '\\n');
   console.log('Listening on ' + process.env.PORT);
 });
@@ -30,8 +31,9 @@ s.on('error', (e) => {
   if (e.code === 'EADDRINUSE') setTimeout(listen, 100);
   else throw e;
 });
-listen();
+setTimeout(listen, Number(process.env.LISTEN_DELAY_MS || 0));
 process.on('SIGTERM', () => {
+  stopping = true;
   s.close();
   setTimeout(() => process.exit(0), 1000);
 });
@@ -112,6 +114,27 @@ test('a backend that cannot be spawned fails the start at once, with the reason'
     process.env.PATH = savedPath;
     process.off('uncaughtException', onUncaught);
     fs.rmSync(empty, { recursive: true, force: true });
+  }
+});
+
+/* The server's shutdown during a start: the child is `server` only once it
+ * listens, so stopBackend() had nothing to kill and the server exited with
+ * the child still booting - it then listened as an orphan holding the port.
+ * stopBackend({ starting: true }) (what the shutdown calls) reaches it. */
+test('a shutdown stop kills a backend that has not listened yet', async () => {
+  process.env.LISTEN_DELAY_MS = '700';
+  try {
+    const start = startBackend();
+    start.catch(() => {});
+    await sleep(250); // spawned, not listening yet
+    await stopBackend({ starting: true });
+    await assert.rejects(start, /before listening/);
+    await sleep(900); // past the moment it would have listened
+    assert.equal(await portOpen(), false, 'the backend whose start was cut short listened anyway, as an orphan');
+    assert.equal(backendStatus().running, false);
+  } finally {
+    delete process.env.LISTEN_DELAY_MS;
+    await stopBackend();
   }
 });
 

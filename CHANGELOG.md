@@ -217,6 +217,14 @@
   is retried cold now, as it already was for a dead browser that did not
   throw, and as `screenshot_view` does (`warmThenCold` in
   `lib/validate.mjs`).
+- **A shutdown during a backend start leaves no backend behind.** The
+  backend child was only tracked once it printed "Listening on", so a
+  client that went away while `backend start` / `run_app` was booting it
+  had the server exit with the child untracked - and the child then
+  listened as an orphan holding the port for the next session. The
+  shutdown now also kills the child of a start in flight
+  (`stopBackend({ starting: true })`); `backend stop` and `restart` are
+  unchanged.
 
 ## 1.0.0 - 2026-10-03
 
