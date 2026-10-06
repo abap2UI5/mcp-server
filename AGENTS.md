@@ -89,7 +89,8 @@ reach the registry - npm-integration and agent-integration - skip themselves), a
 `A2UI5_MCP_SCOPE_TIMEOUT_MS` (default 5 min), `A2UI5_MCP_UI` (`auto`/`on`/`off`:
 whether the app tools declare their MCP Apps screen, below),
 `A2UI5_MCP_APP_FORMAT` (`snapshot`/`adaptive-card`: the app tools' default
-answer format, below), `A2UI5_MCP_BUILD_TIMEOUT_MS`
+answer format, below), the system mode's `A2UI5_MCP_SYSTEM_URL` / `_USER` /
+`_PASSWORD` / `_PASSWORD_CMD` / `_INSECURE_TLS` (below), `A2UI5_MCP_BUILD_TIMEOUT_MS`
 (default 30 min, also the prebuilt download and the npm install) and
 `A2UI5_MCP_UNIT_TIMEOUT_MS` (default 10 min, the test runner).
 
@@ -462,6 +463,60 @@ act with the session it last saw is refused naming the current one).
   validates every fixture screen's card against the 1.5 subset and replays
   the fixtures with their acts submitted through the card. A card that
   cannot be rendered costs the card, never the act.
+
+### The system mode — `lib/system.mjs`, `lib/system-tools.mjs`
+
+**`A2UI5_MCP_SYSTEM_URL` turns the server into something else**: the app
+tools against a REAL SAP system, for the MCP clients that are not the VS Code
+extension (Claude Desktop above all - the extension's system server is
+offered to the clients of its own window only, by design: its URL carries a
+token that acts with the stored credentials). With the variable set,
+`tools/list` answers `SYSTEM_TOOLS` instead of `TOOLS`, `prompts/list` is
+empty (both prompts orchestrate the sandbox loop), a sandbox tool name is
+refused naming the mode, and every call goes to `handleSystem` in
+`server.mjs` - no hydrate, no checkout, no backend. The resources stay (the
+MCP Apps screen among them, which works unchanged: it only builds `app_act`
+calls). A user who wants both registers the server twice; the two never
+share a tool name inside one server.
+
+- **The same client, a different transport.** `createSystemClient` is
+  `createAppClient` with the options docs/agent-snapshot.md "Embedding the
+  client" names - `transport` (one request to the endpoint, through
+  `createSystemHttp`), `location` (the system's launch URL plus
+  `app_start`), `backendHint` (`system_status`) - exactly how the extension
+  embeds its vendored copy. The CSRF handshake and the `sap-contextid` stay
+  the client's; the transport must not do them again. The endpoint is the
+  launch URL without the class (`systemEndpoint`, the extension's
+  `agentEndpoint`: `{class}` in the path, or credentials in the URL, are
+  refused).
+- **The logon** is Basic authentication on every request plus a cookie jar
+  (`cookieJar`: a CSRF token layer binds its token to the session cookie).
+  `A2UI5_MCP_SYSTEM_PASSWORD_CMD` keeps the password out of the client's
+  config file: a shell command, run once and kept in memory, never shown -
+  neither its output nor the command itself is in any answer or error
+  (`describeConfig`).
+- **The breaker - do not weaken it.** SAP locks a user after a few failed
+  logons and an agent retries, so a `401` trips `createSystemHttp`: every
+  later request with the same password is refused by `ready()` without
+  being sent, until the server restarts or the password command answers a
+  different one. The handlers call `sys.ready()` before the client, so the
+  refusal reads as itself rather than as "the backend did not answer". The
+  `401`'s body is replaced by a sentence (the system's logon page is HTML
+  noise) - the client shows it as `HTTP 401: ...`.
+- **A misconfiguration starts the server.** `systemConfig` collects
+  `problems` instead of throwing, and every tool answers with them: in a
+  desktop client the tool answer is the only place a user sees anything.
+- **node http(s), not fetch**: one system's self-signed certificate is
+  accepted per request (`A2UI5_MCP_SYSTEM_INSECURE_TLS`), never by a global
+  switch; `NODE_EXTRA_CA_CERTS` is the better answer and needs no code.
+  Network failures become sentences (`networkProblem`). No HTTP proxy.
+- `test/system.test.mjs` covers the pure halves against injected requests
+  and runs the real server over stdio against `test/helpers/fake-system.mjs`
+  - Basic logon, a session cookie, a CSRF token layer, the ADT search, and a
+  recorded sample session replayed (the start request's location checked
+  against the fake system's own URL): one sandbox registration's worth of
+  confidence without a system. The breaker test asserts that exactly ONE
+  request reached the system.
 
 ### Vendored code — `lib/vendor/`, `scripts/vendor-adaptive-cards.mjs`
 
@@ -1068,4 +1123,4 @@ legitimately slower.
 | [app-template](https://github.com/abap2UI5/app-template) | The starter project `scaffold_app` serves and renames, and the agent setup `add_agent_setup` adds to an existing project, both executing the template's own `template.json` (`APP_TEMPLATE_HOME`) |
 | [docs](https://github.com/abap2UI5/docs) | The documentation site `docs_search` reads, in source form |
 | [abap2UI5-linter](https://github.com/abap2UI5/linter) | `validate_view` implementation (imported via its package `exports` map) |
-| [vscode-extension](https://github.com/abap2UI5/vscode-extension) | Registers this server for MCP clients in the editor (`src/mcp.ts`) |
+| [vscode-extension](https://github.com/abap2UI5/vscode-extension) | Registers this server for MCP clients in the editor (`src/mcp.ts`), and vendors `lib/appclient.mjs` for its own system server - the editor-side counterpart of the system mode |

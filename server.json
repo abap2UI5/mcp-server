@@ -181,6 +181,37 @@
           "isRequired": false
         },
         {
+          "name": "A2UI5_MCP_SYSTEM_URL",
+          "description": "Switches on the SYSTEM MODE: the app tools against this real SAP system instead of the sandbox loop. The launch URL, e.g. https://host:44300/sap/bc/z2ui5?app_start={class}&sap-client=100.",
+          "format": "string",
+          "isRequired": false
+        },
+        {
+          "name": "A2UI5_MCP_SYSTEM_USER",
+          "description": "System mode: the SAP user the app tools log on with (Basic authentication).",
+          "format": "string",
+          "isRequired": false
+        },
+        {
+          "name": "A2UI5_MCP_SYSTEM_PASSWORD",
+          "description": "System mode: the password of A2UI5_MCP_SYSTEM_USER. Or A2UI5_MCP_SYSTEM_PASSWORD_CMD, to keep it out of the configuration.",
+          "format": "string",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "A2UI5_MCP_SYSTEM_PASSWORD_CMD",
+          "description": "System mode: a shell command that prints the password (a keychain lookup) - instead of A2UI5_MCP_SYSTEM_PASSWORD.",
+          "format": "string",
+          "isRequired": false
+        },
+        {
+          "name": "A2UI5_MCP_SYSTEM_INSECURE_TLS",
+          "description": "System mode: set to 1 to accept a certificate that cannot be verified. NODE_EXTRA_CA_CERTS with the CA is the better fix.",
+          "format": "string",
+          "isRequired": false
+        },
+        {
           "name": "GITHUB_TOKEN",
           "description": "Optional token sent to api.github.com only, to raise the rate limit of the docs tree listing (GH_TOKEN is read too).",
           "format": "string",
