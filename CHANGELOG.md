@@ -203,6 +203,11 @@
   the report runtime's support classes had been copied into the sandbox,
   so the refused deploy still changed the next build's input. Every name
   is checked before the first file is written now.
+- **`screenshot_view` refuses a zero-size viewport.** `sizes` checked the
+  digits (`\d{2,5}`) but not their value, so `00x10` passed as a viewport
+  0 pixels wide - which Chromium's device metrics override reads as "no
+  override", a picture of its default window. An edge under 10 pixels is
+  refused by name now, like one over 4096.
 
 ## 1.0.0 - 2026-10-03
 

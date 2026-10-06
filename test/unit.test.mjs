@@ -1455,6 +1455,9 @@ test('a viewport is bounded in size and in number', () => {
   assert.throws(() => parseSizes(['99999x99999']), /out of range/);
   assert.throws(() => parseSizes(['4097x100']), /out of range/);
   assert.doesNotThrow(() => parseSizes(['4096x4096']), 'the limit itself is still a viewport');
+  // a zero edge matched the two-digit pattern; Chromium takes 0 as "no override"
+  for (const tiny of ['00x10', '10x00', '09x844']) assert.throws(() => parseSizes([tiny]), /out of range/, tiny);
+  assert.doesNotThrow(() => parseSizes(['10x10']), 'the lower limit itself is still a viewport');
   assert.throws(() => parseSizes(Array(9).fill('390x844')), /too many sizes/);
   assert.doesNotThrow(() => parseSizes(Array(8).fill('390x844')));
 });
