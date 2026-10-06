@@ -92,6 +92,29 @@ test('a stale child exiting late does not orphan the live backend', async () => 
   assert.equal(await portOpen(), false, 'the backend survived stopBackend as an orphan');
 });
 
+/* `node` not on the PATH (a desktop client starts its servers with a minimal
+ * one): spawn emits 'error' and no 'exit', which used to be an uncaught
+ * exception and a 30 s wait for a start that had already failed. */
+test('a backend that cannot be spawned fails the start at once, with the reason', { skip: process.platform === 'win32' && 'PATH lookup differs' }, async () => {
+  const savedPath = process.env.PATH;
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-nopath-'));
+  const uncaught = [];
+  const onUncaught = (e) => uncaught.push(e);
+  process.on('uncaughtException', onUncaught);
+  process.env.PATH = empty;
+  const t0 = Date.now();
+  try {
+    await assert.rejects(startBackend(), /could not be started \(node\).*ENOENT/);
+    assert.ok(Date.now() - t0 < 10000, `the start failed only after ${Date.now() - t0} ms`);
+    assert.equal(uncaught.length, 0, `uncaught: ${uncaught.map(String).join(', ')}`);
+    assert.equal(backendStatus().running, false);
+  } finally {
+    process.env.PATH = savedPath;
+    process.off('uncaughtException', onUncaught);
+    fs.rmSync(empty, { recursive: true, force: true });
+  }
+});
+
 test.after(() => {
   fs.rmSync(base, { recursive: true, force: true });
 });

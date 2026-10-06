@@ -27,6 +27,12 @@
   so `z_app` was handed the findings of `zz_app` (any class whose name ends
   in its own) and a clean class failed `deploy_app` - and `verify_app`
   stopped at deploy. Matched on the file name now (`issuesOfClass`).
+- **A backend that cannot be spawned fails its start at once.** With no
+  `node` on the PATH the server was started with (a desktop client's
+  minimal one), the backend child emitted only `error`: an uncaught
+  exception, and `run_app` / `app_start` / `backend start` waited 30 s to
+  report "did not start" with an empty output. The start now fails with
+  the spawn error right away.
 
 ## 1.0.0 - 2026-10-03
 
