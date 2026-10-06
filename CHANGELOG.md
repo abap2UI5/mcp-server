@@ -79,6 +79,12 @@
   project config its characters became the allow list (the allowance
   silently ignored), without one the gate failed on `allow.map is not a
   function`. Refused by name now, like every other list argument.
+- **`examples { area: "samples" }` finds the samples again.** The area was
+  read off a `src/01` path prefix, and abap2UI5/samples flattened `src/01`
+  and `src/00` into one `src/` package on 2026-09-22 - so every sample of a
+  current checkout was filed as `experimental-or-test`, and the filter the
+  description recommends answered nothing. `src/00` decides now; an older
+  checkout reads as before.
 
 ## 1.0.0 - 2026-10-03
 

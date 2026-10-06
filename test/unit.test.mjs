@@ -837,6 +837,28 @@ test('searching the catalogue narrows on every term and ranks a keyword hit firs
   assert.deepEqual(q('bookmark', { area: 'experimental-or-test' }), ['Z2UI5_CL_SMP_APP_321']);
 });
 
+/* abap2UI5/samples flattened src/01 and src/00 into one `src/` package
+ * (2026-09-22). The area used to be read off src/01, so every sample of a
+ * current checkout was filed as experimental-or-test and `area: samples` -
+ * the filter the description recommends - answered nothing. src/00 decides. */
+test('a sample in the flat src/ package is the supported set, not experimental-or-test', () => {
+  const flat = [
+    '## Basics',
+    '',
+    '| **Basics I** — Hello World<br><sub>hello world</sub> | [`Z2UI5_CL_SMP_APP_493`](src/z2ui5_cl_smp_app_493.clas.abap) |',
+  ].join('\n');
+  assert.equal(parseExamples(flat)[0].area, 'samples');
+  assert.deepEqual(searchExamples({ query: 'hello', area: 'samples', rawText: flat }).map((e) => e.cls), ['Z2UI5_CL_SMP_APP_493']);
+  assert.deepEqual(searchExamples({ query: 'hello', area: 'experimental-or-test', rawText: flat }), []);
+  // the JSON adapter too: samples' catalogue.json names the flat paths
+  const [json] = searchExamples({
+    area: 'samples',
+    rawCatalogue: { samples: [{ class: 'z2ui5_cl_smp_app_540', file: 'src/z2ui5_cl_smp_app_540.clas.abap', category: 'AI', title: 'AI' }] },
+  });
+  assert.equal(json.cls, 'Z2UI5_CL_SMP_APP_540');
+  assert.equal(json.area, 'samples');
+});
+
 /* The `docs:` block is a per-sample list of the cookbook chapters somebody
  * decided that app is the worked example of - and this parser knew it only
  * well enough to SKIP it while looking for the keywords. So the agent got a
