@@ -74,6 +74,11 @@
   collects the child's output to report a failed start, and went on
   appending every line the backend wrote to stderr after it was listening -
   memory the server never released during a session.
+- **`validate_view` / `fix_view` check `allow`.** A bare string instead of
+  the array the schema names was passed to the linter as it was: beside a
+  project config its characters became the allow list (the allowance
+  silently ignored), without one the gate failed on `allow.map is not a
+  function`. Refused by name now, like every other list argument.
 
 ## 1.0.0 - 2026-10-03
 
