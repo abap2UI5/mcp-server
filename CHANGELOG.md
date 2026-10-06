@@ -44,6 +44,10 @@
   `scripts/check-server-json.mjs` only looked for `process.env.X`, so the
   variable was missing from the registry listing without the gate noticing.
   The scan reads `env.X` too.
+- **`setup.sh` reuses a corpus checked out as `abap2UI5-api`.** Its list of
+  pre-rename directory names left that one out (lib/repo-dirs.json has it),
+  so such a checkout was cloned a second time as `samples-controls`. A test
+  now holds the script's lists against the JSON.
 
 ## 1.0.0 - 2026-10-03
 

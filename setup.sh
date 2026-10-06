@@ -8,7 +8,8 @@
 #     linter/            the view validation gates
 #
 # Existing checkouts are reused, also under their pre-rename directory
-# names (ai-demokit, abap2UI5-linter, ai-view-check), and npm ci is
+# names (abap2UI5-api, ai-demokit, abap2UI5-linter, ai-view-check - the
+# lists in lib/repo-dirs.json), and npm ci is
 # skipped where node_modules is already present - safe to re-run.
 #
 # Usage:
@@ -71,7 +72,7 @@ DEMOKIT_DIR=""
 if [ "$NO_CORPUS" = "1" ]; then
   echo "-- --no-corpus: samples-controls not cloned (scope_of, build_backend mode full and the locally served UI5 stay off until it is)"
 else
-  ensure_repo samples-controls https://github.com/abap2UI5/samples-controls ai-demokit
+  ensure_repo samples-controls https://github.com/abap2UI5/samples-controls abap2UI5-api ai-demokit
   DEMOKIT_DIR="$REPO_DIR"
 fi
 ensure_repo linter https://github.com/abap2UI5/linter abap2UI5-linter ai-view-check

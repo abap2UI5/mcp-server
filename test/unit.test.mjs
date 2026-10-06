@@ -1917,3 +1917,21 @@ test('the Chromium is the explicit one, then Playwright\'s own, then a system bi
   assert.equal(resolveChromium({ env: { CHROMIUM_BIN: '/y' }, exists: has('/y'), managed }).source, 'CHROMIUM_BIN');
   assert.equal(resolveChromium({ env: {}, exists: has(), managed }), null);
 });
+
+// ------------------------------------------------------------- setup.sh ----
+/* setup.sh reuses an existing checkout under any directory name it carried
+ * before a rename - by its own list, a second copy of lib/repo-dirs.json. It
+ * left out `abap2UI5-api`, so a corpus checked out under that name was cloned
+ * a second time as samples-controls. Pinned against the JSON. */
+test('setup.sh reuses every directory name lib/repo-dirs.json knows for the checkouts it clones', async () => {
+  const { REPO_DIRS } = await import('../lib/repos.mjs');
+  const script = fs.readFileSync(path.join(ROOT, 'setup.sh'), 'utf8');
+  const calls = [...script.matchAll(/^[ \t]*ensure_repo[ \t]+(\S+)[ \t]+(\S+)((?:[ \t]+\S+)*)[ \t]*$/gm)]
+    .map((m) => [m[1], ...m[3].trim().split(/[ \t]+/).filter(Boolean)]);
+  assert.ok(calls.length >= 3, 'setup.sh ensure_repo calls found');
+  for (const dirs of calls) {
+    const entry = Object.values(REPO_DIRS).find((r) => r.dirs[0] === dirs[0]);
+    assert.ok(entry, `setup.sh clones ${dirs[0]}, which repo-dirs.json does not name`);
+    assert.deepEqual(dirs, entry.dirs, `setup.sh's names for ${dirs[0]}`);
+  }
+});
