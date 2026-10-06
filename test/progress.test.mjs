@@ -100,18 +100,22 @@ test('build_backend emits notifications/progress when the client sends a progres
 /* deploy_app's abaplint pass reports at least its start and end marks when
  * the client sent a progressToken: abaplint prints nothing until its one JSON
  * answer, so the forced marks are what says the call is alive. The corpus and
- * abaplint are both faked (a scripted npx on PATH), the way the runtime lint
- * test fakes them. */
+ * abaplint are both faked - abaplint as the checkout's own install, the way
+ * the runtime lint test fakes it (the lint never runs npx; a scripted npx on
+ * PATH, which this test used to rely on, was never called). The fake prints
+ * a burst of lines in one chunk right after the start mark: all of them fall
+ * inside the one-per-second throttle, and they used to be sent anyway - the
+ * line's index, passed along by forEach, read as the reporter's `force`. */
 test('deploy_app reports the lint start and end when a progressToken is sent', { skip: process.platform === 'win32' && 'needs a POSIX shell on PATH' }, async () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-lintprog-'));
   const demokit = path.join(base, 'ai-demokit');
   fs.mkdirSync(path.join(demokit, 'scripts'), { recursive: true });
   fs.writeFileSync(path.join(demokit, 'scripts', 'e2e-build.mjs'), '');
   fs.writeFileSync(path.join(demokit, 'abaplint.jsonc'), '{ "global": { "exclude": [] }, "rules": {} }');
-  const bin = path.join(base, 'bin');
-  fs.mkdirSync(bin);
-  fs.writeFileSync(path.join(bin, 'npx'), '#!/bin/sh\nsleep 0.2\necho "[]"\n');
-  fs.chmodSync(path.join(bin, 'npx'), 0o755);
+  const cli = path.join(demokit, 'node_modules', '@abaplint', 'cli');
+  fs.mkdirSync(cli, { recursive: true });
+  fs.writeFileSync(path.join(cli, 'package.json'), JSON.stringify({ name: '@abaplint/cli', bin: { abaplint: './abaplint' } }));
+  fs.writeFileSync(path.join(cli, 'abaplint'), 'process.stdout.write("parsing 1\\nparsing 2\\nparsing 3\\nparsing 4\\nparsing 5\\n[]\\n");');
 
   const p = spawn('node', [path.join(ROOT, 'server.mjs')], {
     stdio: ['pipe', 'pipe', 'ignore'],
@@ -119,7 +123,6 @@ test('deploy_app reports the lint start and end when a progressToken is sent', {
       ...process.env,
       AI_DEMOKIT_HOME: demokit,
       SAMPLES_CONTROLS_HOME: '',
-      PATH: `${bin}${path.delimiter}${process.env.PATH}`,
     },
   });
   let buf = '';
@@ -170,6 +173,9 @@ test('deploy_app reports the lint start and end when a progressToken is sent', {
       `expected the lint start mark, got: ${JSON.stringify(progress.map((n) => n.params.message))}`);
     assert.ok(progress.some((n) => /abaplint: finished/.test(n.params.message)),
       `expected the lint end mark, got: ${JSON.stringify(progress.map((n) => n.params.message))}`);
+    assert.ok(/abaplint: finished \(clean\)/.test(progress[progress.length - 1].params.message), 'the fake abaplint ran and answered clean');
+    assert.deepEqual(progress.filter((n) => /parsing/.test(n.params.message)).map((n) => n.params.message), [],
+      'a burst of lines inside the throttle window after the forced start mark sends nothing');
   } finally {
     p.kill();
     fs.rmSync(base, { recursive: true, force: true });

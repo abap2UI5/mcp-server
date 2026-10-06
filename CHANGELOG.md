@@ -60,6 +60,12 @@
   threw out of `build_backend` without a `build_log` record. Both steps are
   spawned like every other child now - cancellable, killed with their tree,
   reported and logged; a failed step takes the half clone with it.
+- **Progress notifications keep their one-per-second throttle.** A child's
+  output was handed to the line callback through `forEach`, which passes the
+  line's index as a second argument - and the server's progress reporter
+  reads its second parameter as `force`. Every line after the first of an
+  output chunk bypassed the throttle, so a chatty lint or unit-test run sent
+  one `notifications/progress` per line.
 
 ## 1.0.0 - 2026-10-03
 
