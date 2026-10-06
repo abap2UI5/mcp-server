@@ -110,6 +110,13 @@
   walk statted every entry, and one link to a file that is not there (a
   half-finished pull, a moved page) threw `ENOENT` out of it - every search
   failed. Such an entry is skipped now.
+- **A mirror refresh takes out what the repository no longer lists.** The
+  daily refresh of a GitHub mirror wrote the new file list over the old one
+  and removed nothing, so a docs page renamed or deleted upstream stayed in
+  the mirror and `docs_search` - which walks the mirror's tree - kept
+  answering with it (and a URL that 404s). Files the previous refresh listed
+  and this one does not are removed now; a sample read on demand is not one
+  of them.
 
 ## 1.0.0 - 2026-10-03
 

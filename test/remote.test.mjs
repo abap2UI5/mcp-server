@@ -194,6 +194,30 @@ test('the template mirror follows template.json, the docs mirror the repository 
   if (!resolveKey('docs', { local: true })) assert.equal(resolveKey('docs'), d.root);
 }));
 
+/* A refresh wrote the new list over the old one and never took anything
+ * out: a docs page removed upstream stayed in the mirror, and docs_search
+ * (which walks the mirror's tree) kept answering with it. */
+test('a refresh takes out the files the repository no longer lists, and keeps the ones read on demand', withEnv(async () => {
+  const tree = (paths) => JSON.stringify({ tree: paths.map((p) => ({ type: 'blob', path: p })) });
+  const first = await hydrate('docs', { local: null, fetchImpl: fakeFetch({
+    'git/trees/main?recursive=1': tree(['docs/index.md', 'docs/old.md']),
+    '/package.json': '{"name":"abap2ui5-docs"}',
+    '/docs/index.md': '# Home',
+    '/docs/old.md': '# A page that moves',
+  }) });
+  assert.ok(fs.existsSync(path.join(first.root, 'docs/old.md')));
+  const onDemand = await fetchRemoteFile('docs', 'docs/extra.md', { fetchImpl: fakeFetch({ '/docs/extra.md': '# read on demand' }) });
+  const again = await hydrate('docs', { local: null, force: true, fetchImpl: fakeFetch({
+    'git/trees/main?recursive=1': tree(['docs/index.md']),
+    '/package.json': '{"name":"abap2ui5-docs"}',
+    '/docs/index.md': '# Home',
+  }) });
+  assert.equal(again.fetched, true);
+  assert.ok(!fs.existsSync(path.join(again.root, 'docs/old.md')), 'a page gone upstream is gone from the mirror');
+  assert.ok(fs.existsSync(path.join(again.root, 'docs/index.md')));
+  assert.ok(fs.existsSync(onDemand), 'a file the marker never listed is not the refresh\'s to remove');
+}));
+
 test('fetchRemoteFile reads one file on demand, from the cache while fresh', withEnv(async () => {
   const src = 'CLASS z2ui5_cl_smp_app_493 DEFINITION PUBLIC.';
   const impl = fakeFetch({ '/src/01/z2ui5_cl_smp_app_493.clas.abap': src });
