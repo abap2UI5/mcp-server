@@ -541,14 +541,18 @@ share a tool name inside one server.
 
 ### Vendored code — `lib/vendor/`, `scripts/vendor-adaptive-cards.mjs`
 
-`lib/vendor/adaptive-cards/{render,mapping,submit}.mjs` are COPIES of
-abap2UI5/protocol `renderers/adaptive-cards/`, at the commit
+`lib/vendor/adaptive-cards/{render,mapping,submit}.mjs`, `common/{view,request}.mjs`
+and `profiles/portable-v1.json` are COPIES of abap2UI5/protocol
+`renderers/adaptive-cards/`, `renderers/common/` (the halves the protocol's
+renderers share) and the portable profile the view half reads, at the commit
 `lib/vendor/adaptive-cards/source.json` records, with the sha256 of each.
 Rules: never edit a copy - change it upstream and re-vendor (`node
 scripts/vendor-adaptive-cards.mjs /path/to/protocol --ref <commit>`); the only
-transformation is that the renderer's imports of the protocol repository's
-copies of OUR agent modules point back at `lib/` (a copy of a copy would be a
-second version of `viewxml`/`snapshot` in one process). `test/vendor.test.mjs`
+transformation is that relative paths point at the vendored folder and the
+renderer's imports of the protocol repository's copies of OUR agent modules
+point back at `lib/` (a copy of a copy would be a second version of
+`viewxml`/`snapshot` in one process); a path to anything else upstream fails
+the vendoring (extend `MODULES` / `DATA`). `test/vendor.test.mjs`
 fails offline on a hash mismatch, a missing header, an unrecorded file or an
 import into the protocol tree, and - with a protocol checkout that has the
 commit (`PROTOCOL_HOME` or `../protocol`) - when the copies differ from what

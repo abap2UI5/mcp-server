@@ -474,6 +474,15 @@ test('an act queued behind one in flight runs only where its ids still name what
   assert.deepEqual(sent, ['start', 'NEXT', 'DELETE_ALL', 'DELETE_ALL']);
 });
 
+test('evicting a session leaves a newer one with the same draft id reachable', async () => {
+  const xml = page('<Button text="Go" press=".eB([\'GO\'])"/>');
+  const transport = async () => ({ status: 200, body: JSON.stringify({ S_FRONT: { ID: 'D1', APP: 'Z_T', S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'display', 'MAIN', xml]] } } }) });
+  const client = createAppClient({ transport, maxSessions: 2, location: (app) => ({ origin: 'x', pathname: '/', search: `?app_start=${app}` }) });
+  let last;
+  for (let i = 0; i < 5; i += 1) last = await client.start('z_t');
+  assert.equal(client.describe(last.session).session, 'D1');
+});
+
 test('an event name without `row` fires the screen action of that name before a row action', async () => {
   const xml = page(
     '<Table items="{/T}"><columns><Column/></columns><items><ColumnListItem><cells><Button text="Del" press=".eB([\'DELETE\'], ${A})"/></cells></ColumnListItem></items></Table>'

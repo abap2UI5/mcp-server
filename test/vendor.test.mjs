@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { MODULES, SOURCE_RECORD, VENDOR_DIR, REPO, sha256, moduleHeader, build, committedFiles, drift } from '../scripts/vendor-adaptive-cards.mjs';
+import { MODULES, DATA, SOURCE_RECORD, VENDOR_DIR, REPO, sha256, moduleHeader, build, committedFiles, drift } from '../scripts/vendor-adaptive-cards.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RECORD = JSON.parse(fs.readFileSync(path.join(ROOT, SOURCE_RECORD), 'utf8'));
@@ -20,24 +20,31 @@ const RECORD = JSON.parse(fs.readFileSync(path.join(ROOT, SOURCE_RECORD), 'utf8'
 test('every vendored file matches the hash its record holds - no hand edits', () => {
   assert.equal(RECORD.repository, REPO);
   assert.match(RECORD.commit, /^[0-9a-f]{40}$/);
-  assert.deepEqual(Object.keys(RECORD.files).sort(), Object.values(MODULES).sort());
+  assert.deepEqual(Object.keys(RECORD.files).sort(), [...Object.values(MODULES), ...Object.values(DATA)].sort());
   for (const [file, { from, sha256: want }] of Object.entries(RECORD.files)) {
     const text = fs.readFileSync(path.join(ROOT, file), 'utf8');
     assert.equal(sha256(text), want, `${file} differs from what was vendored - change it upstream (${REPO} ${from}) and re-vendor`);
-    assert.ok(text.startsWith(moduleHeader(from, RECORD.commit)), `${file} must start with the header naming ${from} at ${RECORD.commit}`);
-    assert.equal(MODULES[from], file);
+    if (MODULES[from]) {
+      assert.ok(text.startsWith(moduleHeader(from, RECORD.commit)), `${file} must start with the header naming ${from} at ${RECORD.commit}`);
+      assert.equal(MODULES[from], file);
+    } else {
+      assert.equal(DATA[from], file);
+    }
   }
-  const listed = fs.readdirSync(path.join(ROOT, VENDOR_DIR)).map((f) => `${VENDOR_DIR}/${f}`).sort();
-  assert.deepEqual(listed, [...Object.values(MODULES), SOURCE_RECORD].sort(), 'nothing unrecorded lives in the vendor folder');
+  const listed = Object.keys(committedFiles(ROOT)).sort();
+  assert.deepEqual(listed, [...Object.values(MODULES), ...Object.values(DATA), SOURCE_RECORD].sort(), 'nothing unrecorded lives in the vendor folder');
 });
 
 test('the vendored renderer imports the agent modules from lib/, never a copy', () => {
   for (const file of Object.values(MODULES)) {
     const text = fs.readFileSync(path.join(ROOT, file), 'utf8');
-    const imports = [...text.matchAll(/^import[\s\S]*?from\s+"([^"]+)";/gm)].map((m) => m[1]);
+    const imports = [...text.matchAll(/^(?:import|export)[^;]*?from\s+"([^"]+)";/gm)].map((m) => m[1]);
+    const agent = new Set(['viewxml.mjs', 'snapshot.mjs', 'appclient.mjs'].map((f) => path.join(ROOT, 'lib', f)));
+    const vendored = new Set(Object.values(MODULES).map((f) => path.join(ROOT, f)));
     for (const spec of imports) {
-      assert.ok(/^\.\/(render|mapping|submit)\.mjs$/.test(spec) || /^\.\.\/\.\.\/(viewxml|snapshot|appclient)\.mjs$/.test(spec),
-        `${file} imports ${spec}`);
+      if (spec.startsWith('node:')) continue;
+      const target = path.resolve(path.dirname(path.join(ROOT, file)), spec);
+      assert.ok(agent.has(target) || vendored.has(target), `${file} imports ${spec}`);
     }
     assert.ok(!text.includes('conformance/'), `${file} still points into the protocol repository's tree`);
   }

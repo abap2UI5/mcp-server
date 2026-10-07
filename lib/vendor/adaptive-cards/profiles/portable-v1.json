@@ -1,0 +1,5116 @@
+{
+  "$schema": "../schema/portable-profile.schema.json",
+  "profile": "portable",
+  "version": 1,
+  "status": "normative - profiles/portable.md is the text this file is generated for",
+  "generatedFrom": "the portable-profile census (2026-10-03): @abap2ui5/linter 0.8.5 view reconstruction over abap2UI5/samples, samples-stack, the addons and real-world apps (247 core apps) and samples-controls (642 ports)",
+  "documentRoots": [
+    "sap.ui.core.mvc.View",
+    "sap.ui.core.FragmentDefinition"
+  ],
+  "slots": {
+    "required": [
+      "MAIN",
+      "POPUP",
+      "POPOVER"
+    ],
+    "notInV1": [
+      "NEST",
+      "NEST2"
+    ]
+  },
+  "namespaces": [
+    "sap.m",
+    "sap.ui.core",
+    "sap.ui.core.mvc",
+    "sap.ui.layout",
+    "sap.ui.layout.form",
+    "sap.tnt"
+  ],
+  "universalAttributes": [
+    "id",
+    "class",
+    "visible",
+    "tooltip",
+    "busy",
+    "busyIndicatorDelay",
+    "fieldGroupIds",
+    "binding",
+    "layoutData",
+    "customData",
+    "dependents"
+  ],
+  "cssHelperClassPattern": "^sapUi(Tiny|Small|Medium|Large)?(Margin|Padding)(Top|Bottom|Begin|End|BeginEnd|TopBottom)?$|^sapUiContentPadding$|^sapUiResponsiveMargin$|^sapUiNoMargin|^sapUiNoContentPadding$",
+  "controls": {
+    "sap.m.Page": {
+      "category": "Layout & containers",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 195,
+        "samplesControlsApps": 162
+      },
+      "properties": [
+        {
+          "name": "backgroundDesign",
+          "core": 0,
+          "controls": 6
+        },
+        {
+          "name": "enableScrolling",
+          "core": 0,
+          "controls": 23
+        },
+        {
+          "name": "showFooter",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "name": "showHeader",
+          "core": 5,
+          "controls": 120
+        },
+        {
+          "name": "showNavButton",
+          "core": 185,
+          "controls": 36
+        },
+        {
+          "name": "title",
+          "core": 188,
+          "controls": 42
+        },
+        {
+          "name": "titleLevel",
+          "core": 0,
+          "controls": 2
+        }
+      ],
+      "aggregations": [
+        {
+          "name": "customHeader",
+          "core": 2,
+          "controls": 34
+        },
+        {
+          "name": "footer",
+          "core": 10,
+          "controls": 30
+        },
+        {
+          "name": "headerContent",
+          "core": 7,
+          "controls": 4
+        },
+        {
+          "name": "subHeader",
+          "core": 1,
+          "controls": 13
+        }
+      ],
+      "defaultAggregation": "content",
+      "events": [
+        {
+          "name": "navButtonPress",
+          "core": 185,
+          "controls": 20
+        }
+      ],
+      "webComponent": "ui5-page (fiori) + ui5-bar in slot header/footer",
+      "fit": "adapt",
+      "mapping": "`ui5-page` has no title/nav button: build the header as `<ui5-bar slot=\"header\">` with `startContent` = `<ui5-button icon=\"nav-back\" design=\"Transparent\">` (only when `showNavButton`), default slot = `<ui5-title>` with `title`, `endContent` = `headerContent`. `customHeader` replaces that bar; `subHeader` = a second bar; `footer` (a Toolbar/OverflowToolbar/Bar) -> slot `footer` (`fixed-footer`). `showHeader=false` drops the bar, `enableScrolling=false` -> `no-scrolling`, `backgroundDesign` -> `background-design`. `navButtonPress` = click of the nav button.",
+      "notInV1": [
+        {
+          "kind": "aggregation",
+          "name": "landmarkInfo",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.m.Shell": {
+      "category": "Layout & containers",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 193,
+        "samplesControlsApps": 15
+      },
+      "properties": [],
+      "aggregations": [],
+      "defaultAggregation": "app",
+      "events": [],
+      "webComponent": "(none) - plain root <div>",
+      "fit": "compose",
+      "mapping": "App frame only. Render its single child full-height; `appWidthLimited` (default true) = centred max-width (~1280px) letterbox. Do NOT map to `ui5-shellbar` (that is a header bar, not a frame).",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "appWidthLimited",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.m.VBox": {
+      "category": "Layout & containers",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 72,
+        "samplesControlsApps": 194
+      },
+      "properties": [
+        {
+          "name": "alignItems",
+          "core": 2,
+          "controls": 15
+        },
+        {
+          "name": "height",
+          "core": 5,
+          "controls": 14
+        },
+        {
+          "name": "justifyContent",
+          "core": 4,
+          "controls": 14
+        },
+        {
+          "name": "renderType",
+          "core": 0,
+          "controls": 9
+        },
+        {
+          "name": "width",
+          "core": 2,
+          "controls": 8
+        },
+        {
+          "name": "wrap",
+          "core": 0,
+          "controls": 1
+        }
+      ],
+      "aggregations": [],
+      "defaultAggregation": "items",
+      "events": [],
+      "webComponent": "(none) - <div style=\"display:flex;flex-direction:column\">",
+      "fit": "compose",
+      "mapping": "`alignItems`/`justifyContent`/`wrap`/`width`/`height` are CSS flexbox one-to-one (Start->flex-start, End->flex-end, Center, Stretch, SpaceBetween->space-between, …). `renderType` ignored.",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "fitContainer",
+          "core": 0,
+          "controls": 4
+        },
+        {
+          "kind": "property",
+          "name": "backgroundDesign",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.ui.layout.form.SimpleForm": {
+      "category": "Layout & containers",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 70,
+        "samplesControlsApps": 115
+      },
+      "properties": [
+        {
+          "name": "adjustLabelSpan",
+          "core": 2,
+          "controls": 18
+        },
+        {
+          "name": "columnsL",
+          "core": 1,
+          "controls": 44
+        },
+        {
+          "name": "columnsM",
+          "core": 1,
+          "controls": 44
+        },
+        {
+          "name": "columnsXL",
+          "core": 1,
+          "controls": 24
+        },
+        {
+          "name": "editable",
+          "core": 65,
+          "controls": 110
+        },
+        {
+          "name": "emptySpanL",
+          "core": 0,
+          "controls": 50
+        },
+        {
+          "name": "emptySpanM",
+          "core": 0,
+          "controls": 50
+        },
+        {
+          "name": "emptySpanS",
+          "core": 0,
+          "controls": 29
+        },
+        {
+          "name": "emptySpanXL",
+          "core": 0,
+          "controls": 14
+        },
+        {
+          "name": "labelSpanL",
+          "core": 3,
+          "controls": 65
+        },
+        {
+          "name": "labelSpanM",
+          "core": 3,
+          "controls": 65
+        },
+        {
+          "name": "labelSpanS",
+          "core": 2,
+          "controls": 41
+        },
+        {
+          "name": "labelSpanXL",
+          "core": 2,
+          "controls": 24
+        },
+        {
+          "name": "layout",
+          "core": 11,
+          "controls": 112
+        },
+        {
+          "name": "maxContainerCols",
+          "core": 0,
+          "controls": 30
+        },
+        {
+          "name": "singleContainerFullSize",
+          "core": 0,
+          "controls": 15
+        },
+        {
+          "name": "width",
+          "core": 0,
+          "controls": 32
+        }
+      ],
+      "aggregations": [
+        {
+          "name": "title",
+          "core": 53,
+          "controls": 45
+        }
+      ],
+      "defaultAggregation": "content",
+      "events": [],
+      "webComponent": "ui5-form + ui5-form-group + ui5-form-item",
+      "fit": "adapt",
+      "mapping": "SimpleForm content is a FLAT sequence; the renderer must group it: a `core:Title` (or `Toolbar`/`Title`) opens a new `<ui5-form-group header-text>`; each `Label` opens a new `<ui5-form-item>` (the label goes to slot `labelContent`) and every following field until the next Label/Title goes to the item's default slot. `labelSpanXL/L/M/S` -> `label-span=\"S12 M4 L4 XL4\"` (same notation), `emptySpan*` -> `empty-span`, `columnsXL/L/M` -> `layout=\"S1 M1 L2 XL2\"`, `title` aggregation -> `header-text`. `layout`/`adjustLabelSpan`/`singleContainerFullSize`/`maxContainerCols` ignored. `editable` only changes label/field density in UI5 - no WC counterpart (ignore).",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "backgroundDesign",
+          "core": 0,
+          "controls": 5
+        },
+        {
+          "kind": "aggregation",
+          "name": "toolbar",
+          "core": 0,
+          "controls": 3
+        },
+        {
+          "kind": "event",
+          "name": "validateFieldGroup",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.m.HBox": {
+      "category": "Layout & containers",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 35,
+        "samplesControlsApps": 64
+      },
+      "properties": [
+        {
+          "name": "alignItems",
+          "core": 12,
+          "controls": 25
+        },
+        {
+          "name": "height",
+          "core": 0,
+          "controls": 4
+        },
+        {
+          "name": "justifyContent",
+          "core": 1,
+          "controls": 18
+        },
+        {
+          "name": "renderType",
+          "core": 0,
+          "controls": 13
+        },
+        {
+          "name": "width",
+          "core": 0,
+          "controls": 7
+        },
+        {
+          "name": "wrap",
+          "core": 7,
+          "controls": 2
+        }
+      ],
+      "aggregations": [],
+      "defaultAggregation": "items",
+      "events": [],
+      "webComponent": "(none) - <div style=\"display:flex\">",
+      "fit": "compose",
+      "mapping": "As VBox, row direction. `wrap=\"Wrap\"` -> `flex-wrap:wrap`.",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "backgroundDesign",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "kind": "property",
+          "name": "fitContainer",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.m.Panel": {
+      "category": "Layout & containers",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 15,
+        "samplesControlsApps": 71
+      },
+      "properties": [
+        {
+          "name": "backgroundDesign",
+          "core": 0,
+          "controls": 14
+        },
+        {
+          "name": "expandable",
+          "core": 4,
+          "controls": 5
+        },
+        {
+          "name": "expanded",
+          "core": 3,
+          "controls": 4
+        },
+        {
+          "name": "headerText",
+          "core": 14,
+          "controls": 28
+        },
+        {
+          "name": "height",
+          "core": 0,
+          "controls": 13
+        },
+        {
+          "name": "stickyHeader",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "width",
+          "core": 5,
+          "controls": 36
+        }
+      ],
+      "aggregations": [
+        {
+          "name": "headerToolbar",
+          "core": 0,
+          "controls": 21
+        }
+      ],
+      "defaultAggregation": "content",
+      "events": [
+        {
+          "name": "expand",
+          "core": 0,
+          "controls": 1
+        }
+      ],
+      "webComponent": "ui5-panel",
+      "fit": "adapt",
+      "mapping": "`headerText` -> `header-text`; UI5 panels are NOT collapsible by default, WC panels are: set `fixed` unless `expandable=true`; `expanded` -> `!collapsed`; `headerToolbar` -> slot `header`; `width`/`height` CSS; `expand` <- `toggle` (`$parameters>/expand` = `!collapsed`). `backgroundDesign` -> CSS only.",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "accessibleRole",
+          "core": 0,
+          "controls": 2
+        }
+      ]
+    },
+    "sap.ui.layout.Grid": {
+      "category": "Layout & containers",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 13,
+        "samplesControlsApps": 26
+      },
+      "properties": [
+        {
+          "name": "defaultSpan",
+          "core": 11,
+          "controls": 25
+        },
+        {
+          "name": "hSpacing",
+          "core": 0,
+          "controls": 17
+        },
+        {
+          "name": "width",
+          "core": 0,
+          "controls": 11
+        }
+      ],
+      "aggregations": [],
+      "defaultAggregation": "content",
+      "events": [],
+      "webComponent": "(none) - CSS grid, 12 columns",
+      "fit": "compose",
+      "mapping": "`defaultSpan=\"XL3 L3 M6 S12\"` -> per-breakpoint `grid-column: span n` (UI5 breakpoints S<600, M<1024, L<1440, XL); children may carry `GridData span/linebreak/indent` (tolerated). `hSpacing`/`vSpacing` (rem) -> `column-gap`/`row-gap`.",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "containerQuery",
+          "core": 0,
+          "controls": 3
+        },
+        {
+          "kind": "property",
+          "name": "defaultIndent",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "kind": "property",
+          "name": "vSpacing",
+          "core": 0,
+          "controls": 5
+        },
+        {
+          "kind": "property",
+          "name": "position",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.m.FlexBox": {
+      "category": "Layout & containers",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 7,
+        "samplesControlsApps": 54
+      },
+      "properties": [
+        {
+          "name": "alignItems",
+          "core": 5,
+          "controls": 36
+        },
+        {
+          "name": "columnGap",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "direction",
+          "core": 1,
+          "controls": 12
+        },
+        {
+          "name": "fitContainer",
+          "core": 0,
+          "controls": 25
+        },
+        {
+          "name": "gap",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "height",
+          "core": 2,
+          "controls": 7
+        },
+        {
+          "name": "justifyContent",
+          "core": 3,
+          "controls": 12
+        },
+        {
+          "name": "renderType",
+          "core": 1,
+          "controls": 5
+        },
+        {
+          "name": "rowGap",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "width",
+          "core": 1,
+          "controls": 5
+        },
+        {
+          "name": "wrap",
+          "core": 1,
+          "controls": 25
+        }
+      ],
+      "aggregations": [],
+      "defaultAggregation": "items",
+      "events": [],
+      "webComponent": "(none) - flex <div>",
+      "fit": "compose",
+      "mapping": "`direction` (Row/Column/RowReverse/ColumnReverse) -> `flex-direction`; `fitContainer` -> height:100%; `gap`/`rowGap`/`columnGap` -> CSS gap.",
+      "notInV1": []
+    },
+    "sap.m.ScrollContainer": {
+      "category": "Layout & containers",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 4,
+        "samplesControlsApps": 24
+      },
+      "properties": [
+        {
+          "name": "height",
+          "core": 4,
+          "controls": 20
+        },
+        {
+          "name": "horizontal",
+          "core": 1,
+          "controls": 15
+        },
+        {
+          "name": "vertical",
+          "core": 4,
+          "controls": 22
+        },
+        {
+          "name": "width",
+          "core": 0,
+          "controls": 12
+        }
+      ],
+      "aggregations": [],
+      "defaultAggregation": "content",
+      "events": [],
+      "webComponent": "(none) - <div style=\"overflow:auto\">",
+      "fit": "compose",
+      "mapping": "`vertical`/`horizontal` -> `overflow-y`/`overflow-x` (UI5 default: horizontal true, vertical false); `width`/`height` CSS. SCROLL_TO / SCROLL_INTO_VIEW actions address it by id.",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "focusable",
+          "core": 0,
+          "controls": 2
+        }
+      ]
+    },
+    "sap.m.IconTabFilter": {
+      "category": "Layout & containers",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 4,
+        "samplesControlsApps": 35
+      },
+      "properties": [
+        {
+          "name": "count",
+          "core": 0,
+          "controls": 17
+        },
+        {
+          "name": "design",
+          "core": 0,
+          "controls": 3
+        },
+        {
+          "name": "enabled",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "icon",
+          "core": 2,
+          "controls": 16
+        },
+        {
+          "name": "iconColor",
+          "core": 0,
+          "controls": 9
+        },
+        {
+          "name": "key",
+          "core": 4,
+          "controls": 32
+        },
+        {
+          "name": "text",
+          "core": 4,
+          "controls": 29
+        }
+      ],
+      "aggregations": [],
+      "defaultAggregation": "content",
+      "events": [],
+      "webComponent": "ui5-tab",
+      "fit": "adapt",
+      "mapping": "`text`, `icon` (sap-icon://x -> `icon=\"x\"`), `key` -> keep as `data-key` (WC tabs have no key), `count` -> `additional-text`, `enabled=false` -> `disabled`, `design` -> `design`, content -> default slot. `iconColor` (Positive/Critical/Negative) -> tab `design`.",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "showAll",
+          "core": 0,
+          "controls": 7
+        },
+        {
+          "kind": "aggregation",
+          "name": "items",
+          "core": 0,
+          "controls": 5
+        },
+        {
+          "kind": "property",
+          "name": "interactionMode",
+          "core": 0,
+          "controls": 3
+        }
+      ]
+    },
+    "sap.m.IconTabBar": {
+      "category": "Layout & containers",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 3,
+        "samplesControlsApps": 30
+      },
+      "properties": [
+        {
+          "name": "applyContentPadding",
+          "core": 1,
+          "controls": 2
+        },
+        {
+          "name": "expandable",
+          "core": 2,
+          "controls": 2
+        },
+        {
+          "name": "expanded",
+          "core": 2,
+          "controls": 9
+        },
+        {
+          "name": "headerBackgroundDesign",
+          "core": 0,
+          "controls": 3
+        },
+        {
+          "name": "headerMode",
+          "core": 1,
+          "controls": 4
+        },
+        {
+          "name": "selectedKey",
+          "core": 2,
+          "controls": 8
+        }
+      ],
+      "aggregations": [
+        {
+          "name": "content",
+          "core": 1,
+          "controls": 7
+        },
+        {
+          "name": "items",
+          "core": 3,
+          "controls": 30
+        }
+      ],
+      "events": [
+        {
+          "name": "select",
+          "core": 2,
+          "controls": 6
+        }
+      ],
+      "webComponent": "ui5-tabcontainer",
+      "fit": "adapt",
+      "mapping": "`items` -> tabs; `selectedKey` (two-way) -> `selected` on the tab whose key matches, written back on `tab-select`; `select` <- `tab-select` with `$parameters>/key` and `$parameters>/selectedKey` = the tab's key; `expandable`/`expanded` -> `collapsed`; `headerBackgroundDesign` -> `header-background-design`. The IconTabBar-level `content` aggregation (shared content) has no slot: render it below the tab strip.",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "backgroundDesign",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "kind": "property",
+          "name": "stretchContentHeight",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "kind": "property",
+          "name": "upperCase",
+          "core": 0,
+          "controls": 5
+        },
+        {
+          "kind": "property",
+          "name": "enableTabReordering",
+          "core": 0,
+          "controls": 3
+        },
+        {
+          "kind": "property",
+          "name": "tabDensityMode",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "kind": "property",
+          "name": "tabsOverflowMode",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "maxNestingLevel",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.ui.layout.VerticalLayout": {
+      "category": "Layout & containers",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 2,
+        "samplesControlsApps": 174
+      },
+      "properties": [
+        {
+          "name": "width",
+          "core": 2,
+          "controls": 110
+        }
+      ],
+      "aggregations": [],
+      "defaultAggregation": "content",
+      "events": [],
+      "webComponent": "(none) - block <div>",
+      "fit": "compose",
+      "mapping": "Children stacked; `width` CSS.",
+      "notInV1": []
+    },
+    "sap.ui.core.Title": {
+      "category": "Layout & containers",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 1,
+        "samplesControlsApps": 55
+      },
+      "properties": [
+        {
+          "name": "text",
+          "core": 1,
+          "controls": 55
+        }
+      ],
+      "aggregations": [],
+      "events": [],
+      "webComponent": "group header of ui5-form-group (inside forms); ui5-title elsewhere",
+      "fit": "adapt",
+      "mapping": "Only `text` is used (and `level`). Inside SimpleForm it is a group separator, not a visible control of its own.",
+      "notInV1": []
+    },
+    "sap.ui.layout.HorizontalLayout": {
+      "category": "Layout & containers",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 0,
+        "samplesControlsApps": 52
+      },
+      "properties": [
+        {
+          "name": "allowWrapping",
+          "core": 0,
+          "controls": 12
+        }
+      ],
+      "aggregations": [],
+      "defaultAggregation": "content",
+      "events": [],
+      "webComponent": "(none) - inline-flex <div>",
+      "fit": "compose",
+      "mapping": "`allowWrapping` -> `flex-wrap`.",
+      "notInV1": []
+    },
+    "sap.m.OverflowToolbar": {
+      "category": "Toolbars & bars",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 43,
+        "samplesControlsApps": 113
+      },
+      "properties": [
+        {
+          "name": "height",
+          "core": 0,
+          "controls": 12
+        },
+        {
+          "name": "style",
+          "core": 0,
+          "controls": 22
+        }
+      ],
+      "aggregations": [],
+      "defaultAggregation": "content",
+      "events": [],
+      "webComponent": "ui5-toolbar",
+      "fit": "adapt",
+      "mapping": "Toolbar children must be toolbar items: Button/OverflowToolbarButton -> `ui5-toolbar-button`, ToolbarSpacer -> `ui5-toolbar-spacer`, Select -> `ui5-toolbar-select`/`ui5-toolbar-select-option`, anything else (Title, Label, Input, SearchField, SegmentedButton, …) wrapped in `ui5-toolbar-item`. `style=\"Clear\"`/`design=\"Transparent\"` -> `design=\"Transparent\"`. `OverflowToolbarLayoutData priority` -> `overflow-priority` (NeverOverflow -> `NeverOverflow`, AlwaysOverflow -> `AlwaysOverflow`).",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "active",
+          "core": 0,
+          "controls": 3
+        },
+        {
+          "kind": "event",
+          "name": "press",
+          "core": 0,
+          "controls": 3
+        },
+        {
+          "kind": "property",
+          "name": "design",
+          "core": 0,
+          "controls": 4
+        },
+        {
+          "kind": "property",
+          "name": "enabled",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "width",
+          "core": 0,
+          "controls": 5
+        },
+        {
+          "kind": "property",
+          "name": "ariaHasPopup",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.m.ToolbarSpacer": {
+      "category": "Toolbars & bars",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 37,
+        "samplesControlsApps": 117
+      },
+      "properties": [
+        {
+          "name": "width",
+          "core": 1,
+          "controls": 5
+        }
+      ],
+      "aggregations": [],
+      "events": [],
+      "webComponent": "ui5-toolbar-spacer",
+      "fit": "direct",
+      "mapping": "`width` -> `width` (fixed spacer); without width it is the flexible spacer. Outside a `ui5-toolbar` (e.g. in `ui5-bar`) use a `flex:1` div.",
+      "notInV1": []
+    },
+    "sap.m.Toolbar": {
+      "category": "Toolbars & bars",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 16,
+        "samplesControlsApps": 55
+      },
+      "properties": [
+        {
+          "name": "height",
+          "core": 0,
+          "controls": 12
+        },
+        {
+          "name": "style",
+          "core": 1,
+          "controls": 0
+        }
+      ],
+      "aggregations": [],
+      "defaultAggregation": "content",
+      "events": [],
+      "webComponent": "ui5-toolbar (or ui5-bar)",
+      "fit": "adapt",
+      "mapping": "Same mapping as OverflowToolbar. Most uses are the `headerToolbar` of a Table/List/Panel (Title + Spacer + Buttons).",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "width",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "design",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "active",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.m.Bar": {
+      "category": "Toolbars & bars",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 2,
+        "samplesControlsApps": 40
+      },
+      "properties": [],
+      "aggregations": [
+        {
+          "name": "contentLeft",
+          "core": 2,
+          "controls": 9
+        },
+        {
+          "name": "contentMiddle",
+          "core": 0,
+          "controls": 9
+        },
+        {
+          "name": "contentRight",
+          "core": 2,
+          "controls": 34
+        }
+      ],
+      "events": [],
+      "webComponent": "ui5-bar",
+      "fit": "direct",
+      "mapping": "`contentLeft` -> slot `startContent`, `contentMiddle` -> default slot, `contentRight` -> slot `endContent`; `design` (Header/SubHeader/Footer) -> `design`.",
+      "notInV1": []
+    },
+    "sap.m.OverflowToolbarButton": {
+      "category": "Toolbars & bars",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 2,
+        "samplesControlsApps": 37
+      },
+      "properties": [
+        {
+          "name": "enabled",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "icon",
+          "core": 2,
+          "controls": 37
+        },
+        {
+          "name": "text",
+          "core": 2,
+          "controls": 31
+        },
+        {
+          "name": "type",
+          "core": 0,
+          "controls": 30
+        }
+      ],
+      "aggregations": [],
+      "events": [
+        {
+          "name": "press",
+          "core": 2,
+          "controls": 12
+        }
+      ],
+      "webComponent": "ui5-toolbar-button",
+      "fit": "direct",
+      "mapping": "Icon-only in the bar, text shown in the overflow -> `show-overflow-text` + `text`; `type` -> `design` (as Button); `press` <- `click`.",
+      "notInV1": []
+    },
+    "sap.m.Text": {
+      "category": "Display",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 115,
+        "samplesControlsApps": 310
+      },
+      "properties": [
+        {
+          "name": "emptyIndicatorMode",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "maxLines",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "renderWhitespace",
+          "core": 1,
+          "controls": 2
+        },
+        {
+          "name": "text",
+          "core": 102,
+          "controls": 307
+        },
+        {
+          "name": "textAlign",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "width",
+          "core": 1,
+          "controls": 14
+        },
+        {
+          "name": "wrapping",
+          "core": 1,
+          "controls": 42
+        }
+      ],
+      "aggregations": [],
+      "events": [],
+      "webComponent": "ui5-text",
+      "fit": "direct",
+      "mapping": "`text` -> text content; `wrapping=false` -> `max-lines=\"1\"`; `maxLines` -> `max-lines`; `renderWhitespace` -> CSS `white-space:pre-wrap`; `emptyIndicatorMode` -> `empty-indicator-mode`; `textAlign`/`width` CSS.",
+      "notInV1": []
+    },
+    "sap.m.Label": {
+      "category": "Display",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 86,
+        "samplesControlsApps": 286
+      },
+      "properties": [
+        {
+          "name": "design",
+          "core": 0,
+          "controls": 8
+        },
+        {
+          "name": "required",
+          "core": 2,
+          "controls": 8
+        },
+        {
+          "name": "showColon",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "text",
+          "core": 76,
+          "controls": 285
+        },
+        {
+          "name": "textAlign",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "width",
+          "core": 1,
+          "controls": 9
+        },
+        {
+          "name": "wrapping",
+          "core": 0,
+          "controls": 17
+        }
+      ],
+      "aggregations": [],
+      "events": [],
+      "webComponent": "ui5-label",
+      "fit": "direct",
+      "mapping": "`text`, `required`, `showColon` -> `show-colon`, `wrapping` -> `wrapping-type`, `labelFor` -> `for` (needs the target's DOM id); `design=\"Bold\"`/`width`/`textAlign` CSS.",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "displayOnly",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "kind": "property",
+          "name": "wrappingType",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.m.Title": {
+      "category": "Display",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 58,
+        "samplesControlsApps": 181
+      },
+      "properties": [
+        {
+          "name": "level",
+          "core": 10,
+          "controls": 53
+        },
+        {
+          "name": "text",
+          "core": 51,
+          "controls": 178
+        },
+        {
+          "name": "textAlign",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "titleStyle",
+          "core": 0,
+          "controls": 25
+        },
+        {
+          "name": "wrapping",
+          "core": 1,
+          "controls": 43
+        }
+      ],
+      "aggregations": [],
+      "defaultAggregation": "content",
+      "events": [],
+      "webComponent": "ui5-title",
+      "fit": "direct",
+      "mapping": "`text` -> text content; `level` (H1..H6, Auto) -> `level`; `titleStyle` -> `size`; `wrapping=true` -> `wrapping-type=\"Normal\"`. A Title with a `content` child (link) renders that child inside.",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "wrappingType",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.m.ObjectStatus": {
+      "category": "Display",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 17,
+        "samplesControlsApps": 51
+      },
+      "properties": [
+        {
+          "name": "active",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "name": "icon",
+          "core": 2,
+          "controls": 6
+        },
+        {
+          "name": "inverted",
+          "core": 0,
+          "controls": 3
+        },
+        {
+          "name": "state",
+          "core": 11,
+          "controls": 50
+        },
+        {
+          "name": "text",
+          "core": 16,
+          "controls": 51
+        },
+        {
+          "name": "title",
+          "core": 6,
+          "controls": 18
+        }
+      ],
+      "aggregations": [],
+      "events": [
+        {
+          "name": "press",
+          "core": 0,
+          "controls": 1
+        }
+      ],
+      "webComponent": "ui5-tag (non-interactive) or styled text",
+      "fit": "adapt",
+      "mapping": "No exact counterpart. `state` None/Success/Warning/Error/Information/IndicationNN -> `ui5-tag design` Neutral/Positive/Critical/Negative/Information/Set1..(color-scheme) - BUT a tag renders as a pill; apps expect coloured text (+ icon). Recommended: `<span>` with theming colour vars (`--sapPositiveTextColor`, …) + optional `ui5-icon`; use `ui5-tag` only for `inverted=true`. `title` -> \"title: \" prefix; `active`/`press` -> `ui5-tag interactive` + `click`.",
+      "notInV1": []
+    },
+    "sap.m.Link": {
+      "category": "Display",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 14,
+        "samplesControlsApps": 94
+      },
+      "properties": [
+        {
+          "name": "emphasized",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "name": "enabled",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "endIcon",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "href",
+          "core": 11,
+          "controls": 45
+        },
+        {
+          "name": "icon",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "target",
+          "core": 13,
+          "controls": 31
+        },
+        {
+          "name": "text",
+          "core": 12,
+          "controls": 93
+        },
+        {
+          "name": "wrapping",
+          "core": 0,
+          "controls": 1
+        }
+      ],
+      "aggregations": [],
+      "events": [
+        {
+          "name": "press",
+          "core": 3,
+          "controls": 35
+        }
+      ],
+      "webComponent": "ui5-link",
+      "fit": "direct",
+      "mapping": "`text` -> text content, `href`, `target`, `enabled=false` -> `disabled`, `emphasized` -> `design=\"Emphasized\"`, `subtle` -> `design=\"Subtle\"`, `wrapping` -> `wrapping-type`, `icon`/`endIcon` -> `icon`/`end-icon`; `press` <- `click` (do not navigate when a press wire is set and no href).",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "subtle",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "ariaHasPopup",
+          "core": 0,
+          "controls": 5
+        }
+      ]
+    },
+    "sap.m.ObjectIdentifier": {
+      "category": "Display",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 7,
+        "samplesControlsApps": 50
+      },
+      "properties": [
+        {
+          "name": "text",
+          "core": 7,
+          "controls": 45
+        },
+        {
+          "name": "title",
+          "core": 1,
+          "controls": 47
+        },
+        {
+          "name": "titleActive",
+          "core": 0,
+          "controls": 3
+        }
+      ],
+      "aggregations": [],
+      "events": [
+        {
+          "name": "titlePress",
+          "core": 0,
+          "controls": 3
+        }
+      ],
+      "webComponent": "(none) - ui5-title/ui5-link + ui5-text",
+      "fit": "compose",
+      "mapping": "Two lines: `title` (bold; `ui5-link` when `titleActive`, firing `titlePress`) and `text` (secondary).",
+      "notInV1": []
+    },
+    "sap.ui.core.HTML": {
+      "category": "Display",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 7,
+        "samplesControlsApps": 60
+      },
+      "properties": [
+        {
+          "name": "content",
+          "core": 5,
+          "controls": 60
+        }
+      ],
+      "aggregations": [],
+      "events": [],
+      "webComponent": "(none) - raw HTML in a <div>",
+      "fit": "compose",
+      "mapping": "`content` is injected as HTML. Used for (a) custom `<style>` blocks (CSS classes for `class=` attributes - note selectors written against UI5 DOM such as `.sapMInputBaseInner` will not match WC shadow DOM) and (b) small static markup. Must be sanitized/CSP-checked by the renderer (`sanitizeContent`).",
+      "notInV1": []
+    },
+    "sap.ui.core.Icon": {
+      "category": "Display",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 6,
+        "samplesControlsApps": 18
+      },
+      "properties": [
+        {
+          "name": "alt",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "color",
+          "core": 1,
+          "controls": 3
+        },
+        {
+          "name": "size",
+          "core": 5,
+          "controls": 6
+        },
+        {
+          "name": "src",
+          "core": 5,
+          "controls": 17
+        },
+        {
+          "name": "width",
+          "core": 0,
+          "controls": 1
+        }
+      ],
+      "aggregations": [],
+      "events": [
+        {
+          "name": "press",
+          "core": 1,
+          "controls": 1
+        }
+      ],
+      "webComponent": "ui5-icon",
+      "fit": "adapt",
+      "mapping": "`src=\"sap-icon://name\"` -> `name=\"name\"` (icon names are shared with `@ui5/webcomponents-icons`; `sap-icon://tnt/...`/`businessSuiteInAppSymbols/...` -> `tnt/...`/`business-suite/...` and the matching icon package); `size` -> CSS `font-size`/width/height; `color` -> CSS colour or semantic (`Positive`/`Negative`/`Critical`/`Neutral`) -> `design`; `press` -> `mode=\"Interactive\"` + `click`; `alt` -> `accessible-name`.",
+      "notInV1": []
+    },
+    "sap.m.ObjectNumber": {
+      "category": "Display",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 5,
+        "samplesControlsApps": 50
+      },
+      "properties": [
+        {
+          "name": "emphasized",
+          "core": 0,
+          "controls": 14
+        },
+        {
+          "name": "number",
+          "core": 5,
+          "controls": 50
+        },
+        {
+          "name": "state",
+          "core": 2,
+          "controls": 29
+        },
+        {
+          "name": "unit",
+          "core": 3,
+          "controls": 49
+        }
+      ],
+      "aggregations": [],
+      "events": [],
+      "webComponent": "(none) - composed <span>",
+      "fit": "compose",
+      "mapping": "`number` + `unit` (unit in smaller text), `emphasized` -> bold, `state` -> theming colour var as ObjectStatus, `textAlign` CSS. Number formatting comes from the binding type, not the control.",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "active",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "inverted",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "event",
+          "name": "press",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "textAlign",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.tnt.InfoLabel": {
+      "category": "Display",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 4,
+        "samplesControlsApps": 4
+      },
+      "properties": [
+        {
+          "name": "colorScheme",
+          "core": 2,
+          "controls": 3
+        },
+        {
+          "name": "icon",
+          "core": 1,
+          "controls": 1
+        },
+        {
+          "name": "text",
+          "core": 4,
+          "controls": 4
+        }
+      ],
+      "aggregations": [],
+      "events": [],
+      "webComponent": "ui5-tag",
+      "fit": "direct",
+      "mapping": "`text` -> text content, `colorScheme` 1..10 -> `color-scheme`, `icon` -> `<ui5-icon slot=\"icon\">`, `displayOnly` -> no padding (CSS); `design=\"Set2\"` style default.",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "displayOnly",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "kind": "property",
+          "name": "renderMode",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "width",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.m.ProgressIndicator": {
+      "category": "Display",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 3,
+        "samplesControlsApps": 21
+      },
+      "properties": [
+        {
+          "name": "displayOnly",
+          "core": 0,
+          "controls": 4
+        },
+        {
+          "name": "displayValue",
+          "core": 3,
+          "controls": 19
+        },
+        {
+          "name": "percentValue",
+          "core": 3,
+          "controls": 21
+        },
+        {
+          "name": "showValue",
+          "core": 3,
+          "controls": 7
+        },
+        {
+          "name": "state",
+          "core": 3,
+          "controls": 9
+        },
+        {
+          "name": "width",
+          "core": 0,
+          "controls": 1
+        }
+      ],
+      "aggregations": [],
+      "events": [],
+      "webComponent": "ui5-progress-indicator",
+      "fit": "direct",
+      "mapping": "`percentValue` -> `value`, `displayValue` -> `display-value`, `showValue=false` -> `hide-value`, `state` Success/Error/Warning/Information -> `value-state` Positive/Negative/Critical/Information, `width` CSS.",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "displayAnimation",
+          "core": 0,
+          "controls": 2
+        }
+      ]
+    },
+    "sap.m.Image": {
+      "category": "Display",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 2,
+        "samplesControlsApps": 51
+      },
+      "properties": [
+        {
+          "name": "alt",
+          "core": 0,
+          "controls": 6
+        },
+        {
+          "name": "decorative",
+          "core": 0,
+          "controls": 6
+        },
+        {
+          "name": "densityAware",
+          "core": 0,
+          "controls": 15
+        },
+        {
+          "name": "height",
+          "core": 1,
+          "controls": 11
+        },
+        {
+          "name": "src",
+          "core": 2,
+          "controls": 49
+        },
+        {
+          "name": "width",
+          "core": 1,
+          "controls": 26
+        }
+      ],
+      "aggregations": [],
+      "events": [],
+      "webComponent": "(none) - <img>",
+      "fit": "compose",
+      "mapping": "`src`, `width`, `height`, `alt`, `decorative` -> `alt=\"\"`; `densityAware` ignored. (`ui5-avatar` only for avatar-like images.)",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "backgroundPosition",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "backgroundRepeat",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "backgroundSize",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "mode",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "kind": "aggregation",
+          "name": "detailBox",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "kind": "event",
+          "name": "press",
+          "core": 0,
+          "controls": 5
+        },
+        {
+          "kind": "event",
+          "name": "error",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "event",
+          "name": "load",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.m.Input": {
+      "category": "Input",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 87,
+        "samplesControlsApps": 117
+      },
+      "properties": [
+        {
+          "name": "description",
+          "core": 3,
+          "controls": 10
+        },
+        {
+          "name": "editable",
+          "core": 7,
+          "controls": 1
+        },
+        {
+          "name": "enabled",
+          "core": 17,
+          "controls": 1
+        },
+        {
+          "name": "maxLength",
+          "core": 4,
+          "controls": 2
+        },
+        {
+          "name": "placeholder",
+          "core": 14,
+          "controls": 39
+        },
+        {
+          "name": "showClearIcon",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "name": "showSuggestion",
+          "core": 1,
+          "controls": 12
+        },
+        {
+          "name": "showValueHelp",
+          "core": 8,
+          "controls": 8
+        },
+        {
+          "name": "type",
+          "core": 8,
+          "controls": 41
+        },
+        {
+          "name": "value",
+          "core": 81,
+          "controls": 96
+        },
+        {
+          "name": "valueLiveUpdate",
+          "core": 0,
+          "controls": 6
+        },
+        {
+          "name": "valueState",
+          "core": 1,
+          "controls": 6
+        },
+        {
+          "name": "valueStateText",
+          "core": 1,
+          "controls": 6
+        },
+        {
+          "name": "width",
+          "core": 12,
+          "controls": 26
+        }
+      ],
+      "aggregations": [
+        {
+          "name": "suggestionItems",
+          "core": 1,
+          "controls": 10
+        }
+      ],
+      "events": [
+        {
+          "name": "change",
+          "core": 0,
+          "controls": 10
+        },
+        {
+          "name": "liveChange",
+          "core": 1,
+          "controls": 7
+        },
+        {
+          "name": "submit",
+          "core": 12,
+          "controls": 1
+        },
+        {
+          "name": "suggestionItemSelected",
+          "core": 0,
+          "controls": 3
+        },
+        {
+          "name": "valueHelpRequest",
+          "core": 4,
+          "controls": 8
+        }
+      ],
+      "webComponent": "ui5-input",
+      "fit": "adapt",
+      "mapping": "`value` (two-way: update model on `change`, and on `input` when `valueLiveUpdate=true`), `placeholder`, `enabled=false` -> `disabled`, `editable=false` -> `readonly`, `type` Text/Email/Number/Password/Tel/Url -> `type` (Url -> URL), `maxLength` -> `maxlength`, `required`, `showClearIcon` -> `show-clear-icon`, `valueState` None/Error/Warning/Success/Information -> None/Negative/Critical/Positive/Information, `valueStateText` -> `<div slot=\"valueStateMessage\">`, `width` CSS. `showValueHelp` -> `<ui5-icon slot=\"icon\" name=\"value-help\" mode=\"Interactive\">` whose click fires `valueHelpRequest`. `showSuggestion` + `suggestionItems` (core:Item/ListItem) -> `show-suggestions` + `ui5-suggestion-item text/additional-text`. `description` has no slot: render a `ui5-text` after the field. Events: `change` <- `change`, `liveChange` <- `input` (`$parameters>/value` = current value), `submit` <- Enter keydown (WC has no submit event; `change` also fires on Enter), `suggestionItemSelected` <- `selection-change`.",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "fieldWidth",
+          "core": 0,
+          "controls": 3
+        },
+        {
+          "kind": "event",
+          "name": "suggest",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "kind": "property",
+          "name": "showTableSuggestionValueHelp",
+          "core": 0,
+          "controls": 3
+        },
+        {
+          "kind": "property",
+          "name": "textFormatMode",
+          "core": 0,
+          "controls": 3
+        },
+        {
+          "kind": "aggregation",
+          "name": "suggestionColumns",
+          "core": 0,
+          "controls": 3
+        },
+        {
+          "kind": "aggregation",
+          "name": "suggestionRows",
+          "core": 0,
+          "controls": 3
+        },
+        {
+          "kind": "property",
+          "name": "autocomplete",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "kind": "property",
+          "name": "selectedKey",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "aggregation",
+          "name": "formattedValueStateText",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "required",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "kind": "property",
+          "name": "valueHelpIconSrc",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "enableTableAutoPopinMode",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.m.TextArea": {
+      "category": "Input",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 12,
+        "samplesControlsApps": 17
+      },
+      "properties": [
+        {
+          "name": "editable",
+          "core": 6,
+          "controls": 0
+        },
+        {
+          "name": "growing",
+          "core": 3,
+          "controls": 1
+        },
+        {
+          "name": "growingMaxLines",
+          "core": 2,
+          "controls": 1
+        },
+        {
+          "name": "maxLength",
+          "core": 0,
+          "controls": 3
+        },
+        {
+          "name": "placeholder",
+          "core": 3,
+          "controls": 8
+        },
+        {
+          "name": "rows",
+          "core": 9,
+          "controls": 11
+        },
+        {
+          "name": "showExceededText",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "value",
+          "core": 11,
+          "controls": 13
+        },
+        {
+          "name": "valueLiveUpdate",
+          "core": 2,
+          "controls": 3
+        },
+        {
+          "name": "valueState",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "name": "width",
+          "core": 10,
+          "controls": 8
+        },
+        {
+          "name": "wrapping",
+          "core": 1,
+          "controls": 0
+        }
+      ],
+      "aggregations": [],
+      "events": [
+        {
+          "name": "liveChange",
+          "core": 0,
+          "controls": 1
+        }
+      ],
+      "webComponent": "ui5-textarea",
+      "fit": "direct",
+      "mapping": "`value` (two-way; `valueLiveUpdate` as Input), `rows`, `placeholder`, `growing`, `growingMaxLines` -> `growing-max-rows`, `maxLength` -> `maxlength`, `showExceededText` -> `show-exceeded-text`, `editable=false` -> `readonly`, `valueState`, `width` CSS; `wrapping` ignored; `liveChange` <- `input`.",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "cols",
+          "core": 0,
+          "controls": 2
+        }
+      ]
+    },
+    "sap.ui.core.Item": {
+      "category": "Input",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 12,
+        "samplesControlsApps": 132
+      },
+      "properties": [
+        {
+          "name": "key",
+          "core": 12,
+          "controls": 127
+        },
+        {
+          "name": "text",
+          "core": 11,
+          "controls": 131
+        }
+      ],
+      "aggregations": [],
+      "events": [],
+      "webComponent": "parent-dependent: ui5-option / ui5-cb-item / ui5-mcb-item / ui5-suggestion-item",
+      "fit": "adapt",
+      "mapping": "Pure data element: `key` -> `value`, `text`. The tag is chosen by the parent (Select, ComboBox, MultiComboBox, Input suggestions).",
+      "notInV1": []
+    },
+    "sap.m.CheckBox": {
+      "category": "Input",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 11,
+        "samplesControlsApps": 36
+      },
+      "properties": [
+        {
+          "name": "editable",
+          "core": 1,
+          "controls": 0
+        },
+        {
+          "name": "enabled",
+          "core": 5,
+          "controls": 3
+        },
+        {
+          "name": "partiallySelected",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "name": "required",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "selected",
+          "core": 9,
+          "controls": 29
+        },
+        {
+          "name": "text",
+          "core": 2,
+          "controls": 23
+        },
+        {
+          "name": "valueState",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "wrapping",
+          "core": 0,
+          "controls": 1
+        }
+      ],
+      "aggregations": [],
+      "events": [
+        {
+          "name": "select",
+          "core": 2,
+          "controls": 11
+        }
+      ],
+      "webComponent": "ui5-checkbox",
+      "fit": "direct",
+      "mapping": "`selected` (two-way) -> `checked`, `text`, `enabled=false` -> `disabled`, `editable=false` -> `readonly`, `partiallySelected` -> `indeterminate`, `wrapping` -> `wrapping-type`, `valueState`, `required`; `select` <- `change` (`$parameters>/selected` = checked).",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "width",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.m.Switch": {
+      "category": "Input",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 10,
+        "samplesControlsApps": 24
+      },
+      "properties": [
+        {
+          "name": "customTextOff",
+          "core": 1,
+          "controls": 2
+        },
+        {
+          "name": "customTextOn",
+          "core": 1,
+          "controls": 2
+        },
+        {
+          "name": "enabled",
+          "core": 3,
+          "controls": 2
+        },
+        {
+          "name": "state",
+          "core": 10,
+          "controls": 23
+        },
+        {
+          "name": "type",
+          "core": 1,
+          "controls": 4
+        }
+      ],
+      "aggregations": [],
+      "events": [
+        {
+          "name": "change",
+          "core": 8,
+          "controls": 5
+        }
+      ],
+      "webComponent": "ui5-switch",
+      "fit": "direct",
+      "mapping": "`state` (two-way) -> `checked`, `customTextOn`/`customTextOff` -> `text-on`/`text-off`, `type=\"AcceptReject\"` -> `design=\"Graphical\"`, `enabled=false` -> `disabled`; `change` <- `change` (`$parameters>/state` = checked).",
+      "notInV1": []
+    },
+    "sap.m.SegmentedButton": {
+      "category": "Input",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 10,
+        "samplesControlsApps": 23
+      },
+      "properties": [
+        {
+          "name": "enabled",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "selectedKey",
+          "core": 9,
+          "controls": 16
+        },
+        {
+          "name": "width",
+          "core": 0,
+          "controls": 5
+        }
+      ],
+      "aggregations": [
+        {
+          "name": "items",
+          "core": 10,
+          "controls": 23
+        }
+      ],
+      "events": [
+        {
+          "name": "selectionChange",
+          "core": 4,
+          "controls": 9
+        }
+      ],
+      "webComponent": "ui5-segmented-button",
+      "fit": "adapt",
+      "mapping": "`selectedKey` (two-way) -> `selected` on the item whose key matches, written back on `selection-change`; `selectionChange` <- `selection-change` (pass the key, not `$parameters>/item` + JS call); `width` CSS (`items-fit-content`).",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "contentMode",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.m.SegmentedButtonItem": {
+      "category": "Input",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 10,
+        "samplesControlsApps": 23
+      },
+      "properties": [
+        {
+          "name": "enabled",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "name": "icon",
+          "core": 4,
+          "controls": 13
+        },
+        {
+          "name": "key",
+          "core": 10,
+          "controls": 16
+        },
+        {
+          "name": "text",
+          "core": 10,
+          "controls": 18
+        },
+        {
+          "name": "width",
+          "core": 0,
+          "controls": 2
+        }
+      ],
+      "aggregations": [],
+      "events": [],
+      "webComponent": "ui5-segmented-button-item",
+      "fit": "adapt",
+      "mapping": "`text` -> text content, `icon`, `key` -> `data-key`, `enabled=false` -> `disabled`, `tooltip`.",
+      "notInV1": []
+    },
+    "sap.m.Select": {
+      "category": "Input",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 8,
+        "samplesControlsApps": 85
+      },
+      "properties": [
+        {
+          "name": "editable",
+          "core": 1,
+          "controls": 2
+        },
+        {
+          "name": "enabled",
+          "core": 1,
+          "controls": 1
+        },
+        {
+          "name": "forceSelection",
+          "core": 3,
+          "controls": 9
+        },
+        {
+          "name": "selectedKey",
+          "core": 7,
+          "controls": 80
+        },
+        {
+          "name": "valueState",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "valueStateText",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "width",
+          "core": 2,
+          "controls": 11
+        }
+      ],
+      "aggregations": [],
+      "defaultAggregation": "items",
+      "events": [
+        {
+          "name": "change",
+          "core": 1,
+          "controls": 11
+        },
+        {
+          "name": "liveChange",
+          "core": 0,
+          "controls": 1
+        }
+      ],
+      "webComponent": "ui5-select + ui5-option",
+      "fit": "adapt",
+      "mapping": "Items (core:Item / ListItem) -> `<ui5-option value=\"{key}\">{text}</ui5-option>` (`icon`, `additionalText` -> `additional-text`). `selectedKey` (two-way) -> `value` of the select (or `selected` on the matching option); write the chosen option's value back on `change`. `forceSelection=false` has no counterpart (WC always selects the first option) - insert an empty option. `enabled`/`editable`/`valueState`/`valueStateText`/`width` as Input. `change` <- `change`. `$parameters>/selectedItem` + `.getKey()` is UI5 object access - NOT portable; bind `selectedKey` instead.",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "autoAdjustWidth",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "icon",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "type",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "wrapItemsText",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "kind": "property",
+          "name": "columnRatio",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "showSecondaryValues",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "twoColumnSeparator",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.m.DatePicker": {
+      "category": "Input",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 8,
+        "samplesControlsApps": 23
+      },
+      "properties": [
+        {
+          "name": "dateValue",
+          "core": 2,
+          "controls": 0
+        },
+        {
+          "name": "displayFormat",
+          "core": 3,
+          "controls": 7
+        },
+        {
+          "name": "editable",
+          "core": 2,
+          "controls": 0
+        },
+        {
+          "name": "placeholder",
+          "core": 1,
+          "controls": 2
+        },
+        {
+          "name": "required",
+          "core": 0,
+          "controls": 3
+        },
+        {
+          "name": "value",
+          "core": 4,
+          "controls": 16
+        },
+        {
+          "name": "valueFormat",
+          "core": 6,
+          "controls": 6
+        },
+        {
+          "name": "valueState",
+          "core": 0,
+          "controls": 4
+        },
+        {
+          "name": "valueStateText",
+          "core": 0,
+          "controls": 4
+        },
+        {
+          "name": "width",
+          "core": 0,
+          "controls": 4
+        }
+      ],
+      "aggregations": [],
+      "events": [
+        {
+          "name": "change",
+          "core": 0,
+          "controls": 4
+        }
+      ],
+      "webComponent": "ui5-date-picker",
+      "fit": "direct",
+      "mapping": "`value` (two-way) with `valueFormat` -> `value-format` and `displayFormat` -> `display-format` (same CLDR patterns, e.g. `yyyyMMdd` for ABAP DATS); `placeholder`, `editable=false` -> `readonly`, `enabled`, `required`, `valueState`/`valueStateText`, `width` CSS, `minDate`/`maxDate` -> `min-date`/`max-date` (as strings in value-format). `dateValue` (JS Date, needs a formatter such as Formatter.DateAbapDateToDateObject) -> convert to `value`. `change` <- `change` (`$parameters>/value`, `$parameters>/valid`).",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "hideInput",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.m.SearchField": {
+      "category": "Input",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 7,
+        "samplesControlsApps": 29
+      },
+      "properties": [
+        {
+          "name": "placeholder",
+          "core": 7,
+          "controls": 8
+        },
+        {
+          "name": "showRefreshButton",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "name": "value",
+          "core": 5,
+          "controls": 6
+        },
+        {
+          "name": "width",
+          "core": 7,
+          "controls": 27
+        }
+      ],
+      "aggregations": [],
+      "events": [
+        {
+          "name": "liveChange",
+          "core": 2,
+          "controls": 3
+        },
+        {
+          "name": "search",
+          "core": 5,
+          "controls": 15
+        },
+        {
+          "name": "suggest",
+          "core": 0,
+          "controls": 1
+        }
+      ],
+      "webComponent": "ui5-search-field (fiori) or ui5-input with a search icon",
+      "fit": "adapt",
+      "mapping": "`value` (two-way), `placeholder`, `width` CSS; `search` <- `search` (`$parameters>/query` = value; `refreshButtonPressed`=false), `liveChange` <- `input` (`$parameters>/newValue`). `ui5-search-field` is a recent fiori component - check the minimum WC version; the `ui5-input` + `<ui5-icon slot=\"icon\" name=\"search\">` fallback is safe.",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "enableSuggestions",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "aggregation",
+          "name": "suggestionItems",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.m.ComboBox": {
+      "category": "Input",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 3,
+        "samplesControlsApps": 36
+      },
+      "properties": [
+        {
+          "name": "placeholder",
+          "core": 0,
+          "controls": 10
+        },
+        {
+          "name": "selectedKey",
+          "core": 3,
+          "controls": 16
+        },
+        {
+          "name": "showClearIcon",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "name": "value",
+          "core": 0,
+          "controls": 8
+        },
+        {
+          "name": "valueState",
+          "core": 0,
+          "controls": 3
+        },
+        {
+          "name": "valueStateText",
+          "core": 0,
+          "controls": 3
+        },
+        {
+          "name": "width",
+          "core": 0,
+          "controls": 5
+        }
+      ],
+      "aggregations": [],
+      "defaultAggregation": "items",
+      "events": [
+        {
+          "name": "change",
+          "core": 0,
+          "controls": 4
+        }
+      ],
+      "webComponent": "ui5-combobox + ui5-cb-item",
+      "fit": "adapt",
+      "mapping": "Items -> `<ui5-cb-item value=\"{key}\" text=\"{text}\" additional-text>`; `selectedKey` (two-way) <-> `selected-value`; `value`, `placeholder`, `showClearIcon`, `valueState`, `width` as Input; `change`/`selectionChange` <- `change`/`selection-change`. `showSecondaryValues` -> show `additional-text` (WC always shows it when set).",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "maxWidth",
+          "core": 0,
+          "controls": 3
+        },
+        {
+          "kind": "property",
+          "name": "showSecondaryValues",
+          "core": 0,
+          "controls": 5
+        },
+        {
+          "kind": "property",
+          "name": "filterSecondaryValues",
+          "core": 0,
+          "controls": 3
+        },
+        {
+          "kind": "event",
+          "name": "loadItems",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "maxPickerHeight",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "aggregation",
+          "name": "formattedValueStateText",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.m.MultiInput": {
+      "category": "Input",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 3,
+        "samplesControlsApps": 14
+      },
+      "properties": [
+        {
+          "name": "enabled",
+          "core": 1,
+          "controls": 0
+        },
+        {
+          "name": "placeholder",
+          "core": 0,
+          "controls": 6
+        },
+        {
+          "name": "showSuggestion",
+          "core": 0,
+          "controls": 9
+        },
+        {
+          "name": "showValueHelp",
+          "core": 0,
+          "controls": 11
+        },
+        {
+          "name": "value",
+          "core": 0,
+          "controls": 4
+        },
+        {
+          "name": "valueState",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "name": "width",
+          "core": 1,
+          "controls": 9
+        }
+      ],
+      "aggregations": [
+        {
+          "name": "tokens",
+          "core": 3,
+          "controls": 6
+        }
+      ],
+      "defaultAggregation": "suggestionItems",
+      "events": [
+        {
+          "name": "change",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "name": "tokenUpdate",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "name": "valueHelpRequest",
+          "core": 1,
+          "controls": 1
+        }
+      ],
+      "webComponent": "ui5-multi-input + ui5-token",
+      "fit": "adapt",
+      "mapping": "`tokens` -> slot `tokens`; `showValueHelp` -> `show-value-help-icon`, `valueHelpRequest` <- `value-help-trigger`; `value`, `placeholder`, `enabled`, `width`, `showSuggestion` + `suggestionItems` as Input; `tokenUpdate` <- `token-delete` (`$parameters>/type`=\"removed\", `removedTokens` - object access, not portable beyond the token keys). Token add/remove has to be written back into the bound token table by the renderer (UI5 apps use z2ui5.cc.MultiInputExt for that - excluded).",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "maxTokens",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "showTableSuggestionValueHelp",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "type",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "aggregation",
+          "name": "suggestionColumns",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "kind": "aggregation",
+          "name": "suggestionRows",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "kind": "property",
+          "name": "showClearIcon",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "valueStateText",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "aggregation",
+          "name": "formattedValueStateText",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.m.Token": {
+      "category": "Input",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 3,
+        "samplesControlsApps": 12
+      },
+      "properties": [
+        {
+          "name": "editable",
+          "core": 3,
+          "controls": 0
+        },
+        {
+          "name": "key",
+          "core": 3,
+          "controls": 9
+        },
+        {
+          "name": "selected",
+          "core": 3,
+          "controls": 0
+        },
+        {
+          "name": "text",
+          "core": 3,
+          "controls": 12
+        }
+      ],
+      "aggregations": [],
+      "events": [],
+      "webComponent": "ui5-token",
+      "fit": "adapt",
+      "mapping": "`text`, `selected`; `key` -> keep as `data-key`; `editable=false` has no per-token attribute (use `readonly` on the multi-input).",
+      "notInV1": []
+    },
+    "sap.m.MultiComboBox": {
+      "category": "Input",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 2,
+        "samplesControlsApps": 21
+      },
+      "properties": [
+        {
+          "name": "editable",
+          "core": 1,
+          "controls": 0
+        },
+        {
+          "name": "placeholder",
+          "core": 0,
+          "controls": 7
+        },
+        {
+          "name": "selectedKeys",
+          "core": 1,
+          "controls": 8
+        },
+        {
+          "name": "valueState",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "name": "valueStateText",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "name": "width",
+          "core": 0,
+          "controls": 14
+        }
+      ],
+      "aggregations": [],
+      "defaultAggregation": "items",
+      "events": [
+        {
+          "name": "selectionChange",
+          "core": 0,
+          "controls": 3
+        },
+        {
+          "name": "selectionFinish",
+          "core": 0,
+          "controls": 8
+        }
+      ],
+      "webComponent": "ui5-multi-combobox + ui5-mcb-item",
+      "fit": "adapt",
+      "mapping": "Items -> `<ui5-mcb-item value=\"{key}\" text>`; `selectedKeys` (two-way, string array) <-> `selected` flags of the items (or `selected-values`); `placeholder`, `width`, `valueState`; `selectionChange` <- `selection-change`, `selectionFinish` <- `close`.",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "showSecondaryValues",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "kind": "property",
+          "name": "maxWidth",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "kind": "property",
+          "name": "showSelectAll",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "showClearIcon",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "maxPickerHeight",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "aggregation",
+          "name": "formattedValueStateText",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.m.StepInput": {
+      "category": "Input",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 2,
+        "samplesControlsApps": 4
+      },
+      "properties": [
+        {
+          "name": "displayValuePrecision",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "editable",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "enabled",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "max",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "name": "min",
+          "core": 1,
+          "controls": 2
+        },
+        {
+          "name": "step",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "name": "value",
+          "core": 2,
+          "controls": 4
+        },
+        {
+          "name": "valueState",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "name": "width",
+          "core": 0,
+          "controls": 4
+        }
+      ],
+      "aggregations": [],
+      "events": [
+        {
+          "name": "change",
+          "core": 0,
+          "controls": 1
+        }
+      ],
+      "webComponent": "ui5-step-input",
+      "fit": "direct",
+      "mapping": "`value` (two-way), `min`, `max`, `step`, `displayValuePrecision` -> `value-precision`, `enabled`/`editable`/`valueState`, `width` CSS; `change` <- `change` (`$parameters>/value`).",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "description",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "fieldWidth",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "largerStep",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "stepMode",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "textAlign",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "validationMode",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.ui.core.ListItem": {
+      "category": "Input",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 1,
+        "samplesControlsApps": 19
+      },
+      "properties": [
+        {
+          "name": "additionalText",
+          "core": 1,
+          "controls": 11
+        },
+        {
+          "name": "key",
+          "core": 0,
+          "controls": 18
+        },
+        {
+          "name": "text",
+          "core": 1,
+          "controls": 19
+        }
+      ],
+      "aggregations": [],
+      "events": [],
+      "webComponent": "as core:Item (+ additional-text, icon)",
+      "fit": "adapt",
+      "mapping": "`additionalText` -> `additional-text`; `icon` -> `icon` (`ui5-option` only).",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "icon",
+          "core": 0,
+          "controls": 2
+        }
+      ]
+    },
+    "sap.m.DateTimePicker": {
+      "category": "Input",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 1,
+        "samplesControlsApps": 10
+      },
+      "properties": [
+        {
+          "name": "dateValue",
+          "core": 1,
+          "controls": 0
+        },
+        {
+          "name": "displayFormat",
+          "core": 0,
+          "controls": 3
+        },
+        {
+          "name": "editable",
+          "core": 1,
+          "controls": 0
+        },
+        {
+          "name": "placeholder",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "name": "required",
+          "core": 0,
+          "controls": 3
+        },
+        {
+          "name": "value",
+          "core": 0,
+          "controls": 7
+        },
+        {
+          "name": "valueFormat",
+          "core": 0,
+          "controls": 6
+        },
+        {
+          "name": "valueState",
+          "core": 0,
+          "controls": 4
+        },
+        {
+          "name": "valueStateText",
+          "core": 0,
+          "controls": 3
+        },
+        {
+          "name": "width",
+          "core": 0,
+          "controls": 2
+        }
+      ],
+      "aggregations": [],
+      "events": [
+        {
+          "name": "change",
+          "core": 0,
+          "controls": 4
+        }
+      ],
+      "webComponent": "ui5-datetime-picker",
+      "fit": "direct",
+      "mapping": "As DatePicker (`value`/`valueFormat`/`displayFormat`, `dateValue` via conversion).",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "initialFocusedDateValue",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "minutesStep",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "secondaryCalendarType",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "secondsStep",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "showCurrentDateButton",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "showCurrentTimeButton",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "showTimezone",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "timezone",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "hideInput",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.m.Button": {
+      "category": "Actions",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 169,
+        "samplesControlsApps": 273
+      },
+      "properties": [
+        {
+          "name": "ariaHasPopup",
+          "core": 0,
+          "controls": 30
+        },
+        {
+          "name": "enabled",
+          "core": 8,
+          "controls": 33
+        },
+        {
+          "name": "icon",
+          "core": 59,
+          "controls": 93
+        },
+        {
+          "name": "text",
+          "core": 149,
+          "controls": 242
+        },
+        {
+          "name": "type",
+          "core": 83,
+          "controls": 136
+        },
+        {
+          "name": "width",
+          "core": 4,
+          "controls": 20
+        }
+      ],
+      "aggregations": [],
+      "events": [
+        {
+          "name": "press",
+          "core": 167,
+          "controls": 215
+        }
+      ],
+      "webComponent": "ui5-button",
+      "fit": "direct",
+      "mapping": "`text` -> text content, `icon`, `type` -> `design`: Default/Emphasized/Transparent/Attention as is, Accept/Success -> Positive, Reject/Negative -> Negative, Critical -> Attention, Ghost -> Transparent, Back -> Transparent + `icon=\"nav-back\"`, Up -> `icon=\"navigation-up-arrow\"`; `enabled=false` -> `disabled`, `tooltip` -> `tooltip`, `width` CSS, `ariaHasPopup` -> `accessibility-attributes`. `press` <- `click`. A Button is also the usual `opener` of a popover (by id).",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "badgeStyle",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.m.ToggleButton": {
+      "category": "Actions",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 1,
+        "samplesControlsApps": 43
+      },
+      "properties": [
+        {
+          "name": "enabled",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "icon",
+          "core": 1,
+          "controls": 15
+        },
+        {
+          "name": "pressed",
+          "core": 1,
+          "controls": 24
+        },
+        {
+          "name": "text",
+          "core": 1,
+          "controls": 31
+        },
+        {
+          "name": "type",
+          "core": 0,
+          "controls": 1
+        }
+      ],
+      "aggregations": [],
+      "events": [
+        {
+          "name": "press",
+          "core": 1,
+          "controls": 10
+        }
+      ],
+      "webComponent": "ui5-toggle-button",
+      "fit": "direct",
+      "mapping": "`pressed` (two-way), `text`, `icon`, `type` -> `design`, `enabled`; `press` <- `click` (`$parameters>/pressed` = new pressed state).",
+      "notInV1": []
+    },
+    "sap.m.Column": {
+      "category": "Collections & tables",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 65,
+        "samplesControlsApps": 69
+      },
+      "properties": [
+        {
+          "name": "demandPopin",
+          "core": 2,
+          "controls": 50
+        },
+        {
+          "name": "hAlign",
+          "core": 3,
+          "controls": 56
+        },
+        {
+          "name": "importance",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "mergeDuplicates",
+          "core": 2,
+          "controls": 2
+        },
+        {
+          "name": "minScreenWidth",
+          "core": 2,
+          "controls": 49
+        },
+        {
+          "name": "width",
+          "core": 8,
+          "controls": 48
+        }
+      ],
+      "aggregations": [],
+      "defaultAggregation": "header",
+      "events": [],
+      "webComponent": "ui5-table-header-cell",
+      "fit": "adapt",
+      "mapping": "`header` child -> cell content; `width` -> `width`; `hAlign` Begin/Center/End/Left/Right -> `horizontal-align` (also on the column's cells); `minScreenWidth`/`demandPopin`/`importance` -> `importance` + table `overflow-mode=\"Popin\"` (WC pops in by importance, not by breakpoint); `visible=false` -> drop the header cell AND that cell of every row; `mergeDuplicates` -> no counterpart (ignore).",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "popinDisplay",
+          "core": 0,
+          "controls": 7
+        },
+        {
+          "kind": "property",
+          "name": "styleClass",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "mergeFunctionName",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "sortIndicator",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "vAlign",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.m.ColumnListItem": {
+      "category": "Collections & tables",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 65,
+        "samplesControlsApps": 69
+      },
+      "properties": [
+        {
+          "name": "selected",
+          "core": 10,
+          "controls": 8
+        },
+        {
+          "name": "type",
+          "core": 8,
+          "controls": 18
+        },
+        {
+          "name": "vAlign",
+          "core": 8,
+          "controls": 29
+        }
+      ],
+      "aggregations": [],
+      "defaultAggregation": "cells",
+      "events": [
+        {
+          "name": "detailPress",
+          "core": 1,
+          "controls": 0
+        },
+        {
+          "name": "press",
+          "core": 7,
+          "controls": 6
+        }
+      ],
+      "webComponent": "ui5-table-row",
+      "fit": "adapt",
+      "mapping": "`cells` -> `ui5-table-cell`s; `type` Active/Navigation/Detail -> `interactive` (+ `navigated` for Navigation); `press` <- table `row-click` dispatched to the clicked row's wire (with that row as context); `selected` (two-way) <-> selection feature; `vAlign` CSS; `highlight` -> no WC attribute (left border CSS).",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "navigated",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "aggregation",
+          "name": "actions",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.m.Table": {
+      "category": "Collections & tables",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 63,
+        "samplesControlsApps": 63
+      },
+      "properties": [
+        {
+          "name": "alternateRowColors",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "growing",
+          "core": 13,
+          "controls": 8
+        },
+        {
+          "name": "growingScrollToLoad",
+          "core": 3,
+          "controls": 1
+        },
+        {
+          "name": "growingThreshold",
+          "core": 5,
+          "controls": 3
+        },
+        {
+          "name": "headerText",
+          "core": 10,
+          "controls": 12
+        },
+        {
+          "name": "inset",
+          "core": 0,
+          "controls": 29
+        },
+        {
+          "name": "mode",
+          "core": 11,
+          "controls": 17
+        },
+        {
+          "name": "noDataText",
+          "core": 2,
+          "controls": 3
+        },
+        {
+          "name": "popinLayout",
+          "core": 0,
+          "controls": 8
+        },
+        {
+          "name": "sticky",
+          "core": 4,
+          "controls": 8
+        },
+        {
+          "name": "width",
+          "core": 6,
+          "controls": 16
+        }
+      ],
+      "aggregations": [
+        {
+          "name": "columns",
+          "core": 63,
+          "controls": 62
+        },
+        {
+          "name": "headerToolbar",
+          "core": 38,
+          "controls": 39
+        },
+        {
+          "name": "infoToolbar",
+          "core": 0,
+          "controls": 11
+        }
+      ],
+      "defaultAggregation": "items",
+      "events": [
+        {
+          "name": "itemPress",
+          "core": 0,
+          "controls": 5
+        },
+        {
+          "name": "selectionChange",
+          "core": 0,
+          "controls": 5
+        }
+      ],
+      "webComponent": "ui5-table (+ ui5-table-header-row/-header-cell/-row/-cell, features ui5-table-selection-*, ui5-table-growing)",
+      "fit": "adapt",
+      "mapping": "`columns` -> `<ui5-table-header-row slot=\"headerRow\">` with one `ui5-table-header-cell` per Column; `items` (list binding over a client array) -> one `ui5-table-row` per entry (row context for relative bindings and `${REL}` event args), each `cells` child in a `ui5-table-cell`. `mode` None/SingleSelect/SingleSelectLeft/SingleSelectMaster/MultiSelect -> `<ui5-table-selection-single|multi slot=\"features\">`; WC selection is a space-separated list of `row-key`s while UI5 binds `ColumnListItem.selected` per row: the renderer derives `row-key` (row index) and keeps both in sync. `growing`/`growingThreshold` -> `<ui5-table-growing slot=\"features\" mode=\"Button|Scroll\">` with local paging (all rows are already on the client). `headerText`/`headerToolbar`/`infoToolbar`: no slot - render above the table. `noDataText` -> `no-data-text`, `sticky` -> `sticky` on the header row, `alternateRowColors` -> `alternate-row-colors`, `width` CSS; `inset`/`popinLayout`/`fixedLayout`/`contextualWidth` ignored. `selectionChange` <- selection feature `change`; `itemPress` <- table `row-click`.",
+      "notInV1": [
+        {
+          "kind": "aggregation",
+          "name": "dragDropConfig",
+          "core": 1,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "contextualWidth",
+          "core": 0,
+          "controls": 4
+        },
+        {
+          "kind": "property",
+          "name": "showSeparators",
+          "core": 0,
+          "controls": 4
+        },
+        {
+          "kind": "property",
+          "name": "showOverlay",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "fixedLayout",
+          "core": 0,
+          "controls": 3
+        },
+        {
+          "kind": "aggregation",
+          "name": "contextMenu",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "event",
+          "name": "paste",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "autoPopinMode",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "kind": "property",
+          "name": "hiddenInPopin",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "event",
+          "name": "popinChanged",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "itemActionCount",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "multiSelectMode",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.m.List": {
+      "category": "Collections & tables",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 24,
+        "samplesControlsApps": 74
+      },
+      "properties": [
+        {
+          "name": "growing",
+          "core": 0,
+          "controls": 6
+        },
+        {
+          "name": "growingThreshold",
+          "core": 0,
+          "controls": 4
+        },
+        {
+          "name": "headerText",
+          "core": 15,
+          "controls": 35
+        },
+        {
+          "name": "includeItemInSelection",
+          "core": 0,
+          "controls": 5
+        },
+        {
+          "name": "mode",
+          "core": 7,
+          "controls": 13
+        },
+        {
+          "name": "noDataText",
+          "core": 5,
+          "controls": 7
+        },
+        {
+          "name": "showSeparators",
+          "core": 3,
+          "controls": 9
+        },
+        {
+          "name": "width",
+          "core": 1,
+          "controls": 4
+        }
+      ],
+      "aggregations": [
+        {
+          "name": "headerToolbar",
+          "core": 0,
+          "controls": 10
+        }
+      ],
+      "defaultAggregation": "items",
+      "events": [
+        {
+          "name": "delete",
+          "core": 0,
+          "controls": 4
+        },
+        {
+          "name": "itemPress",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "selectionChange",
+          "core": 7,
+          "controls": 5
+        }
+      ],
+      "webComponent": "ui5-list",
+      "fit": "adapt",
+      "mapping": "`items` (list binding) -> list items; `headerText` -> `header-text`; `headerToolbar` -> slot `header`; `mode` None/SingleSelect/SingleSelectLeft/SingleSelectMaster/MultiSelect/Delete -> `selection-mode` None/Single/SingleStart/Single/Multiple/Delete; `noDataText` -> `no-data-text`; `showSeparators` All/Inner/None -> `separators`; `growing` -> `growing=\"Button\"` + local paging on `load-more`. `selectionChange` <- `selection-change` (write item `selected` back; `$parameters>/listItem` + JS is not portable), `itemPress` <- `item-click`, `delete` <- `item-delete`.",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "backgroundDesign",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "kind": "property",
+          "name": "footerText",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "growingScrollToLoad",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "kind": "property",
+          "name": "showUnread",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "aggregation",
+          "name": "contextMenu",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "aggregation",
+          "name": "swipeContent",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "event",
+          "name": "swipe",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "aggregation",
+          "name": "infoToolbar",
+          "core": 0,
+          "controls": 4
+        },
+        {
+          "kind": "property",
+          "name": "sticky",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "enableBusyIndicator",
+          "core": 0,
+          "controls": 5
+        },
+        {
+          "kind": "property",
+          "name": "growingDirection",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "growingTriggerText",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.m.StandardListItem": {
+      "category": "Collections & tables",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 18,
+        "samplesControlsApps": 59
+      },
+      "properties": [
+        {
+          "name": "counter",
+          "core": 0,
+          "controls": 7
+        },
+        {
+          "name": "description",
+          "core": 14,
+          "controls": 39
+        },
+        {
+          "name": "highlight",
+          "core": 1,
+          "controls": 5
+        },
+        {
+          "name": "icon",
+          "core": 6,
+          "controls": 33
+        },
+        {
+          "name": "iconDensityAware",
+          "core": 0,
+          "controls": 29
+        },
+        {
+          "name": "iconInset",
+          "core": 1,
+          "controls": 31
+        },
+        {
+          "name": "info",
+          "core": 9,
+          "controls": 9
+        },
+        {
+          "name": "infoState",
+          "core": 1,
+          "controls": 5
+        },
+        {
+          "name": "selected",
+          "core": 6,
+          "controls": 3
+        },
+        {
+          "name": "title",
+          "core": 18,
+          "controls": 59
+        },
+        {
+          "name": "type",
+          "core": 1,
+          "controls": 17
+        },
+        {
+          "name": "wrapping",
+          "core": 2,
+          "controls": 1
+        }
+      ],
+      "aggregations": [],
+      "defaultAggregation": "actions",
+      "events": [
+        {
+          "name": "detailPress",
+          "core": 1,
+          "controls": 1
+        },
+        {
+          "name": "press",
+          "core": 0,
+          "controls": 7
+        }
+      ],
+      "webComponent": "ui5-li",
+      "fit": "direct",
+      "mapping": "`title` -> `text`, `description`, `icon` (sap-icon://x -> `icon=\"x\"`; an image URL -> `<img slot=\"image\">`), `info` -> `additional-text`, `infoState` -> `additional-text-state` (Success->Positive, …), `highlight` -> `highlight`, `type` Inactive/Active/Navigation/Detail/DetailAndActive -> `type` (Inactive/Active/Navigation/Detail), `selected` (two-way), `wrapping` -> `wrapping-type=\"Normal\"`, `counter` -> append to `additional-text`; `press` <- `click`, `detailPress` <- `detail-click`.",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "unread",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "adaptTitleSize",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "kind": "aggregation",
+          "name": "avatar",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "infoStateInverted",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "kind": "property",
+          "name": "infoIcon",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "wrapCharLimit",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "navigated",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.m.CustomListItem": {
+      "category": "Collections & tables",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 5,
+        "samplesControlsApps": 7
+      },
+      "properties": [
+        {
+          "name": "selected",
+          "core": 1,
+          "controls": 0
+        }
+      ],
+      "aggregations": [],
+      "defaultAggregation": "content",
+      "events": [],
+      "webComponent": "ui5-li-custom",
+      "fit": "direct",
+      "mapping": "Content -> default slot; `type`, `selected`, `highlight` as StandardListItem; `press` <- `click`.",
+      "notInV1": []
+    },
+    "sap.m.Tree": {
+      "category": "Collections & tables",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 4,
+        "samplesControlsApps": 9
+      },
+      "properties": [
+        {
+          "name": "headerText",
+          "core": 4,
+          "controls": 0
+        },
+        {
+          "name": "mode",
+          "core": 0,
+          "controls": 4
+        },
+        {
+          "name": "sticky",
+          "core": 0,
+          "controls": 1
+        }
+      ],
+      "aggregations": [
+        {
+          "name": "headerToolbar",
+          "core": 0,
+          "controls": 3
+        }
+      ],
+      "defaultAggregation": "items",
+      "events": [
+        {
+          "name": "toggleOpenState",
+          "core": 0,
+          "controls": 1
+        }
+      ],
+      "webComponent": "ui5-tree",
+      "fit": "adapt",
+      "mapping": "`items=\"{/T_NODES}\"` binds a NESTED client array (UI5 JSONModel tree binding: every array-valued property of a node is its children) - the renderer recurses and emits nested `ui5-tree-item`s. `headerText` -> `header-text`, `mode` -> `selection-mode`, `headerToolbar` -> slot `header`; `toggleOpenState` <- `item-toggle`.",
+      "notInV1": [
+        {
+          "kind": "aggregation",
+          "name": "dragDropConfig",
+          "core": 1,
+          "controls": 1
+        },
+        {
+          "kind": "aggregation",
+          "name": "contextMenu",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "includeItemInSelection",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "aggregation",
+          "name": "infoToolbar",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.m.StandardTreeItem": {
+      "category": "Collections & tables",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 3,
+        "samplesControlsApps": 8
+      },
+      "properties": [
+        {
+          "name": "icon",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "title",
+          "core": 3,
+          "controls": 8
+        }
+      ],
+      "aggregations": [],
+      "events": [],
+      "webComponent": "ui5-tree-item",
+      "fit": "direct",
+      "mapping": "`title` -> `text`, `icon`, `selected`, `expanded` (UI5 keeps expansion in the binding; default collapsed).",
+      "notInV1": []
+    },
+    "sap.m.Dialog": {
+      "category": "Dialogs & popups",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 46,
+        "samplesControlsApps": 33
+      },
+      "properties": [
+        {
+          "name": "contentHeight",
+          "core": 10,
+          "controls": 5
+        },
+        {
+          "name": "contentWidth",
+          "core": 23,
+          "controls": 8
+        },
+        {
+          "name": "draggable",
+          "core": 4,
+          "controls": 2
+        },
+        {
+          "name": "horizontalScrolling",
+          "core": 1,
+          "controls": 0
+        },
+        {
+          "name": "icon",
+          "core": 3,
+          "controls": 0
+        },
+        {
+          "name": "resizable",
+          "core": 5,
+          "controls": 3
+        },
+        {
+          "name": "showHeader",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "state",
+          "core": 1,
+          "controls": 1
+        },
+        {
+          "name": "stretch",
+          "core": 5,
+          "controls": 0
+        },
+        {
+          "name": "title",
+          "core": 20,
+          "controls": 26
+        },
+        {
+          "name": "type",
+          "core": 1,
+          "controls": 9
+        },
+        {
+          "name": "verticalScrolling",
+          "core": 3,
+          "controls": 3
+        }
+      ],
+      "aggregations": [
+        {
+          "name": "beginButton",
+          "core": 2,
+          "controls": 27
+        },
+        {
+          "name": "buttons",
+          "core": 38,
+          "controls": 3
+        },
+        {
+          "name": "customHeader",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "name": "endButton",
+          "core": 3,
+          "controls": 21
+        },
+        {
+          "name": "footer",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "subHeader",
+          "core": 0,
+          "controls": 1
+        }
+      ],
+      "defaultAggregation": "content",
+      "events": [
+        {
+          "name": "afterClose",
+          "core": 30,
+          "controls": 0
+        }
+      ],
+      "webComponent": "ui5-dialog",
+      "fit": "adapt",
+      "mapping": "Shown via `client->popup_display( )` (slot POPUP) -> render and set `open`; `popup_destroy( )` / action POPUP_CLOSE -> close + remove. `title` -> `header-text`, `icon` -> custom `header` slot, `state` Error/Warning/Success/Information -> `state` Negative/Critical/Positive/Information, `contentWidth`/`contentHeight` -> CSS width/height of the content wrapper, `resizable`, `draggable`, `stretch`; `buttons` / `beginButton` / `endButton` / `footer` -> `<ui5-bar slot=\"footer\">` endContent (begin before end); `customHeader`/`subHeader` -> slot `header`; `showHeader=false` -> empty header; `verticalScrolling`/`horizontalScrolling` CSS overflow. `afterClose` <- `close` (Escape closes a WC dialog client-side: the renderer must fire the `afterClose` wire, or cancel `before-close` when none is wired, so the server popup state does not drift).",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "showFullScreenButton",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.m.Popover": {
+      "category": "Dialogs & popups",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 7,
+        "samplesControlsApps": 12
+      },
+      "properties": [
+        {
+          "name": "contentHeight",
+          "core": 0,
+          "controls": 3
+        },
+        {
+          "name": "contentWidth",
+          "core": 5,
+          "controls": 6
+        },
+        {
+          "name": "modal",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "name": "placement",
+          "core": 7,
+          "controls": 10
+        },
+        {
+          "name": "showHeader",
+          "core": 0,
+          "controls": 6
+        },
+        {
+          "name": "title",
+          "core": 7,
+          "controls": 5
+        }
+      ],
+      "aggregations": [
+        {
+          "name": "footer",
+          "core": 2,
+          "controls": 4
+        }
+      ],
+      "defaultAggregation": "content",
+      "events": [
+        {
+          "name": "afterClose",
+          "core": 0,
+          "controls": 1
+        }
+      ],
+      "webComponent": "ui5-popover",
+      "fit": "adapt",
+      "mapping": "Shown via `client->popover_display( xml, by_id )` -> `opener` = the DOM id of the control with that view id, `open=true`; POPOVER_CLOSE / `popover_destroy( )` -> close. `title` -> `header-text` (`showHeader=false` -> none), `placement` Top/Bottom/Left/Right/Auto/PreferredTopOrFlip… -> `placement` Top/Bottom/Start/End (Auto -> End), `contentWidth`/`contentHeight` CSS, `footer` -> slot `footer`, `modal`; `afterClose` <- `close`.",
+      "notInV1": [
+        {
+          "kind": "event",
+          "name": "afterOpen",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "resizable",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "verticalScrolling",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "aggregation",
+          "name": "customHeader",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "contentMinWidth",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.m.MessageStrip": {
+      "category": "Messages",
+      "tolerated": false,
+      "usage": {
+        "coreApps": 153,
+        "samplesControlsApps": 45
+      },
+      "properties": [
+        {
+          "name": "enableFormattedText",
+          "core": 1,
+          "controls": 1
+        },
+        {
+          "name": "showCloseButton",
+          "core": 0,
+          "controls": 7
+        },
+        {
+          "name": "showIcon",
+          "core": 145,
+          "controls": 27
+        },
+        {
+          "name": "text",
+          "core": 150,
+          "controls": 45
+        },
+        {
+          "name": "type",
+          "core": 152,
+          "controls": 27
+        }
+      ],
+      "aggregations": [],
+      "events": [
+        {
+          "name": "close",
+          "core": 0,
+          "controls": 1
+        }
+      ],
+      "webComponent": "ui5-message-strip",
+      "fit": "direct",
+      "mapping": "`text` -> text content; `type` Information/Success/Warning/Error/None -> `design` Information/Positive/Critical/Negative/Information(+`hide-icon`); `showIcon=false` (UI5 default false!) -> `hide-icon`; UI5 has NO close button by default, WC does: set `hide-close-button` unless `showCloseButton=true`; `close` <- `close`. `enableFormattedText` -> limited HTML (a, b, i, strong, em, br, code) in the text.",
+      "notInV1": [
+        {
+          "kind": "aggregation",
+          "name": "link",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "aggregation",
+          "name": "controls",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "colorScheme",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.ui.core.CustomData": {
+      "category": "Tolerated (no visual)",
+      "tolerated": true,
+      "usage": {
+        "coreApps": 3,
+        "samplesControlsApps": 11
+      },
+      "properties": [
+        {
+          "name": "key",
+          "core": 3,
+          "controls": 11
+        },
+        {
+          "name": "value",
+          "core": 3,
+          "controls": 10
+        },
+        {
+          "name": "writeToDom",
+          "core": 2,
+          "controls": 4
+        }
+      ],
+      "aggregations": [],
+      "events": [],
+      "webComponent": "none - data-* attribute",
+      "fit": "compose",
+      "mapping": "`writeToDom=true` -> `data-{key}=\"{value}\"` on the parent element, otherwise drop. (`$event.getSource().data(...)` readers are not portable.)",
+      "notInV1": []
+    },
+    "sap.m.FlexItemData": {
+      "category": "Tolerated (no visual)",
+      "tolerated": true,
+      "usage": {
+        "coreApps": 1,
+        "samplesControlsApps": 37
+      },
+      "properties": [
+        {
+          "name": "baseSize",
+          "core": 1,
+          "controls": 6
+        },
+        {
+          "name": "growFactor",
+          "core": 1,
+          "controls": 29
+        },
+        {
+          "name": "shrinkFactor",
+          "core": 0,
+          "controls": 8
+        }
+      ],
+      "aggregations": [],
+      "events": [],
+      "webComponent": "none - CSS on the child",
+      "fit": "compose",
+      "mapping": "`growFactor` -> `flex-grow`, `shrinkFactor` -> `flex-shrink`, `baseSize` -> `flex-basis`, `alignSelf`, `maxWidth`. Safe to drop.",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "styleClass",
+          "core": 0,
+          "controls": 5
+        },
+        {
+          "kind": "property",
+          "name": "order",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "backgroundDesign",
+          "core": 0,
+          "controls": 5
+        },
+        {
+          "kind": "property",
+          "name": "maxWidth",
+          "core": 0,
+          "controls": 5
+        }
+      ]
+    },
+    "sap.ui.layout.GridData": {
+      "category": "Tolerated (no visual)",
+      "tolerated": true,
+      "usage": {
+        "coreApps": 0,
+        "samplesControlsApps": 37
+      },
+      "properties": [
+        {
+          "name": "linebreak",
+          "core": 0,
+          "controls": 11
+        },
+        {
+          "name": "span",
+          "core": 0,
+          "controls": 36
+        }
+      ],
+      "aggregations": [],
+      "events": [],
+      "webComponent": "none - CSS on the child",
+      "fit": "compose",
+      "mapping": "`span=\"XL6 L6 M12 S12\"`/`spanL…` -> `grid-column: span n` per breakpoint, `linebreak*` -> `grid-column-start:1`, `indent*` -> start offset. Safe to drop.",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "indent",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "kind": "property",
+          "name": "indentL",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "kind": "property",
+          "name": "indentXL",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "linebreakM",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "kind": "property",
+          "name": "spanL",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "spanM",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "spanS",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "spanXL",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "visibleL",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "visibleM",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "kind": "property",
+          "name": "visibleS",
+          "core": 0,
+          "controls": 2
+        },
+        {
+          "kind": "property",
+          "name": "visibleXL",
+          "core": 0,
+          "controls": 1
+        }
+      ]
+    },
+    "sap.m.OverflowToolbarLayoutData": {
+      "category": "Tolerated (no visual)",
+      "tolerated": true,
+      "usage": {
+        "coreApps": 0,
+        "samplesControlsApps": 18
+      },
+      "properties": [
+        {
+          "name": "priority",
+          "core": 0,
+          "controls": 18
+        }
+      ],
+      "aggregations": [],
+      "events": [],
+      "webComponent": "overflow-priority on the toolbar item",
+      "fit": "adapt",
+      "mapping": "`priority` NeverOverflow/AlwaysOverflow/High/Low -> `overflow-priority` (Default for High/Low). Safe to drop.",
+      "notInV1": [
+        {
+          "kind": "property",
+          "name": "group",
+          "core": 0,
+          "controls": 5
+        },
+        {
+          "kind": "property",
+          "name": "minWidth",
+          "core": 0,
+          "controls": 3
+        },
+        {
+          "kind": "property",
+          "name": "shrinkable",
+          "core": 0,
+          "controls": 6
+        },
+        {
+          "kind": "property",
+          "name": "closeOverflowOnInteraction",
+          "core": 0,
+          "controls": 1
+        },
+        {
+          "kind": "property",
+          "name": "maxWidth",
+          "core": 0,
+          "controls": 2
+        }
+      ]
+    }
+  },
+  "bindingForms": {
+    "allowed": [
+      {
+        "form": "absolute-path",
+        "example": "{/MV_VALUE}",
+        "note": "two-way for value-like properties"
+      },
+      {
+        "form": "list-binding",
+        "example": "items=\"{/T_TAB}\" + one template child"
+      },
+      {
+        "form": "relative-path",
+        "example": "{TITLE}",
+        "note": "inside a template or an element binding"
+      },
+      {
+        "form": "object-binding",
+        "example": "{path:'/T_TAB', templateShareable:false}",
+        "keys": [
+          "path",
+          "parts",
+          "type",
+          "formatOptions",
+          "constraints",
+          "formatter",
+          "targetType",
+          "mode",
+          "sorter",
+          "templateShareable",
+          "length",
+          "startIndex"
+        ]
+      },
+      {
+        "form": "string-composite",
+        "example": "{/MV_PERCENT} %"
+      },
+      {
+        "form": "expression",
+        "example": "{= ${/QUANTITY} > 500 }",
+        "grammar": "restricted - see expressionGrammar"
+      },
+      {
+        "form": "escaped-braces",
+        "example": "\\{ color:red \\}"
+      },
+      {
+        "form": "typed",
+        "example": "{path:'/AMOUNT', type:'sap.ui.model.type.Integer'}",
+        "types": [
+          "sap.ui.model.type.String",
+          "sap.ui.model.type.Integer",
+          "sap.ui.model.type.Float",
+          "sap.ui.model.type.Currency",
+          "sap.ui.model.type.Date",
+          "sap.ui.model.type.Time",
+          "sap.ui.model.type.DateTime"
+        ]
+      },
+      {
+        "form": "parts",
+        "example": "{parts:['/AMOUNT','/CURRENCY'], type:'sap.ui.model.type.Currency'}"
+      },
+      {
+        "form": "formatter",
+        "example": "formatter: 'Formatter.DateAbapDateToDateObject'",
+        "formatters": [
+          "Formatter.DateCreateObject",
+          "Formatter.DateAbapDateToDateObject",
+          "Formatter.DateAbapDateTimeToDateObject"
+        ]
+      },
+      {
+        "form": "device-model",
+        "example": "{device>/system/phone}",
+        "paths": [
+          "/system/phone",
+          "/system/tablet",
+          "/system/desktop",
+          "/resize/width",
+          "/resize/height",
+          "/support/touch",
+          "/orientation/portrait",
+          "/orientation/landscape"
+        ]
+      }
+    ],
+    "formatOptions": [
+      "minFractionDigits",
+      "maxFractionDigits",
+      "minIntegerDigits",
+      "maxIntegerDigits",
+      "groupingEnabled",
+      "decimals",
+      "style",
+      "pattern",
+      "source.pattern",
+      "showMeasure",
+      "showNumber",
+      "currencyCode",
+      "preserveDecimals",
+      "UTC"
+    ],
+    "constraints": [
+      "minimum",
+      "maximum",
+      "minLength",
+      "maxLength"
+    ],
+    "expressionGrammar": {
+      "references": [
+        "${/absolute}",
+        "${relative}",
+        "${device>/path}"
+      ],
+      "literals": [
+        "string",
+        "number",
+        "boolean",
+        "null"
+      ],
+      "operators": [
+        "!",
+        "&&",
+        "||",
+        "?:",
+        "===",
+        "!==",
+        "==",
+        "!=",
+        "<",
+        "<=",
+        ">",
+        ">=",
+        "+",
+        "-",
+        "*",
+        "/",
+        "%",
+        "( )"
+      ],
+      "members": [
+        ".length"
+      ],
+      "functions": [
+        "Math.max",
+        "Math.min",
+        "Math.abs",
+        "Math.round",
+        "Math.floor",
+        "Math.ceil",
+        ".toUpperCase()",
+        ".toLowerCase()",
+        ".trim()",
+        ".indexOf()",
+        ".includes()",
+        ".startsWith()"
+      ]
+    },
+    "excluded": [
+      "named models other than device> (XML templating variables, meta>, i18n>)",
+      "sap.ui.model.odata.type.*",
+      "app formatter functions and Formatter.expandInlineIcons",
+      "core:require type aliases",
+      "expressions beyond expressionGrammar (RegExp, odata.*, encodeURIComponent, arbitrary JS)"
+    ]
+  },
+  "eventWires": {
+    "allowed": [
+      {
+        "wire": ".eB(['EVENT'], arg...)",
+        "from": "client->_event( )"
+      },
+      {
+        "wire": ".eB(['___ZZZ_NAL'])",
+        "from": "client->_event_nav_app_leave( )"
+      },
+      {
+        "wire": ".eF('ACTION', arg...)",
+        "from": "client->_event_client( ) / a wired follow_up_action( )",
+        "note": "only the frontend actions of actions.wire.custom and actions.wire.customGlobals"
+      },
+      {
+        "wire": ".eBP($event, true, ['EVENT'], arg...)",
+        "from": "s_ctrl-check_prevent_default"
+      },
+      {
+        "wire": "['EVENT', false, false, false, queueLast, noBusy]",
+        "from": "s_ctrl-check_queue_last / check_no_busy"
+      },
+      {
+        "wire": "quoted arguments",
+        "from": "s_ctrl-check_arg_literal"
+      }
+    ],
+    "excluded": [
+      "s_ctrl-prevent_default_expr (.eBP with an expression over control objects)"
+    ]
+  },
+  "eventArgDescriptors": {
+    "allowed": [
+      {
+        "descriptor": "'literal'",
+        "meaning": "a constant string"
+      },
+      {
+        "descriptor": "${REL_PATH}",
+        "meaning": "a field of the binding context (row) of the control that fired"
+      },
+      {
+        "descriptor": "${/ABS_PATH}",
+        "meaning": "the current model value"
+      },
+      {
+        "descriptor": "${$source>/prop}",
+        "meaning": "a v1 property of the control that fired"
+      },
+      {
+        "descriptor": "${$parameters>/name}",
+        "meaning": "an event parameter of the closed list eventParameters"
+      },
+      {
+        "descriptor": "JSON / message template",
+        "meaning": "an argument starting with { or $ passed through as data (only meaningful for frontend actions)"
+      }
+    ],
+    "excluded": [
+      "method calls on event objects (${$parameters>/selectedItem}.getKey(), .getBindingContext().getPath(), ...)",
+      "$event.* (the raw UI5 event)",
+      "$controller.* helpers",
+      "parameters that are UI5 objects (item, listItem, selectedItem, column, ...)"
+    ]
+  },
+  "eventParameters": {
+    "sap.m.Input": {
+      "liveChange": [
+        "value"
+      ],
+      "submit": [
+        "value"
+      ],
+      "change": [
+        "value"
+      ],
+      "suggest": [
+        "suggestValue"
+      ]
+    },
+    "sap.m.TextArea": {
+      "liveChange": [
+        "value"
+      ],
+      "change": [
+        "value"
+      ]
+    },
+    "sap.m.SearchField": {
+      "search": [
+        "query",
+        "refreshButtonPressed",
+        "clearButtonPressed"
+      ],
+      "liveChange": [
+        "newValue"
+      ],
+      "suggest": [
+        "suggestValue"
+      ]
+    },
+    "sap.m.CheckBox": {
+      "select": [
+        "selected"
+      ]
+    },
+    "sap.m.Switch": {
+      "change": [
+        "state"
+      ]
+    },
+    "sap.m.ToggleButton": {
+      "press": [
+        "pressed"
+      ]
+    },
+    "sap.m.IconTabBar": {
+      "select": [
+        "key",
+        "selectedKey"
+      ]
+    },
+    "sap.m.DatePicker": {
+      "change": [
+        "value",
+        "valid"
+      ]
+    },
+    "sap.m.DateTimePicker": {
+      "change": [
+        "value",
+        "valid"
+      ]
+    },
+    "sap.m.StepInput": {
+      "change": [
+        "value"
+      ]
+    },
+    "sap.m.MultiInput": {
+      "change": [
+        "value"
+      ],
+      "tokenUpdate": [
+        "type"
+      ]
+    },
+    "sap.m.MultiComboBox": {
+      "selectionChange": [
+        "selected"
+      ]
+    },
+    "sap.m.Table": {
+      "selectionChange": [
+        "selected"
+      ]
+    },
+    "sap.m.List": {
+      "selectionChange": [
+        "selected"
+      ]
+    },
+    "sap.m.Panel": {
+      "expand": [
+        "expand"
+      ]
+    }
+  },
+  "frontendActions": {
+    "allowed": [
+      "SET_FOCUS",
+      "START_TIMER",
+      "DOWNLOAD_B64_FILE",
+      "CLIPBOARD_COPY",
+      "URLHELPER",
+      "OPEN_NEW_TAB",
+      "SCROLL_TO",
+      "SCROLL_INTO_VIEW",
+      "SET_TITLE",
+      "SET_FAVICON",
+      "LOCATION_RELOAD",
+      "SYSTEM_LOGOUT",
+      "STORE_DATA",
+      "KEYBOARD_SHORTCUT",
+      "PLAY_AUDIO",
+      "SET_PUSH_STATE",
+      "HASH_REPLACE",
+      "HASH_BACK",
+      "HASH_ATTACH_CHANGED",
+      "SET_NAV_ROUTING",
+      "SET_APP_STATE_ACTIVE",
+      "SET_SIZE_LIMIT"
+    ],
+    "allowedGlobals": {
+      "MESSAGE_TOAST": [
+        "show"
+      ],
+      "MESSAGE_BOX": [
+        "show",
+        "alert",
+        "confirm",
+        "information",
+        "warning",
+        "error",
+        "success"
+      ],
+      "BUSY_INDICATOR": [
+        "show",
+        "hide"
+      ],
+      "INVISIBLE_MESSAGE": [
+        "announce"
+      ],
+      "THEMING": [
+        "setTheme"
+      ],
+      "VIEW_SLOTS": [
+        "destroy"
+      ]
+    },
+    "noOpAllowed": [
+      "SET_SIZE_LIMIT",
+      "SET_PUSH_STATE",
+      "HASH_REPLACE",
+      "HASH_BACK",
+      "HASH_ATTACH_CHANGED",
+      "SET_NAV_ROUTING",
+      "SET_APP_STATE_ACTIVE"
+    ],
+    "excluded": [
+      "CONTROL_BY_ID",
+      "BINDING_CALL",
+      "BIND_ELEMENT",
+      "SET_ODATA_MODEL",
+      "SMART_VARIANT_INIT",
+      "FILTER_BAR_VARIANT_INIT",
+      "CROSS_APP_NAV_TO_EXT",
+      "CROSS_APP_NAV_TO_PREV_APP",
+      "SET_TITLE_LAUNCHPAD",
+      "CONTROL_GLOBAL ICON_POOL",
+      "CONTROL_GLOBAL POPUP",
+      "CONTROL_GLOBAL FORMATTING"
+    ]
+  },
+  "actions": {
+    "note": "api: the follow_up_action( ) names (cs_event values) a portable app may call - frontendActions.allowed is the same list, kept for consumers of revision 0.2. wire: what a portable renderer actually receives - T_SYSTEM actions with their ROUTER options, and the T_CUSTOM / .eF names. The navigation family of api is folded by the backend into the one ROUTER system action (foldedIntoRouter) and never arrives under its own name.",
+    "api": [
+      "SET_FOCUS",
+      "START_TIMER",
+      "DOWNLOAD_B64_FILE",
+      "CLIPBOARD_COPY",
+      "URLHELPER",
+      "OPEN_NEW_TAB",
+      "SCROLL_TO",
+      "SCROLL_INTO_VIEW",
+      "SET_TITLE",
+      "SET_FAVICON",
+      "LOCATION_RELOAD",
+      "SYSTEM_LOGOUT",
+      "STORE_DATA",
+      "KEYBOARD_SHORTCUT",
+      "PLAY_AUDIO",
+      "SET_PUSH_STATE",
+      "HASH_REPLACE",
+      "HASH_BACK",
+      "HASH_ATTACH_CHANGED",
+      "SET_NAV_ROUTING",
+      "SET_APP_STATE_ACTIVE",
+      "SET_SIZE_LIMIT"
+    ],
+    "wire": {
+      "system": {
+        "VIEW_SLOTS": [
+          "display",
+          "destroy"
+        ],
+        "ROUTER": [
+          "sync"
+        ]
+      },
+      "routerOptions": [
+        "setNavRouting",
+        "checkNavAppCall",
+        "navAppCallPrevApp",
+        "navAppCallPrevId",
+        "setPushState",
+        "setHashReplace",
+        "setHashEvent",
+        "setAppStateActive"
+      ],
+      "foldedIntoRouter": {
+        "SET_NAV_ROUTING": "setNavRouting",
+        "SET_PUSH_STATE": "setPushState",
+        "HASH_REPLACE": "setHashReplace",
+        "HASH_ATTACH_CHANGED": "setHashEvent",
+        "SET_APP_STATE_ACTIVE": "setAppStateActive"
+      },
+      "custom": [
+        "SET_FOCUS",
+        "START_TIMER",
+        "DOWNLOAD_B64_FILE",
+        "CLIPBOARD_COPY",
+        "URLHELPER",
+        "OPEN_NEW_TAB",
+        "SCROLL_TO",
+        "SCROLL_INTO_VIEW",
+        "SET_TITLE",
+        "SET_FAVICON",
+        "LOCATION_RELOAD",
+        "SYSTEM_LOGOUT",
+        "STORE_DATA",
+        "KEYBOARD_SHORTCUT",
+        "PLAY_AUDIO",
+        "HASH_BACK",
+        "SET_SIZE_LIMIT"
+      ],
+      "customGlobals": {
+        "MESSAGE_TOAST": [
+          "show"
+        ],
+        "MESSAGE_BOX": [
+          "show",
+          "alert",
+          "confirm",
+          "information",
+          "warning",
+          "error",
+          "success"
+        ],
+        "BUSY_INDICATOR": [
+          "show",
+          "hide"
+        ],
+        "INVISIBLE_MESSAGE": [
+          "announce"
+        ],
+        "THEMING": [
+          "setTheme"
+        ],
+        "VIEW_SLOTS": [
+          "destroy"
+        ]
+      },
+      "noOpAllowed": [
+        "ROUTER",
+        "HASH_BACK",
+        "SET_SIZE_LIMIT"
+      ]
+    }
+  },
+  "clientApi": {
+    "allowed": [
+      "view_display",
+      "popup_display",
+      "popup_destroy",
+      "popover_display",
+      "popover_destroy",
+      "message_toast_display",
+      "message_box_display",
+      "follow_up_action",
+      "_event",
+      "_event_client",
+      "_event_nav_app_leave",
+      "_bind",
+      "_bind_edit",
+      "nav_app_call",
+      "nav_app_leave",
+      "get_event_arg"
+    ],
+    "excluded": [
+      "nest_view_display",
+      "nest_view_destroy",
+      "nest2_view_display",
+      "nest2_view_destroy",
+      "view_display( switch_default_model_path )"
+    ]
+  },
+  "excludedNamespaces": [
+    "sap.ui.comp",
+    "sap.uxap",
+    "sap.f",
+    "sap.ui.table",
+    "sap.ui.unified",
+    "sap.suite",
+    "sap.viz",
+    "sap.gantt",
+    "sap.ui.vbm",
+    "sap.ui.vk",
+    "sap.ui.codeeditor",
+    "sap.ui.integration",
+    "sap.ndc",
+    "sap.ui.webc",
+    "sap.ui.core.dnd",
+    "sap.f.dnd",
+    "sap.m.plugins",
+    "z2ui5.cc",
+    "http://www.w3.org/1999/xhtml",
+    "http://schemas.sap.com/sapui5/extension/sap.ui.core.template/1"
+  ],
+  "v11Candidates": [
+    {
+      "family": "grid table",
+      "controls": "sap.ui.table.Table, Column, RowAction, RowActionItem",
+      "coreAppsBlocked": "7",
+      "webComponent": "ui5-table (+ ui5-table-row-action, ui5-table-virtualizer)",
+      "note": "adapt: Column `label` + `template` instead of header/cells; `visibleRowCount`/`selectionMode`/`rowActionTemplate`; fixed columns and column menu (`sort`/`filter` events with `$parameters>/column` objects) not portable"
+    },
+    {
+      "family": "message popover",
+      "controls": "sap.m.MessagePopover, MessageItem, MessageView",
+      "coreAppsBlocked": "4 (3 sole)",
+      "webComponent": "none - compose ui5-popover/ui5-dialog + ui5-list (ui5-li with highlight per type)",
+      "note": "compose"
+    },
+    {
+      "family": "page layouts",
+      "controls": "sap.f.DynamicPage (+Title, Header), sap.f.FlexibleColumnLayout, sap.m.NavContainer",
+      "coreAppsBlocked": "3 + 3 + 3",
+      "webComponent": "ui5-dynamic-page/-title/-header, ui5-flexible-column-layout",
+      "note": "adapt; NavContainer needs CONTROL_BY_ID `to`/`back` -> define a portable \"page switch\""
+    },
+    {
+      "family": "value-help dialogs",
+      "controls": "sap.m.TableSelectDialog, SelectDialog",
+      "coreAppsBlocked": "3 (2 sole)",
+      "webComponent": "none - compose ui5-dialog + ui5-input search + ui5-table/ui5-list",
+      "note": "compose; `search`/`confirm` events with `$parameters>/value`, selected rows via two-way `selected`"
+    },
+    {
+      "family": "quick view",
+      "controls": "sap.m.QuickView, QuickViewPage, QuickViewGroup, QuickViewGroupElement",
+      "coreAppsBlocked": "3",
+      "webComponent": "none - compose ui5-popover",
+      "note": "compose"
+    },
+    {
+      "family": "menus",
+      "controls": "sap.m.Menu, MenuItem, MenuButton",
+      "coreAppsBlocked": "2",
+      "webComponent": "ui5-menu, ui5-menu-item, ui5-button opener",
+      "note": "direct"
+    },
+    {
+      "family": "small inputs",
+      "controls": "TimePicker, Slider, RadioButton/RadioButtonGroup, RatingIndicator",
+      "coreAppsBlocked": "1 each (+ many in samples-controls: Slider 37, RadioButton 15)",
+      "webComponent": "ui5-time-picker, ui5-slider, ui5-radio-button (group via name), ui5-rating-indicator",
+      "note": "direct"
+    },
+    {
+      "family": "object display",
+      "controls": "ObjectAttribute, ObjectHeader, Avatar, FormattedText, Carousel, Breadcrumbs",
+      "coreAppsBlocked": "1 each (samples-controls: 43, 26, 40, …)",
+      "webComponent": "compose / ui5-avatar / limited HTML / ui5-carousel / ui5-breadcrumbs",
+      "note": "mixed"
+    },
+    {
+      "family": "full Form",
+      "controls": "sap.ui.layout.form.Form, FormContainer, FormElement (+ ResponsiveGridLayout)",
+      "coreAppsBlocked": "0 (18 samples-controls)",
+      "webComponent": "ui5-form, ui5-form-group, ui5-form-item",
+      "note": "direct (simpler than SimpleForm)"
+    },
+    {
+      "family": "ResponsivePopover",
+      "controls": "sap.m.ResponsivePopover",
+      "coreAppsBlocked": "0 (18)",
+      "webComponent": "ui5-responsive-popover",
+      "note": "direct"
+    },
+    {
+      "family": "nested views",
+      "controls": "`nest_view_display`, `nest2_view_display`",
+      "coreAppsBlocked": "3 (+3 with other blockers)",
+      "webComponent": "render a second view document into the control with the given id",
+      "note": "protocol feature, no new control"
+    },
+    {
+      "family": "CONTROL_BY_ID whitelist",
+      "controls": "`open`/`close`/`openBy`/`toggleBy` (Dialog, Popover), `setExpanded` (Panel), `focus`, `addStyleClass`/`removeStyleClass`/`toggleStyleClass`, `setText`, `setVisible`",
+      "coreAppsBlocked": "5 among v1-control-covered apps (16 overall)",
+      "webComponent": "renderer implements the named methods on its own components",
+      "note": "defines the portable part of an open-ended action"
+    },
+    {
+      "family": "BINDING_CALL",
+      "controls": "client-side `filter`/`sort` of a bound list",
+      "coreAppsBlocked": "2",
+      "webComponent": "renderer-side filter/sort of the template rows",
+      "note": "needs a declarative filter/sort spec"
+    }
+  ]
+}
