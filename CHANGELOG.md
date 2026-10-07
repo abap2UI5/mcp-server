@@ -79,7 +79,15 @@
 - **An untouched MCP Apps form sends nothing.** A choice whose value matched
   no key showed - and sent - its first option, and a check box bound to
   `null`, `''` or `'X'` counted as changed. Message box choices with
-  parentheses stay whole.
+  parentheses stay whole. Untouched now means "as rendered": a textarea
+  with CRLF or a leading newline, a text with a newline and a
+  multi-select in another order were written back on every press too.
+- **The MCP Apps screen keeps what the user typed and the focus** across a
+  failed act and while one runs; it reads the current screen when its
+  session moved on (Refresh failed for good once the agent had acted);
+  a button that needs a value only a browser computes is disabled instead
+  of failing every time; the reported height shrinks again; Refresh keeps
+  the tool input's `max_rows`.
 - **The snapshot survives `&#99999999;` in a view and unclosed `<` in model
   markup.** The first threw the whole snapshot (after the act had reached
   the backend), the second took seconds for 80k characters.
