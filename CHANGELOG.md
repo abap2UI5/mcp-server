@@ -35,6 +35,81 @@
 - `createAppClient` gains `screen(session)`: a copy of a session's folded
   state, for renderers other than the snapshot (additive; the vendored
   copies elsewhere keep working unchanged).
+- **System mode: a wrong password reaches the system once under parallel
+  calls too.** Parallel tool calls all passed the breaker before the first
+  401 came back, so a wrong password was sent once per call (SAP locks a
+  user after a few), and the password command ran once per call. Until the
+  system has accepted the logon, requests go one at a time, and the
+  command's answer is shared. `system_status` and `app_list` give up after
+  30 s instead of waiting for good, a redirect names its target (a SAML
+  logon page), a malformed `%` in `A2UI5_MCP_SYSTEM_URL` no longer stops the
+  server from starting, and a URL that does not parse no longer shows the
+  user and password typed into it. A breaker refusal reads as itself, not as
+  "the backend did not answer".
+- **An act queued behind one in flight runs only where it still names what
+  its caller saw.** Two `app_act { event: "a1" }` at once fired the first
+  screen's a1 and then whatever a1 was on the screen that answered it
+  (NEXT, then DELETE_ALL - for real in system mode). The queued act is
+  refused, sending nothing, when its action or fields name something else
+  on the new screen.
+- **A backend start during `build_backend` is refused.** `app_start`,
+  `run_app` or `backend start` booted the output from before the build,
+  and the build then reported built while that process went on serving
+  the old classes.
+- **The app tools' answers fit the client.** A 120 KB TextArea or a table
+  of 200 wide rows went over the result cap by default. Long values are
+  cut (and read-only in that answer), then rows dropped from the end, and a
+  text beside the snapshot says what was cut. With `format:
+  "adaptive-card"` the card counts together with the snapshot.
+- **`interact_app` waits for each action's roundtrip.** The frontend drops
+  an event fired while a roundtrip runs, and its busy overlay shows only
+  after a second: two quick clicks lost the second, and a click right after
+  a fill was dropped - each reported as performed.
+- **`backend stop` stops a start in flight.** It answered "not running"
+  while the start went on to listen, and a build that stopped the backend
+  while one started reported built while the old process served on.
+- **Pictures are bounded.** `run_app` / `interact_app` cut a page taller
+  than 4096 px (and say so); `screenshot_view` leaves out a picture over
+  8000 px a side or past its image budget, named. Each call writes its own
+  PNG - two calls on one class reported each other's picture.
+- **Answers that grew without bound are paged or cut:** a lint's findings
+  (the first 100, counted per rule - and the whole sandbox's JSON is read
+  in full: one app with many findings made every later lint a `parse`
+  failure), `read_app` (pages of whole lines, `from_line`), a full
+  `run_unit_tests` (counted per object), `migrate_report`'s files.
+- **The build refuses a dev object named like a framework class** - for
+  every writer: `deploy_app` could not check before a release was
+  installed, and `migrate_report` did not check at all.
+- **An argument a tool does not declare is refused.** `app_act { value:
+  {...}, event }` fired the event without the edits. `max_rows: true`
+  (or `false`, `[]`, `"  "`) is refused instead of read as 1 or 0, and an
+  error repeats at most 80 characters of an argument.
+- **App sessions are evicted least recently used first.** The session
+  started first went first, even while it was the one in use, and a session
+  evicted while an act was in flight came back unlisted.
+- **An event name without `row` fires the screen action of that name**
+  before a row action of the same name (a "delete selected" button after a
+  table with a DELETE per row).
+- **The Adaptive Card shows the snapshot's rows.** It rendered every row of a
+  table - 5,000 rows were a card of ~1 MB in the same result as the
+  snapshot - and Save on the untouched card wrote back every row the
+  snapshot did not show. A card over the answer budget is left out with the
+  reason.
+- **An untouched MCP Apps form sends nothing.** A choice whose value matched
+  no key showed - and sent - its first option, and a check box bound to
+  `null`, `''` or `'X'` counted as changed. Message box choices with
+  parentheses stay whole. Untouched now means "as rendered": a textarea
+  with CRLF or a leading newline, a text with a newline and a
+  multi-select in another order were written back on every press too.
+- **The MCP Apps screen keeps what the user typed and the focus** across a
+  failed act and while one runs; it reads the current screen when its
+  session moved on (Refresh failed for good once the agent had acted);
+  a button that needs a value only a browser computes is disabled instead
+  of failing every time; the reported height shrinks again; Refresh keeps
+  the tool input's `max_rows`.
+- **The snapshot survives `&#99999999;` in a view and unclosed `<` in model
+  markup.** The first threw the whole snapshot (after the act had reached
+  the backend), the second took seconds for 80k characters.
 - **A deploy lint reports the deployed class's findings only.** They were
   picked from the repository-wide abaplint run by a substring of the path,
   so `z_app` was handed the findings of `zz_app` (any class whose name ends

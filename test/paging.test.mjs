@@ -15,7 +15,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { ANSWER_BUDGET, takeWithin, takeSmallestWithin } from '../lib/budget.mjs';
+import { ANSWER_BUDGET, takeWithin, takeSmallestWithin, fitSnapshot } from '../lib/budget.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const LIMIT = 90_000; // characters: comfortably under the client's token cap for this kind of text
@@ -159,4 +159,25 @@ test('the budget helpers keep order, always return one item, and prefer small fi
   const { taken, rest } = takeSmallestWithin(files, 1000);
   assert.deepEqual(taken.map((f) => f.path), ['a', 'c'], 'original order kept');
   assert.deepEqual(rest.map((f) => f.path), ['BIG']);
+});
+
+test('fitSnapshot: a snapshot that fits is the same; long values are cut and read-only, then rows go from the end', () => {
+  const small = { snapshotVersion: 1, fields: [{ id: 'f1', value: 'x', editable: true }], tables: [] };
+  assert.equal(fitSnapshot(small).snapshot, small);
+  const big = {
+    snapshotVersion: 1,
+    fields: [{ id: 'f1', value: 'a'.repeat(120000), editable: true }, { id: 'f2', value: 'short', editable: true }],
+    tables: [{ id: 't1', rowCount: 300, truncated: false, editableCells: ['NOTE', 'QTY'], rows: Array.from({ length: 300 }, (_, i) => ({ NOTE: i === 0 ? 'n'.repeat(5000) : `note ${i}`.padEnd(300, '.'), QTY: i })) }],
+  };
+  const { snapshot, notes } = fitSnapshot(big);
+  assert.ok(JSON.stringify(snapshot).length <= ANSWER_BUDGET);
+  assert.equal(snapshot.fields[0].value.length, 2003);
+  assert.equal(snapshot.fields[0].editable, false);
+  assert.equal(snapshot.fields[1].editable, true);
+  assert.deepEqual(snapshot.tables[0].editableCells, ['QTY']);
+  assert.equal(snapshot.tables[0].truncated, true);
+  assert.ok(snapshot.tables[0].rows.length < 300 && snapshot.tables[0].rows.length >= 1);
+  assert.equal(snapshot.tables[0].rowCount, 300);
+  assert.equal(big.fields[0].value.length, 120000, 'the input is not changed');
+  assert.match(notes.join(' '), /f1 are cut.*table t1: cells of NOTE.*table t1 shows its first \d+ row\(s\)/);
 });

@@ -35,6 +35,14 @@ test('the endpoint is the launch URL without the class; {class} in the path is r
   assert.match(systemEndpoint('https://me:pw@h/sap/bc/z2ui5').problem, /carries credentials/);
 });
 
+test('a URL that does not parse never echoes its credentials; a malformed % sequence does not throw', () => {
+  const broken = systemEndpoint('https://me:secret@h:44x/sap/bc/z2ui5').problem;
+  assert.match(broken, /is not a URL/);
+  assert.doesNotMatch(broken, /secret/);
+  assert.match(broken, /https:\/\/\*\*\*@h:44x/);
+  assert.deepEqual(systemEndpoint('https://h/sap/bc/%zz?sap-client=1'), { endpoint: 'https://h/sap/bc/%zz?sap-client=1' });
+});
+
 test('the start location is the launch URL: origin, path, query plus app_start', () => {
   assert.deepEqual(systemLocation('https://h:44300/sap/bc/z2ui5?sap-client=100&sap-theme=sap_horizon', 'zcl_app'),
     { origin: 'https://h:44300', pathname: '/sap/bc/z2ui5', search: '?sap-client=100&sap-theme=sap_horizon&app_start=zcl_app' });
@@ -129,6 +137,62 @@ test('the breaker: a rejected logon is sent ONCE, then refused without a request
   assert.equal(calls, 1, 'the second attempt never reached the system');
 });
 
+test('the breaker under parallel calls: a wrong password reaches the system once, not once per call', async () => {
+  let calls = 0;
+  const sys = createSystemHttp(cfg(), {
+    request: async () => {
+      calls++;
+      await new Promise((r) => setTimeout(r, 10));
+      return { status: 401, headers: {}, body: '' };
+    },
+  });
+  const all = await Promise.allSettled([sys.send('https://h/a'), sys.send('https://h/b'), sys.send('https://h/c')]);
+  assert.equal(calls, 1, 'the calls waited for the first answer');
+  assert.equal(all[0].value.status, 401);
+  assert.ok(all.slice(1).every((r) => r.status === 'rejected' && /once already/.test(r.reason.message)));
+});
+
+test('accepted once, requests run side by side; parallel first calls ask the password command once', async () => {
+  let asked = 0;
+  let open = 0;
+  let most = 0;
+  const sys = createSystemHttp(cfg({ passwordSource: 'command', password: undefined, passwordCmd: 'x' }), {
+    runCommand: async () => {
+      asked++;
+      await new Promise((r) => setTimeout(r, 5));
+      return 'pw';
+    },
+    request: async () => {
+      open++;
+      most = Math.max(most, open);
+      await new Promise((r) => setTimeout(r, 10));
+      open--;
+      return { status: 200, headers: {}, body: '' };
+    },
+  });
+  await Promise.all([sys.send('https://h/a'), sys.send('https://h/b')]);
+  assert.equal(asked, 1);
+  assert.equal(most, 1, 'one at a time until the logon was accepted');
+  await Promise.all([sys.send('https://h/a'), sys.send('https://h/b'), sys.send('https://h/c')]);
+  assert.equal(most, 3, 'side by side once accepted');
+  assert.equal(asked, 1);
+});
+
+test('a failing password command is asked again on the next call', async () => {
+  let asked = 0;
+  const sys = createSystemHttp(cfg({ passwordSource: 'command', password: undefined, passwordCmd: 'x' }), {
+    runCommand: async () => {
+      asked++;
+      if (asked === 1) throw new Error('keychain locked');
+      return 'pw';
+    },
+    request: async () => ({ status: 200, headers: {}, body: '' }),
+  });
+  await assert.rejects(sys.send('https://h/a'), /keychain locked/);
+  assert.equal((await sys.send('https://h/a')).status, 200);
+  assert.equal(asked, 2);
+});
+
 test('the breaker with a password command: asked once, asked again after a 401, retried only with a new answer', async () => {
   const answers = ['wrong', 'wrong', 'right'];
   let asked = 0;
@@ -196,6 +260,11 @@ test('system_status: misconfigured, accepted, rejected', async () => {
   assert.match(no.problem, /rejected the logon/);
   const gone = await checkSystem(cfg(), createSystemHttp(cfg(), { request: async () => ({ status: 404, headers: {}, body: '' }) }));
   assert.match(gone.problem, /SICF/);
+  const moved = await checkSystem(cfg(), createSystemHttp(cfg(), { request: async () => ({ status: 302, headers: { location: 'https://idp/saml' }, body: '' }) }));
+  assert.match(moved.problem, /HTTP 302 to https:\/\/idp\/saml.*Basic/);
+  let signal;
+  await checkSystem(cfg(), createSystemHttp(cfg(), { request: async (url, init) => { signal = init.signal; return { status: 200, headers: {}, body: '' }; } }));
+  assert.ok(signal instanceof AbortSignal, 'the check is bounded');
 });
 
 test('every system tool has a name, a documenting description and an object schema; the acting ones say they are real', () => {

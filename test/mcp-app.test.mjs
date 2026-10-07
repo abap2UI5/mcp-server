@@ -203,6 +203,26 @@ test('editsFromForm keeps only what the user changed', async () => {
   assert.deepEqual(editsFromForm(snap, changed), { [text.id]: 'typed' });
 });
 
+test('an untouched choice without a matching key and an unchecked box with an ABAP value send nothing', () => {
+  const fields = [
+    { id: 'f1', path: '/C', name: 'C', label: 'C', kind: 'choice', value: '', editable: true, values: [{ key: 'DE', text: 'Germany' }, { key: 'FR', text: 'France' }] },
+    { id: 'f2', path: '/R', name: 'R', label: 'R', kind: 'choice', value: -1, editable: true, values: [{ key: '0', text: 'a' }, { key: '1', text: 'b' }] },
+    { id: 'f3', path: '/B', name: 'B', label: 'B', kind: 'boolean', value: null, editable: true },
+    { id: 'f4', path: '/X', name: 'X', label: 'X', kind: 'boolean', value: 'X', editable: true },
+  ];
+  const snap = { snapshotVersion: 1, session: 'S1', app: 'Z', title: '', layer: 'main', fields, actions: [], tables: [], messages: [], texts: [], unsupported: [] };
+  const html = renderScreen({ snapshot: snap, canAct: true });
+  assert.match(html, /<select id="in-f1"[^>]*><option value="" selected hidden><\/option><option value="DE">/, 'the empty key is the shown option, not Germany');
+  assert.match(html, /<option value="-1" selected hidden><\/option>/);
+  assert.deepEqual(editsFromForm(snap, [{ key: 'f1', value: '' }, { key: 'f2', value: '-1' }, { key: 'f3', value: false }, { key: 'f4', value: true }]), {});
+  assert.deepEqual(editsFromForm(snap, [{ key: 'f3', value: true }, { key: 'f4', value: false }]), { f3: true, f4: false });
+});
+
+test('message box choices with parentheses stay whole', () => {
+  const box = { id: 'a2', event: 'CLOSED', args: ['$action'], label: 'close message box (Save (draft) | Discard)' };
+  assert.deepEqual(boxChoices(box), ['Save (draft)', 'Discard']);
+});
+
 test('renderScreen shows every field, action and table of each recorded screen, and escapes every value', async () => {
   for (const name of FIXTURES) {
     for (const snap of await snapshotsOf(name)) {
@@ -278,7 +298,7 @@ test('the bridge: initialize handshake, tool-result rendering, app_act through t
   // refresh is app_describe of the current session; nothing else is callable
   const r = bridge.refresh();
   const c3 = posted.shift();
-  assert.deepEqual(c3.params, { name: 'app_describe', arguments: { session: second.session } });
+  assert.deepEqual(c3.params, { name: 'app_describe', arguments: { session: second.session, max_rows: 7 } }, 'Refresh keeps the tool input max_rows');
   bridge.handle({ jsonrpc: '2.0', id: c3.id, result: { content: [{ type: 'text', text: JSON.stringify(second) }] } });
   await r;
   assert.deepEqual(CALLABLE_TOOLS, ['app_act', 'app_describe']);
@@ -286,6 +306,35 @@ test('the bridge: initialize handshake, tool-result rendering, app_act through t
   // teardown and ping are answered
   bridge.handle({ jsonrpc: '2.0', id: 99, method: 'ui/resource-teardown', params: { reason: 'x' } });
   assert.deepEqual(posted.shift(), { jsonrpc: '2.0', id: 99, result: {} });
+});
+
+test('Refresh on a session that moved on reads the current one; an act refused for it says so', async () => {
+  const [first, second] = await snapshotsOf('form-381');
+  const posted = [];
+  const views = [];
+  const bridge = createBridge({ post: (m) => posted.push(m), render: (v) => views.push(v) });
+  const started = bridge.start();
+  bridge.handle({ jsonrpc: '2.0', id: posted.shift().id, result: { hostCapabilities: { serverTools: {} } } });
+  await started;
+  posted.length = 0;
+  bridge.handle({ jsonrpc: '2.0', method: 'ui/notifications/tool-result', params: { content: [{ type: 'text', text: JSON.stringify(first) }] } });
+  const moved = `session '${first.session}' is an earlier state of this app session - continue with the current one: '${second.session}' (app_describe shows it)`;
+  const acting = bridge.act({ action: first.actions[0].id });
+  bridge.handle({ jsonrpc: '2.0', id: posted.shift().id, result: { isError: true, content: [{ type: 'text', text: moved }] } });
+  await acting;
+  assert.match(views.at(-1).error, /- Refresh shows it$/);
+  const r = bridge.refresh();
+  const c1 = posted.shift();
+  assert.deepEqual(c1.params.arguments, { session: first.session });
+  bridge.handle({ jsonrpc: '2.0', id: c1.id, result: { isError: true, content: [{ type: 'text', text: moved }] } });
+  await new Promise((res) => setImmediate(res));
+  const c2 = posted.shift();
+  assert.deepEqual(c2.params, { name: 'app_describe', arguments: { session: second.session } });
+  bridge.handle({ jsonrpc: '2.0', id: c2.id, result: { content: [{ type: 'text', text: JSON.stringify(second) }] } });
+  await r;
+  assert.equal(views.at(-1).snapshot.session, second.session);
+  assert.equal(views.at(-1).error, null);
+  assert.match(views.at(-1).note, /moved on/);
 });
 
 test('the bridge acts only when the host proxies tool calls (serverTools)', async () => {
@@ -455,6 +504,113 @@ test('the real page in Chromium under the default CSP: renders the snapshot, a c
     assert.ok(await page.evaluate(() => window.sizes) >= 1, 'the page reports its size');
     assert.deepEqual(problems, [], 'no CSP violation, no script error');
     assert.deepEqual(requests.map((u) => new URL(u).pathname).sort(), ['/', '/view'], 'the page loads nothing else');
+  } finally {
+    await browser.close();
+    srv.close();
+  }
+});
+
+/* What the browser does to a value it is given, and what a failed act did to
+ * the typing: an untouched textarea with CRLF, a text input with a newline,
+ * a multi-select in another order or with a key it has no option for were
+ * all written back on any press; an error result wiped what the user typed
+ * and the focus; the frame never shrank. */
+test('the real page: untouched inputs send nothing, typing and focus survive a failed act, the size shrinks again', async (t) => {
+  const browser = await browserOrNull();
+  if (!browser) {
+    t.skip('no Chromium for Playwright on this machine');
+    return;
+  }
+  const field = (id, kind, value, extra = {}) => ({ id, path: `/${id.toUpperCase()}`, name: id.toUpperCase(), label: id, kind, value, editable: true, ...extra });
+  const snap = {
+    snapshotVersion: 1, session: 'S1', app: 'Z_T', title: 'T', layer: 'main',
+    fields: [
+      field('f1', 'textarea', 'line one\r\nline two'),
+      field('f2', 'textarea', '\nstarts with a newline'),
+      field('f3', 'text', 'pasted\nwith newline'),
+      field('f4', 'multichoice', ['B', 'A'], { values: [{ key: 'A', text: 'A' }, { key: 'B', text: 'B' }, { key: 'C', text: 'C' }] }),
+      field('f5', 'multichoice', ['A', 'GONE'], { values: [{ key: 'A', text: 'A' }, { key: 'B', text: 'B' }] }),
+      field('f6', 'text', 'type here'),
+    ],
+    actions: [
+      { id: 'a1', event: 'GO', args: [], label: 'Go', control: 'sap.m.Button', trigger: 'press', enabled: true, scope: 'screen', layer: 'main' },
+      { id: 'a2', event: 'VH', args: ['$parameters:value'], label: 'Search', control: 'sap.m.SearchField', trigger: 'search', enabled: true, scope: 'screen', layer: 'main' },
+    ],
+    tables: [], messages: [], texts: [], unsupported: [],
+  };
+  const small = { ...snap, fields: [field('f6', 'text', 'x')], actions: [snap.actions[0]] };
+  const host = `<!doctype html><html><head><link rel="icon" href="data:,"></head><body>
+<iframe id="view" src="/view" sandbox="allow-scripts" style="width:800px;height:600px"></iframe>
+<script>
+  window.calls = []; window.sizes = []; window.order = []; window.answer = 'error';
+  const SNAP = ${JSON.stringify(JSON.stringify(snap))};
+  const SMALL = ${JSON.stringify(JSON.stringify(small))};
+  const frame = document.getElementById('view');
+  const send = (m) => frame.contentWindow.postMessage(m, '*');
+  window.release = null;
+  window.addEventListener('message', (ev) => {
+    if (ev.source !== frame.contentWindow) return;
+    const m = ev.data;
+    window.order.push(m.method || 'response');
+    if (m.method === 'ui/initialize') send({ jsonrpc: '2.0', id: m.id, result: { protocolVersion: m.params.protocolVersion, hostInfo: { name: 'h', version: '0' }, hostCapabilities: { serverTools: {} }, hostContext: {} } });
+    else if (m.method === 'ui/notifications/initialized') send({ jsonrpc: '2.0', method: 'ui/notifications/tool-result', params: { content: [{ type: 'text', text: SNAP }] } });
+    else if (m.method === 'tools/call') {
+      window.calls.push(m.params);
+      const reply = () => send({ jsonrpc: '2.0', id: m.id, result: window.answer === 'error'
+        ? { isError: true, content: [{ type: 'text', text: 'HTTP 500: backend error' }] }
+        : { content: [{ type: 'text', text: window.answer === 'small' ? SMALL : SNAP }] } });
+      window.release = reply;
+    } else if (m.method === 'ui/notifications/size-changed') {
+      window.sizes.push(m.params.height);
+      frame.style.height = m.params.height + 'px';
+    }
+  });
+</script></body></html>`;
+  const srv = http.createServer((req, res) => {
+    if (req.url === '/view') res.writeHead(200, { 'content-type': 'text/html', 'content-security-policy': DEFAULT_CSP }).end(appScreenHtml());
+    else if (req.url === '/') res.writeHead(200, { 'content-type': 'text/html' }).end(host);
+    else res.writeHead(404).end();
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const page = await browser.newPage();
+  const problems = [];
+  page.on('pageerror', (e) => problems.push(String(e)));
+  try {
+    await page.goto(`http://127.0.0.1:${srv.address().port}/`);
+    const view = page.frameLocator('#view');
+    await view.locator('[data-field="f1"]').waitFor();
+    assert.equal(await view.locator('[data-field="f2"]').inputValue(), '\nstarts with a newline', 'a leading newline is kept');
+    assert.equal(await view.locator('button[data-action="a2"]').isDisabled(), true, 'a button that needs a browser value is disabled');
+
+    // untouched: nothing goes out
+    await view.locator('button[data-action="a1"]').click();
+    await page.waitForFunction(() => window.calls.length === 1);
+    assert.deepEqual((await page.evaluate(() => window.calls))[0].arguments, { session: 'S1', event: 'a1' });
+    await page.evaluate(() => window.release());
+    await view.locator('.error').waitFor();
+
+    // typed, then a failed act: the typing and the focus stay
+    await view.locator('[data-field="f6"]').fill('my long typed text');
+    await view.locator('button[data-action="a1"]').focus();
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => window.calls.length === 2);
+    assert.deepEqual((await page.evaluate(() => window.calls))[1].arguments.values, { f6: 'my long typed text' });
+    assert.equal(await view.locator('[data-field="f6"]').inputValue(), 'my long typed text', 'shown while the act runs');
+    await page.evaluate(() => window.release());
+    await view.locator('.error').waitFor();
+    assert.equal(await view.locator('[data-field="f6"]').inputValue(), 'my long typed text', 'kept after the error');
+    assert.equal(await view.locator('button[data-action="a1"]').evaluate((el) => el === document.activeElement), true, 'the focus is back on the button');
+
+    // a smaller screen: the frame shrinks with it
+    const big = await page.evaluate(() => window.sizes.at(-1));
+    await page.evaluate(() => { window.answer = 'small'; });
+    await view.locator('button[data-action="a1"]').click();
+    await page.waitForFunction(() => window.calls.length === 3);
+    await page.evaluate(() => window.release());
+    await page.waitForFunction((b) => window.sizes.at(-1) < b, big, { timeout: 5000 });
+    const order = await page.evaluate(() => window.order);
+    assert.ok(order.indexOf('ui/notifications/initialized') < order.indexOf('ui/notifications/size-changed'), order.join());
+    assert.deepEqual(problems, []);
   } finally {
     await browser.close();
     srv.close();

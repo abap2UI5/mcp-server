@@ -411,6 +411,87 @@ function fakeApp(xml, model) {
 }
 const page = (body) => `<mvc:View xmlns="sap.m" xmlns:mvc="sap.ui.core.mvc" xmlns:t="sap.ui.table"><Page title="T">${body}</Page></mvc:View>`;
 
+test('sessions are evicted least recently used first; one evicted while its act was in flight does not come back', async () => {
+  let n = 0;
+  let hold = null;
+  const xml = page('<Button text="Go" press=".eB([\'GO\'])"/>');
+  const transport = async ({ body }) => {
+    const value = JSON.parse(body).value;
+    n += 1;
+    const id = `D${n}`;
+    if (hold && value.S_FRONT.ID === hold.id) await hold.wait;
+    const response = value.S_FRONT.ID
+      ? { S_FRONT: { ID: id, APP: 'Z_T' } }
+      : { S_FRONT: { ID: id, APP: 'Z_T' }, S_ACTION: undefined };
+    if (!value.S_FRONT.ID) response.S_FRONT.S_ACTION = { T_SYSTEM: [['VIEW_SLOTS', 'display', 'MAIN', xml]] };
+    return { status: 200, body: JSON.stringify(response) };
+  };
+  const client = createAppClient({ transport, maxSessions: 2, location: (app) => ({ origin: 'x', pathname: '/', search: `?app_start=${app}` }) });
+  let a = await client.start('z_a');
+  const b = await client.start('z_b');
+  a = await client.act(a.session, { event: 'GO' });
+  const c = await client.start('z_c');
+  assert.deepEqual(client.sessions().map((x) => x.session), [a.session, c.session], 'B went, not A that was in use');
+  assert.throws(() => client.describe(b.session), /unknown session/);
+
+  let release;
+  hold = { id: a.session, wait: new Promise((r) => { release = r; }) };
+  const late = client.act(a.session, { event: 'GO' });
+  const d = await client.start('z_d');
+  const e = await client.start('z_e');
+  release();
+  const answered = await late;
+  assert.deepEqual(client.sessions().map((x) => x.session), [d.session, e.session]);
+  assert.throws(() => client.describe(answered.session), /unknown session/, 'not back as an unlisted session');
+});
+
+test('an act queued behind one in flight runs only where its ids still name what the caller saw', async () => {
+  const one = page('<Button text="Next" press=".eB([\'NEXT\'])"/>');
+  const two = page('<Button text="Delete all" press=".eB([\'DELETE_ALL\'])"/>');
+  const sent = [];
+  let release;
+  const transport = async ({ body }) => {
+    const value = JSON.parse(body).value;
+    sent.push(value.S_FRONT.EVENT ?? 'start');
+    if (!value.S_FRONT.ID) return { status: 200, body: JSON.stringify({ S_FRONT: { ID: 'D1', APP: 'Z_T', S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'display', 'MAIN', one]] } } }) };
+    if (value.S_FRONT.EVENT === 'NEXT') await new Promise((r) => { release = r; });
+    return { status: 200, body: JSON.stringify({ S_FRONT: { ID: `D${sent.length}`, APP: 'Z_T', S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'display', 'MAIN', two]] } } }) };
+  };
+  const client = createAppClient({ transport, location: (app) => ({ origin: 'x', pathname: '/', search: `?app_start=${app}` }) });
+  const s = await client.start('z_t');
+  const first = client.act(s.session, { event: 'a1' });
+  const second = client.act(s.session, { event: 'a1' });
+  await new Promise((r) => setImmediate(r));
+  release();
+  const next = await first;
+  await rejects(second, /^the screen changed while an earlier act was in flight - 'a1' is a1 \(DELETE_ALL\) on the new screen; nothing was sent/);
+  assert.deepEqual(sent, ['start', 'NEXT'], 'DELETE_ALL was never sent');
+  // queued on a screen that stays the same, it runs
+  const third = client.act(next.session, { event: 'a1' });
+  const fourth = client.act(next.session, { event: 'DELETE_ALL' });
+  await third;
+  await fourth;
+  assert.deepEqual(sent, ['start', 'NEXT', 'DELETE_ALL', 'DELETE_ALL']);
+});
+
+test('an event name without `row` fires the screen action of that name before a row action', async () => {
+  const xml = page(
+    '<Table items="{/T}"><columns><Column/></columns><items><ColumnListItem><cells><Button text="Del" press=".eB([\'DELETE\'], ${A})"/></cells></ColumnListItem></items></Table>'
+    + '<Button text="Delete selected" press=".eB([\'DELETE\'])"/>',
+  );
+  const { client, bodies } = fakeApp(xml, ROWS());
+  let s = await client.start('z_t');
+  s = await client.act(s.session, { event: 'DELETE' });
+  assert.deepEqual(bodies[1].S_FRONT.T_EVENT_ARG ?? [], []);
+  await client.act(s.session, { event: 'DELETE', row: 1 });
+  assert.deepEqual(bodies[2].S_FRONT.T_EVENT_ARG, ['a1']);
+});
+
+test('a 2xx answer that is no JSON is shown without its control characters', async () => {
+  const client = createAppClient({ transport: async () => ({ status: 200, body: '<html>\u001b[2Jlogon</html>' }), location: () => ({ origin: 'x', pathname: '/', search: '' }) });
+  await rejects(client.start('z_x'), new RegExp(`^the backend answered no JSON: <html>${String.fromCodePoint(0xfffd)}\\[2Jlogon</html>$`));
+});
+
 const DIALOG = (multi, confirmArgs) => page(
   `<TableSelectDialog title="Pick" multiSelect="${multi}" items="{/T}" confirm=".eB(['OK']${confirmArgs})">`
   + '<ColumnListItem selected="{SEL}" type="Active"><cells><Text text="{A}"/><ObjectIdentifier title="{B}" text="{N}"/></cells></ColumnListItem>'

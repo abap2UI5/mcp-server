@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import { appCard, cardContent, cardSubmitToAct, messagesOf, defaultAppFormat, CARD_MIME, APP_FORMATS } from '../lib/adaptive-card.mjs';
 import { CARD_VERSION, walk } from '../lib/vendor/adaptive-cards/render.mjs';
 import { FIXTURES, fixture, replayClient, actionOf, targetOf } from './helpers/agent-replay.mjs';
+import { createAppClient } from '../lib/appclient.mjs';
 
 // ------------------------------------------------- Adaptive Cards 1.5 ----
 // The subset of the 1.5 schema the renderer writes (the protocol
@@ -199,4 +200,27 @@ test('messagesOf reads toasts and message boxes of the last response, CONTROL_GL
     { kind: 'box', type: 'confirm', text: 'sure?', actions: ['YES', 'NO'] },
   ]);
   assert.deepEqual(messagesOf({}), []);
+});
+
+test('a long table: the card shows the snapshot\'s rows only, and an untouched submit writes nothing back', async () => {
+  /* The renderer wrote every row of a list binding: 5,000 rows were 5,000
+   * inputs (~1 MB) next to a snapshot of 20, and Save on the untouched card
+   * sent the 4,980 rows the snapshot did not show as edits. */
+  const xml = '<mvc:View xmlns="sap.m" xmlns:mvc="sap.ui.core.mvc"><Page title="T"><Table items="{/T}">'
+    + '<columns><Column/><Column/></columns><items><ColumnListItem><cells><Text text="{NAME}"/><Input value="{QTY}"/></cells></ColumnListItem></items></Table>'
+    + '<Button text="Save" press=".eB([\'SAVE\'])"/></Page></mvc:View>';
+  const model = { T: Array.from({ length: 5000 }, (_, i) => ({ NAME: `n${i}`, QTY: String(i) })) };
+  const transport = async () => ({
+    status: 200,
+    body: JSON.stringify({ S_FRONT: { ID: 'D1', APP: 'Z_T', S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'display', 'MAIN', xml]] } }, MODEL: model }),
+  });
+  const client = createAppClient({ transport, location: (app) => ({ origin: 'x', pathname: '/', search: `?app_start=${app}` }) });
+  const snap = await client.start('z_t');
+  assert.equal(snap.tables[0].rows.length, 20);
+  const { card } = appCard(client.screen(snap.session), snap.session, snap);
+  assert.equal(inputs(card).length, 20, 'one input per shown row');
+  assert.equal(client.screen(snap.session).models[Object.keys(client.screen(snap.session).models)[0]].data.T.length, 5000, 'the session state is not cut');
+  const save = submits(card).find((a) => a.data.event === 'SAVE');
+  const act = cardSubmitToAct(snap, { ...submitted(card, save), '/T/4000/QTY': '4000' });
+  assert.equal(act.values, undefined, 'nothing differs from what the card showed; a row it did not show is no edit');
 });
