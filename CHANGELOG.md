@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Evicting an app session leaves a newer one with the same draft id
+  reachable.** Sessions started from one screen share its id (the
+  playground's Pilot starts one per change of the reader's typing), and the
+  eviction of the oldest made the newest an "unknown session".
 - **Adaptive Cards: app text is never Markdown.** The renderer is
   re-vendored from abap2UI5/protocol (with its shared `renderers/common/`
   halves and the portable profile): a model value or a toast like
