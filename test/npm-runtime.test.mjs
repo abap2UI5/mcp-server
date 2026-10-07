@@ -14,7 +14,7 @@ import path from 'node:path';
 import {
   decideBackend, backendKind, sandbox, deployApp, removeApp, readAppSource, listDevApps, lintApp, buildBackend,
   backendBuilt, runUnitTests, setupStatus, backendStatus, frameworkLintConfig, npmLintTarget, npmModeProblem, planBuild,
-  npmPreferenceProblem,
+  npmPreferenceProblem, startBackend,
 } from '../lib/runtime.mjs';
 import { resetNpmBackend, appsDir, downportDir } from '../lib/npm-backend.mjs';
 import { fakeRelease, fakeTemplate, APP, TESTS, VERSION, CORE_SHA } from './helpers/npm-fixture.mjs';
@@ -239,6 +239,16 @@ test('build_backend on the package: the sandbox transpiled, the dev tests run al
   assert.equal(broken.ok, false);
   assert.match(broken.tail, /check_syntax, Method "nope" not found/);
   assert.ok(fs.existsSync(path.join(appsDir(dir), 'zcl_npm_a.clas.mjs')));
+}));
+
+/* app_start (or backend start) during build_backend booted the output
+ * from before the build, and the build then reported built while that
+ * process went on serving the old classes. */
+test('a backend start while build_backend runs is refused with the reason', withNpm(async () => {
+  deployApp({ className: 'zcl_npm_a', source: APP('zcl_npm_a') });
+  const build = buildBackend({ mode: 'auto' });
+  await assert.rejects(startBackend(), /build_backend is running/);
+  assert.equal((await build).ok, true);
 }));
 
 /* The filtered runner copy was named after the selection alone

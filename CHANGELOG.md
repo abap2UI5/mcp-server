@@ -46,6 +46,25 @@
   server from starting, and a URL that does not parse no longer shows the
   user and password typed into it. A breaker refusal reads as itself, not as
   "the backend did not answer".
+- **An act queued behind one in flight runs only where it still names what
+  its caller saw.** Two `app_act { event: "a1" }` at once fired the first
+  screen's a1 and then whatever a1 was on the screen that answered it
+  (NEXT, then DELETE_ALL - for real in system mode). The queued act is
+  refused, sending nothing, when its action or fields name something else
+  on the new screen.
+- **A backend start during `build_backend` is refused.** `app_start`,
+  `run_app` or `backend start` booted the output from before the build,
+  and the build then reported built while that process went on serving
+  the old classes.
+- **The app tools' answers fit the client.** A 120 KB TextArea or a table
+  of 200 wide rows went over the result cap by default. Long values are
+  cut (and read-only in that answer), then rows dropped from the end, and a
+  text beside the snapshot says what was cut. With `format:
+  "adaptive-card"` the card counts together with the snapshot.
+- **An argument a tool does not declare is refused.** `app_act { value:
+  {...}, event }` fired the event without the edits. `max_rows: true`
+  (or `false`, `[]`, `"  "`) is refused instead of read as 1 or 0, and an
+  error repeats at most 80 characters of an argument.
 - **App sessions are evicted least recently used first.** The session
   started first went first, even while it was the one in use, and a session
   evicted while an act was in flight came back unlisted.

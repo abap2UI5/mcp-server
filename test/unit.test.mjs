@@ -1500,9 +1500,17 @@ test('a numeric argument is coerced, bounded and refused when it is not a number
   assert.equal(boundedInt(0, opts), 1);
   assert.equal(boundedInt(-3, opts), 1);
   assert.equal(boundedInt(1e9, opts), 200);
-  for (const bad of ['abc', {}, NaN, Infinity]) {
+  // Number( ) read true as 1, false, [] and blanks as 0 and [7] as 7
+  for (const bad of ['abc', {}, NaN, Infinity, true, false, [], [7], '  ']) {
     assert.throws(() => boundedInt(bad, opts), /limit must be a number/, `expected rejection for ${String(bad)}`);
   }
+});
+
+test('an argument the tool does not declare is refused, naming the ones it has', () => {
+  const tool = { name: 'app_act', inputSchema: { type: 'object', properties: { session: { type: 'string' }, values: { type: 'object' }, event: { type: 'string' } } } };
+  assert.doesNotThrow(() => checkStringArgs(tool, { session: 'S1', event: 'POST' }));
+  assert.throws(() => checkStringArgs(tool, { session: 'S1', value: { f1: '1' }, event: 'POST' }), /^Error: app_act has no argument 'value' - its arguments: session, values, event$/);
+  assert.throws(() => checkStringArgs({ name: 'x', inputSchema: { type: 'object', properties: {} } }, { a: 1 }), /x has no argument 'a' - it takes none/);
 });
 
 /* A list argument that ends up as spawn argv has the failure modes coercion

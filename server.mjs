@@ -59,7 +59,7 @@ import { agentTargetProblem, planAgentSetup, writePlan, pinProblems, pinWarning,
 import { fixSource } from './lib/fixview.mjs';
 import { lintOptionsFor } from './lib/lintopts.mjs';
 import { withRenderFallback, renderSkippedNote, warmThenCold } from './lib/validate.mjs';
-import { ANSWER_BUDGET, takeWithin, takeSmallestWithin } from './lib/budget.mjs';
+import { ANSWER_BUDGET, takeWithin, takeSmallestWithin, fitSnapshot } from './lib/budget.mjs';
 import { getRenderer, dropRenderer, closeRenderers, rendererLooksDead } from './lib/renderer.mjs';
 import { TOOLS } from './lib/tools.mjs';
 import { RESOURCES, RESOURCE_TEMPLATES, GUIDE_CHAPTER_TEMPLATE, readResource } from './lib/resources.mjs';
@@ -295,8 +295,11 @@ async function agentClient() {
  * catch like every other tool's failure. */
 async function snapshotAnswer(run, { format = 'snapshot', client = null } = {}) {
   try {
-    const snap = await run();
+    // fitted to one answer: a 120 KB TextArea or 200 wide rows went over the
+    // client's cap by default, and the agent saw nothing
+    const { snapshot: snap, notes } = fitSnapshot(await run());
     const answer = text(JSON.stringify(snap));
+    if (notes.length) answer.content.push({ type: 'text', text: `cut to fit one answer: ${notes.join('; ')}` });
     /* format "adaptive-card": the same screen as an Adaptive Card 1.5, an
      * embedded resource after the unchanged snapshot (lib/adaptive-card.mjs).
      * A card that cannot be rendered costs the card, never the act: the
@@ -306,7 +309,8 @@ async function snapshotAnswer(run, { format = 'snapshot', client = null } = {}) 
         const card = cardContent(appCard(client.screen(snap.session), snap.session, snap).card, snap.session);
         // the card goes into the same result as the snapshot: one over the
         // budget would cost the snapshot too
-        if (card.resource.text.length > ANSWER_BUDGET) throw new Error(`the card has ${card.resource.text.length} characters, more than a tool answer holds - the snapshot alone describes the screen`);
+        const total = answer.content[0].text.length + card.resource.text.length;
+        if (total > ANSWER_BUDGET) throw new Error(`the card would make the answer ${total} characters, more than a tool answer holds - the snapshot alone describes the screen`);
         answer.content.push(card);
       } catch (e) {
         answer.content.push({ type: 'text', text: `no Adaptive Card for this screen: ${(e && e.message) || e}` });

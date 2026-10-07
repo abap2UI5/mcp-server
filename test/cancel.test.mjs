@@ -99,9 +99,11 @@ test('a cancelled build_backend kills the build child', async () => {
 });
 
 /* A build_backend call that the in-flight build of another mode refuses must
- * refuse BEFORE it stops the running backend: it used to stop it first, so
- * the call that built nothing still took the app down. */
-test('a build_backend refused for a build in progress leaves the backend running', async () => {
+ * refuse BEFORE it stops anything: it used to stop the backend first, so the
+ * call that built nothing still took the app down. A backend start beside
+ * the build is refused too now - it booted the output from before the
+ * build, which the build then reported as built. */
+test('during a build: another mode\'s build and a backend start are refused, neither stops nor starts anything', async () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-buildconflict-'));
   const demokit = path.join(base, 'ai-demokit');
   fs.mkdirSync(path.join(demokit, 'scripts'), { recursive: true });
@@ -172,16 +174,16 @@ test('a build_backend refused for a build in progress leaves the backend running
     // the full build is running ...
     send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'build_backend', arguments: { mode: 'full' }, _meta: { progressToken: 'tok-f' } } });
     await until((m) => m.method === 'notifications/progress');
-    // ... and the backend is (re)started beside it
+    // ... a backend start beside it is refused ...
     const started = await call(3, 'backend', { action: 'start' });
-    assert.equal(JSON.parse(body(started)).running, true, body(started));
-    // a build of another mode is refused ...
+    assert.equal(started.result.isError, true, body(started));
+    assert.match(body(started), /build_backend is running/);
+    // ... and so is a build of another mode
     const refused = await call(4, 'build_backend', { mode: 'prebuilt' });
     assert.equal(refused.result.isError, true);
     assert.match(body(refused), /build in progress \(full\)/);
-    // ... and has not stopped the backend
     const status = await call(5, 'backend', { action: 'status' });
-    assert.equal(JSON.parse(body(status)).running, true, `the refused build stopped the backend: ${body(status)}`);
+    assert.equal(JSON.parse(body(status)).running, false, `a backend runs beside the build: ${body(status)}`);
   } finally {
     send({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 2, reason: 'test over' } });
     p.stdin.end();
