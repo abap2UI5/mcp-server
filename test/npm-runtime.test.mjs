@@ -155,6 +155,17 @@ test('a dev app named like one of the framework\'s own objects is refused, not b
   assert.deepEqual(listDevApps(), ['zcl_hi_world']);
 }));
 
+test('a framework class that reached the sandbox without the deploy gate fails the build, named', withNpm(async (t, { dir }) => {
+  /* deploy_app refuses one only once a release is installed, and
+   * migrate_report deployed without asking: the build refuses it for
+   * every writer */
+  deployApp({ className: 'zcl_npm_a', source: APP('zcl_npm_a') });
+  fs.writeFileSync(path.join(sandbox().dir, 'z2ui5_if_app.intf.abap'), 'INTERFACE z2ui5_if_app PUBLIC. ENDINTERFACE.\n');
+  const res = await buildBackend({ mode: 'auto' });
+  assert.equal(res.ok, false);
+  assert.match(res.tail, /z2ui5_if_app\.intf is the framework's own - .*remove_app z2ui5_if_app/);
+}));
+
 test('the npm sandbox lints with app-template\'s config against the release\'s downport/', withNpm(async (t, { root, workspace }) => {
   const record = path.join(root, 'lint.json');
   process.env.LINT_RECORD = record;

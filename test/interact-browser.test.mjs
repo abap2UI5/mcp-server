@@ -10,7 +10,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import http from 'node:http';
-import { locate, performAction } from '../lib/runtime.mjs';
+import { locate, performAction, settle, trackRequests } from '../lib/runtime.mjs';
 import { parseActions } from '../lib/interact.mjs';
 
 const PAGE = `<!doctype html><html><body>
@@ -104,6 +104,49 @@ test('the four actions drive a page the way a UI5 view expects', async (t) => {
     await assert.rejects(performAction(page, fillMissing, 300), /Timeout/);
     assert.ok(Date.now() - t0 < 5000, `a fill of a missing element fails within the action timeout, took ${Date.now() - t0} ms`);
     assert.equal(typeof locate(page, { text: 'Save' }).click, 'function', 'locate answers a Playwright locator');
+  } finally {
+    await page.close().catch(() => {});
+    await browser.close().catch(() => {});
+    srv.close();
+  }
+});
+
+/* The frontend drops an event fired while a roundtrip runs, and its busy
+ * overlay shows only after a second: two quick clicks lost the second, and
+ * both were reported as performed. interact_app waits for the roundtrip an
+ * action started (settle) before the next one. */
+test('an action waits for the roundtrip it started before the next one', async (t) => {
+  const browser = await browserOrNull();
+  if (!browser) {
+    t.skip('no Chromium for Playwright on this machine');
+    return;
+  }
+  const page2 = `<!doctype html><html><body><button id="add" type="button">Add</button><p id="count">0</p><script>
+    let busy = false; let count = 0;
+    document.getElementById('add').addEventListener('click', async () => {
+      if (busy) return; // what the frontend does with an event during a roundtrip
+      busy = true;
+      const r = await fetch('/roundtrip', { method: 'POST' });
+      count = Number(await r.text()) + count;
+      document.getElementById('count').textContent = String(count);
+      busy = false;
+    });
+  </script></body></html>`;
+  const srv = http.createServer((req, res) => {
+    if (req.url === '/roundtrip') setTimeout(() => res.end('1'), 400);
+    else res.writeHead(200, { 'content-type': 'text/html' }).end(page2);
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const page = await browser.newPage();
+  try {
+    await page.goto(`http://127.0.0.1:${srv.address().port}/`);
+    const inflight = trackRequests(page, (u) => u.endsWith('/roundtrip'));
+    const [click] = parseActions([{ action: 'click', id: 'add' }]);
+    for (let i = 0; i < 3; i += 1) {
+      await performAction(page, click, 5000);
+      assert.equal(await settle(page, inflight), true);
+    }
+    assert.equal(await page.locator('#count').textContent(), '3', 'every click reached the app');
   } finally {
     await page.close().catch(() => {});
     await browser.close().catch(() => {});

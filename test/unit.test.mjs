@@ -1506,6 +1506,16 @@ test('a numeric argument is coerced, bounded and refused when it is not a number
   }
 });
 
+test('an argument echoed in an error is cut to 80 characters', () => {
+  const huge = 'x'.repeat(300000);
+  for (const run of [
+    () => oneOf(huge, { name: 'mode', allowed: ['a', 'b'] }),
+    () => boundedInt(huge, { name: 'tail', dflt: 1 }),
+  ]) {
+    assert.throws(run, (e) => e.message.length < 400);
+  }
+});
+
 test('an argument the tool does not declare is refused, naming the ones it has', () => {
   const tool = { name: 'app_act', inputSchema: { type: 'object', properties: { session: { type: 'string' }, values: { type: 'object' }, event: { type: 'string' } } } };
   assert.doesNotThrow(() => checkStringArgs(tool, { session: 'S1', event: 'POST' }));

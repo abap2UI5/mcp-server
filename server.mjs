@@ -289,6 +289,18 @@ async function agentClient() {
   return appClient;
 }
 
+/* An image block's limits: the Claude API takes no side over 8000 px, and
+ * the base64 of every picture in one answer stays under IMAGE_BUDGET. */
+const MAX_IMAGE_EDGE = 8000;
+const IMAGE_BUDGET = 8_000_000;
+
+/** A PNG's width and height from its IHDR chunk, or null. */
+function pngSize(png) {
+  const buf = png && (Buffer.isBuffer(png) ? png : Buffer.from(png));
+  if (!buf || buf.length < 24 || buf.readUInt32BE(12) !== 0x49484452) return null;
+  return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+}
+
 /* A snapshot as the tool answer: compact JSON - the shape is the token
  * budget's friend, indentation is not. A refusal (AgentError) is an error
  * result naming what is allowed; anything else propagates to the handler's
@@ -605,7 +617,7 @@ async function handle(name, args = {}, ctx = {}) {
       const cls = (args.class || '').toLowerCase();
       if (cls && !validClassName(cls, readSpec(root))) {
         const { rule, max } = classNameRule(readSpec(root));
-        return toolError(`"${args.class}" is not a class name this template accepts — it has to match `
+        return toolError(`"${String(args.class).slice(0, 80)}" is not a class name this template accepts — it has to match `
           + `${rule} and stay within ${max} characters, e.g. zcl_my_app. `
           + 'abaplint\'s object_naming in the scaffolded project accepts ZCL_ and ZCX_ only, '
           + 'so a name outside this rule produces a repository that fails its own gate.');
@@ -641,7 +653,7 @@ async function handle(name, args = {}, ctx = {}) {
         const wanted = stringArray(args.files, { name: 'files', maxItems: 200, maxLength: 300, example: '["AGENTS.md"]' });
         const unknown = wanted.filter((p) => !files.some((f) => f.path === p));
         if (unknown.length) {
-          return toolError(`not a file of this scaffold: ${unknown.join(', ')} — the paths are the ones this tool returns `
+          return toolError(`not a file of this scaffold: ${unknown.slice(0, 10).map((p) => p.slice(0, 80)).join(', ')}${unknown.length > 10 ? ` (+${unknown.length - 10} more)` : ''} — the paths are the ones this tool returns `
             + `(with the same class): ${files.map((f) => f.path).join(', ')}`);
         }
         pick = files.filter((f) => wanted.includes(f.path));
@@ -945,8 +957,23 @@ async function handle(name, args = {}, ctx = {}) {
         return toolError(`no dev app '${res.class}' in the dev sandbox (looked for ${res.file}) — `
           + 'remove_app without arguments lists the deployed ones');
       }
+      /* Paged by whole lines: a class of 1,500 lines (migrate_report
+       * deploys them) answered 107,304 characters. */
+      const all = res.source.split('\n');
+      const from = boundedInt(args.from_line, { name: 'from_line', dflt: 1, min: 1, max: Math.max(1, all.length) });
+      const page = [];
+      let used = 0;
+      for (let i = from - 1; i < all.length; i += 1) {
+        if (page.length && used + all[i].length + 1 > ANSWER_BUDGET - 5000) break;
+        page.push(all[i]);
+        used += all[i].length + 1;
+      }
+      const to = from + page.length - 1;
+      const paged = from > 1 || to < all.length;
       return text({
         ...res,
+        source: page.join('\n'),
+        ...(paged ? { lines: { from, to, total: all.length }, ...(to < all.length ? { next: { from_line: to + 1 } } : {}) } : {}),
         ...(res.staleInBackend
           ? { hint: 'deployed after the last build — run_app still boots the older code; run build_backend' }
           : {}),
@@ -1143,14 +1170,36 @@ async function handle(name, args = {}, ctx = {}) {
        * document (a view and its popup fragment), and `index`/`kind` are what
        * tell them apart - so the report names them rather than leaving the
        * agent to guess which of three images is the popup. */
+      /* The pictures are full-page: one follows the content, not the
+       * viewport - 400 Texts were a 1280x7200 image, eight 4096 viewports
+       * 20 MB of answer. A picture past what the Claude API takes (8000 px a
+       * side) or past the answer's image budget is left out and named. */
+      let imageChars = 0;
+      const attached = new Set();
+      const leftOut = new Map();
+      for (const s of shots) {
+        if (!s.png) continue;
+        const dim = pngSize(s.png);
+        const chars = Math.ceil(s.png.length / 3) * 4;
+        if (dim && (dim.width > MAX_IMAGE_EDGE || dim.height > MAX_IMAGE_EDGE)) {
+          leftOut.set(s, `the picture is ${dim.width}x${dim.height} - more than ${MAX_IMAGE_EDGE} px a side; a shorter view or a smaller size fits`);
+        } else if (imageChars + chars > IMAGE_BUDGET) {
+          leftOut.set(s, 'left out to keep the answer within its image budget - ask for fewer sizes');
+        } else {
+          imageChars += chars;
+          attached.add(s);
+        }
+      }
       const report = shots.map((s) => ({
         index: s.index,
         kind: s.kind,
         size: s.size ? `${s.size.width}x${s.size.height}` : undefined,
         photographed: Boolean(s.png),
+        ...(s.png && pngSize(s.png) ? { picture: `${pngSize(s.png).width}x${pngSize(s.png).height}` } : {}),
+        ...(leftOut.has(s) ? { notAttached: leftOut.get(s) } : {}),
         errors: s.errors && s.errors.length ? s.errors : undefined,
       }));
-      const taken = shots.filter((s) => s.png);
+      const taken = shots.filter((s) => attached.has(s));
       const content = [{
         type: 'text',
         text: JSON.stringify({
@@ -1307,6 +1356,7 @@ async function handle(name, args = {}, ctx = {}) {
         errors: res.errors,
         screenshot: res.screenshotPath,
         ...(res.screenshotNotSaved ? { screenshotNotSaved: res.screenshotNotSaved } : {}),
+        ...(res.screenshotCut ? { screenshotCut: res.screenshotCut } : {}),
       };
       const content = [{ type: 'text', text: JSON.stringify(report, null, 2) }];
       if (res.base64) content.push({ type: 'image', data: res.base64, mimeType: 'image/png' });
@@ -1336,6 +1386,7 @@ async function handle(name, args = {}, ctx = {}) {
         errors: res.errors,
         screenshot: res.screenshotPath,
         ...(res.screenshotNotSaved ? { screenshotNotSaved: res.screenshotNotSaved } : {}),
+        ...(res.screenshotCut ? { screenshotCut: res.screenshotCut } : {}),
         ...(res.booted ? {} : { hint: 'the app did not boot, so no action was performed - run_app shows the boot on its own' }),
       };
       const content = [{ type: 'text', text: JSON.stringify(report, null, 2) }];
@@ -1389,6 +1440,18 @@ async function handle(name, args = {}, ctx = {}) {
       const classNames = args.class_names === undefined ? undefined : stringArray(args.class_names, { name: 'class_names', example: '["zcl_my_app", "zcl_my_other_app"]' });
       const res = await runUnitTests({ className: args.class_name, classNames, signal: ctx.signal, onLine: report });
       if (res.aborted || res.timedOut) return toolError(res.error);
+      /* Every test of a checkout's full run was 1,522 entries, 194,772
+       * characters: past the budget, the tests are counted per object and
+       * only the skipped ones are listed (the failure is `failed`). */
+      if (JSON.stringify(res).length > ANSWER_BUDGET - 5000) {
+        const perObject = {};
+        for (const t of res.tests) perObject[t.object] = (perObject[t.object] || 0) + 1;
+        const skippedTests = res.tests.filter((t) => t.skipped);
+        res.tests = undefined;
+        res.testsPerObject = perObject;
+        res.skippedTests = skippedTests.slice(0, 50);
+        res.testsNote = 'too many tests to list in one answer - counted per object; class_name or class_names lists a class\'s tests';
+      }
       /* No test line at all is "no test class" only for a run that passed: a
        * class_setup that threw prints none either, and that hint sent an
        * agent to redeploy tests that were there all along. */
@@ -1437,7 +1500,7 @@ async function handle(name, args = {}, ctx = {}) {
       const miss = missingLocalSibling('abap-cloud-gui');
       if (miss) return miss;
       if (args.class_name !== undefined && args.class_name !== null && !validTargetClass(args.class_name)) {
-        return toolError(`class_name '${args.class_name}' is no ABAP class name - letters, digits, _ and /, at most 30 characters, e.g. zcl_flights`);
+        return toolError(`class_name '${String(args.class_name).slice(0, 80)}' is no ABAP class name - letters, digits, _ and /, at most 30 characters, e.g. zcl_flights`);
       }
       let res;
       try {
@@ -1466,6 +1529,12 @@ async function handle(name, args = {}, ctx = {}) {
         if (cut > 0) reply.migration_report = `${reply.migration_report.slice(0, cut)}\n\n## Mapped\n\n(left out - the answer would pass the client's size limit; convert with the report2cloud CLI for the full table)\n`;
       }
       if (args.deploy === true) reply.deploy = await deployMigrated(res, ctx);
+      /* then the files: a report of 2,000 lines converted to 212,028
+       * characters of them - named with their size, never cut mid-file */
+      if (JSON.stringify(reply).length > ANSWER_BUDGET && reply.files && typeof reply.files === 'object') {
+        reply.files = Object.fromEntries(Object.entries(reply.files).map(([k, v]) => [k, `(${String(v).length} characters - left out)`]));
+        reply.files_left_out = 'the files would pass the client\'s size limit - deploy: true writes them to the dev sandbox, read_app reads them back page by page';
+      }
       return text(reply);
     }
     case 'remove_app': {
@@ -1609,7 +1678,7 @@ function shutdown(reason) {
   shuttingDown = (async () => {
     try {
       killChildren();
-      await Promise.all([stopBackend({ starting: true }).catch(() => {}), closeRenderers().catch(() => {})]);
+      await Promise.all([stopBackend().catch(() => {}), closeRenderers().catch(() => {})]);
     } catch (e) {
       console.error(`abap2ui5 MCP server: shutdown (${reason}) - ${(e && e.message) || e}`);
     }

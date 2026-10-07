@@ -138,18 +138,19 @@ test('a backend that cannot be spawned fails the start at once, with the reason'
   }
 });
 
-/* The server's shutdown during a start: the child is `server` only once it
- * listens, so stopBackend() had nothing to kill and the server exited with
- * the child still booting - it then listened as an orphan holding the port.
- * stopBackend({ starting: true }) (what the shutdown calls) reaches it. */
-test('a shutdown stop kills a backend that has not listened yet', async () => {
+/* A stop during a start: the child is `server` only once it listens, so
+ * stopBackend() had nothing to kill - the server's shutdown exited with the
+ * child still booting (an orphan holding the port), and `backend stop`
+ * answered "not running" while the start went on to listen. Every stop
+ * reaches it now, and the start says it was stopped. */
+test('a stop kills a backend that has not listened yet, and the start says so', async () => {
   process.env.LISTEN_DELAY_MS = '700';
   try {
     const start = startBackend();
     start.catch(() => {});
     await sleep(250); // spawned, not listening yet
-    await stopBackend({ starting: true });
-    await assert.rejects(start, /before listening/);
+    await stopBackend();
+    await assert.rejects(start, /the backend start was stopped .* before it listened/);
     await sleep(900); // past the moment it would have listened
     assert.equal(await portOpen(), false, 'the backend whose start was cut short listened anyway, as an orphan');
     assert.equal(backendStatus().running, false);

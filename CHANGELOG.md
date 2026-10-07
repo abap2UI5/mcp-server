@@ -61,6 +61,25 @@
   cut (and read-only in that answer), then rows dropped from the end, and a
   text beside the snapshot says what was cut. With `format:
   "adaptive-card"` the card counts together with the snapshot.
+- **`interact_app` waits for each action's roundtrip.** The frontend drops
+  an event fired while a roundtrip runs, and its busy overlay shows only
+  after a second: two quick clicks lost the second, and a click right after
+  a fill was dropped - each reported as performed.
+- **`backend stop` stops a start in flight.** It answered "not running"
+  while the start went on to listen, and a build that stopped the backend
+  while one started reported built while the old process served on.
+- **Pictures are bounded.** `run_app` / `interact_app` cut a page taller
+  than 4096 px (and say so); `screenshot_view` leaves out a picture over
+  8000 px a side or past its image budget, named. Each call writes its own
+  PNG - two calls on one class reported each other's picture.
+- **Answers that grew without bound are paged or cut:** a lint's findings
+  (the first 100, counted per rule - and the whole sandbox's JSON is read
+  in full: one app with many findings made every later lint a `parse`
+  failure), `read_app` (pages of whole lines, `from_line`), a full
+  `run_unit_tests` (counted per object), `migrate_report`'s files.
+- **The build refuses a dev object named like a framework class** - for
+  every writer: `deploy_app` could not check before a release was
+  installed, and `migrate_report` did not check at all.
 - **An argument a tool does not declare is refused.** `app_act { value:
   {...}, event }` fired the event without the edits. `max_rows: true`
   (or `false`, `[]`, `"  "`) is refused instead of read as 1 or 0, and an
