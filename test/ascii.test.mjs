@@ -39,7 +39,7 @@ const SOURCES = [
   'server.mjs',
   ...fs.readdirSync(path.join(ROOT, 'lib')).filter((f) => f.endsWith('.mjs')).map((f) => `lib/${f}`),
   // the vendored renderer ships in lib/ too; its upstream is held to the same rule
-  ...fs.readdirSync(path.join(ROOT, 'lib', 'vendor', 'adaptive-cards')).filter((f) => f.endsWith('.mjs')).map((f) => `lib/vendor/adaptive-cards/${f}`),
+  ...fs.readdirSync(path.join(ROOT, 'lib', 'vendor', 'adaptive-cards'), { recursive: true }).filter((f) => f.endsWith('.mjs')).map((f) => `lib/vendor/adaptive-cards/${f.split(path.sep).join('/')}`),
 ];
 
 test('every source file is ASCII apart from the prose punctuation the rule allows', () => {

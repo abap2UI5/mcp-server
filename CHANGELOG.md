@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Adaptive Cards: app text is never Markdown.** The renderer is
+  re-vendored from abap2UI5/protocol (with its shared `renderers/common/`
+  halves and the portable profile): a model value or a toast like
+  `[verify your account](https://...)` was a live link in Teams and Copilot;
+  a text with Markdown syntax is a `TextRun` now. Its `htmlToText` (a
+  message box's details) is linear.
 - **System mode: the app tools against a real SAP system.** With
   `A2UI5_MCP_SYSTEM_URL` (the launch URL, `{class}` as a query parameter),
   `A2UI5_MCP_SYSTEM_USER` and `A2UI5_MCP_SYSTEM_PASSWORD` - or

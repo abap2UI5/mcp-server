@@ -53,15 +53,24 @@ export const VENDOR_DIR = 'lib/vendor/adaptive-cards';
 export const SOURCE_RECORD = `${VENDOR_DIR}/source.json`;
 const FETCH_TIMEOUT_MS = 30_000;
 
-/** The modules, upstream path -> vendored path. */
+/** The modules, upstream path -> vendored path. The renderer shares its
+ *  view and request halves with the protocol's other renderers
+ *  (renderers/common/), and the view half reads the portable profile. */
 export const MODULES = {
   'renderers/adaptive-cards/render.mjs': `${VENDOR_DIR}/render.mjs`,
   'renderers/adaptive-cards/mapping.mjs': `${VENDOR_DIR}/mapping.mjs`,
   'renderers/adaptive-cards/submit.mjs': `${VENDOR_DIR}/submit.mjs`,
+  'renderers/common/view.mjs': `${VENDOR_DIR}/common/view.mjs`,
+  'renderers/common/request.mjs': `${VENDOR_DIR}/common/request.mjs`,
+};
+
+/** Data files, copied byte for byte (no header - JSON takes no comment). */
+export const DATA = {
+  'profiles/portable-v1.json': `${VENDOR_DIR}/profiles/portable-v1.json`,
 };
 
 /** Where the protocol repository keeps its copies of this repository's agent modules. */
-const UPSTREAM_AGENT = '../../conformance/frontend/adapters/vendor/mcp-server/';
+const UPSTREAM_AGENT_DIR = 'conformance/frontend/adapters/vendor/mcp-server/';
 
 /** The header every vendored module starts with. */
 export function moduleHeader(from, commit) {
@@ -70,19 +79,37 @@ export function moduleHeader(from, commit) {
     + ` * VENDORED - do not edit. ${REPO} ${from}\n`
     + ` * at commit ${commit},\n`
     + ' * copied by scripts/vendor-adaptive-cards.mjs; the only change is that the\n'
-    + ' * imports of the agent modules point at lib/ (the originals the protocol\n'
-    + ' * repository vendors) instead of its copies. `node scripts/vendor-adaptive-cards.mjs\n'
+    + ' * relative paths point at the vendored folder, and the imports of the agent\n'
+    + ' * modules at lib/ (the originals the protocol repository vendors) instead of\n'
+    + ' * its copies. `node scripts/vendor-adaptive-cards.mjs\n'
     + ' * --check` fails when this copy drifts from that commit. Change it upstream,\n'
     + ' * then re-vendor.\n'
     + ' */\n'
   );
 }
 
+/* A relative path in `from` (upstream) -> the same target, relative to where
+ * `from` is vendored: an agent module is lib/'s original, a vendored module
+ * or data file its copy. Anything else is refused - extend the tables. */
+function rewritePath(rel, from, commit) {
+  const target = path.posix.normalize(path.posix.join(path.posix.dirname(from), rel));
+  let to;
+  if (target.startsWith(UPSTREAM_AGENT_DIR) && /^(viewxml|snapshot|appclient)\.mjs$/.test(target.slice(UPSTREAM_AGENT_DIR.length))) {
+    to = `lib/${target.slice(UPSTREAM_AGENT_DIR.length)}`;
+  } else {
+    to = MODULES[target] || DATA[target];
+  }
+  if (!to) throw new Error(`${from} at ${commit} refers to ${target}, which is not vendored - extend MODULES or DATA`);
+  const out = MODULES[from];
+  const r = path.posix.relative(path.posix.dirname(out), to);
+  return r.startsWith('.') ? r : `./${r}`;
+}
+
 /** One upstream module as it is vendored. */
 export function vendorModule(text, from, commit) {
   const body = text
     .replace(/\r\n/g, '\n')
-    .split(UPSTREAM_AGENT).join('../../');
+    .replace(/(from\s+|import\s*\(\s*|new URL\(\s*)"(\.\.?\/[^"]+)"/g, (m, lead, rel) => `${lead}"${rewritePath(rel, from, commit)}"`);
   if (body.includes('conformance/')) {
     throw new Error(`${from} at ${commit} imports something else from the protocol repository's conformance tree - extend the rewrite`);
   }
@@ -128,6 +155,10 @@ export async function build(local, commit) {
     files[out] = vendorModule(await src.read(up), up, commit);
     from[out] = up;
   }
+  for (const [up, out] of Object.entries(DATA)) {
+    files[out] = (await src.read(up)).replace(/\r\n/g, '\n');
+    from[out] = up;
+  }
   const record = {
     note: `What scripts/vendor-adaptive-cards.mjs copied from ${REPO}, at which commit, and the sha256 of every file it wrote. `
       + 'Generated - do not edit; test/vendor.test.mjs holds the copies to these hashes.',
@@ -144,7 +175,13 @@ export function committedFiles(root = ROOT) {
   const out = {};
   const abs = path.join(root, VENDOR_DIR);
   if (!fs.existsSync(abs)) return out;
-  for (const f of fs.readdirSync(abs)) out[`${VENDOR_DIR}/${f}`] = fs.readFileSync(path.join(abs, f), 'utf8');
+  const walk = (dir, rel) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (e.isDirectory()) walk(path.join(dir, e.name), `${rel}/${e.name}`);
+      else out[`${rel}/${e.name}`] = fs.readFileSync(path.join(dir, e.name), 'utf8');
+    }
+  };
+  walk(abs, VENDOR_DIR);
   return out;
 }
 
