@@ -35,6 +35,35 @@
 - `createAppClient` gains `screen(session)`: a copy of a session's folded
   state, for renderers other than the snapshot (additive; the vendored
   copies elsewhere keep working unchanged).
+- **System mode: a wrong password reaches the system once under parallel
+  calls too.** Parallel tool calls all passed the breaker before the first
+  401 came back, so a wrong password was sent once per call (SAP locks a
+  user after a few), and the password command ran once per call. Until the
+  system has accepted the logon, requests go one at a time, and the
+  command's answer is shared. `system_status` and `app_list` give up after
+  30 s instead of waiting for good, a redirect names its target (a SAML
+  logon page), a malformed `%` in `A2UI5_MCP_SYSTEM_URL` no longer stops the
+  server from starting, and a URL that does not parse no longer shows the
+  user and password typed into it. A breaker refusal reads as itself, not as
+  "the backend did not answer".
+- **App sessions are evicted least recently used first.** The session
+  started first went first, even while it was the one in use, and a session
+  evicted while an act was in flight came back unlisted.
+- **An event name without `row` fires the screen action of that name**
+  before a row action of the same name (a "delete selected" button after a
+  table with a DELETE per row).
+- **The Adaptive Card shows the snapshot's rows.** It rendered every row of a
+  table - 5,000 rows were a card of ~1 MB in the same result as the
+  snapshot - and Save on the untouched card wrote back every row the
+  snapshot did not show. A card over the answer budget is left out with the
+  reason.
+- **An untouched MCP Apps form sends nothing.** A choice whose value matched
+  no key showed - and sent - its first option, and a check box bound to
+  `null`, `''` or `'X'` counted as changed. Message box choices with
+  parentheses stay whole.
+- **The snapshot survives `&#99999999;` in a view and unclosed `<` in model
+  markup.** The first threw the whole snapshot (after the act had reached
+  the backend), the second took seconds for 80k characters.
 - **A deploy lint reports the deployed class's findings only.** They were
   picked from the repository-wide abaplint run by a substring of the path,
   so `z_app` was handed the findings of `zz_app` (any class whose name ends

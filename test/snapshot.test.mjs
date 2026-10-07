@@ -608,3 +608,14 @@ test('an element named like an Object.prototype member is a custom control, not 
     assert.deepEqual(s.tables[1].rows, [{ Q: 1 }]);
   }
 });
+
+test('an out-of-range character reference stays as written; model markup of unclosed "<" is linear', () => {
+  const view = (body) => `<mvc:View xmlns="sap.m" xmlns:mvc="sap.ui.core.mvc"><Page title="T">${body}</Page></mvc:View>`;
+  const at = (xml, model) => buildSnapshot({ state: applyResponse(emptyState(), { S_FRONT: { ID: '1', APP: 'Z_A', S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'display', 'MAIN', xml]] } }, MODEL: model }) });
+  const snap = at(view('<Text text="a &#99999999; b &#x110000; c &#x41;"/>'), {});
+  assert.match(JSON.stringify(snap), /a &#99999999; b &#x110000; c A/);
+  const started = Date.now();
+  const big = at(view('<FormattedText htmlText="{/H}"/>'), { H: `${'<'.repeat(80000)}<b>x</b>` });
+  assert.ok(Date.now() - started < 1500, `${Date.now() - started} ms`);
+  assert.ok(big);
+});

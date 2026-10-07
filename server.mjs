@@ -303,7 +303,11 @@ async function snapshotAnswer(run, { format = 'snapshot', client = null } = {}) 
      * snapshot is the answer, and the reason is said beside it. */
     if (format === 'adaptive-card' && client && snap && snap.session) {
       try {
-        answer.content.push(cardContent(appCard(client.screen(snap.session), snap.session).card, snap.session));
+        const card = cardContent(appCard(client.screen(snap.session), snap.session, snap).card, snap.session);
+        // the card goes into the same result as the snapshot: one over the
+        // budget would cost the snapshot too
+        if (card.resource.text.length > ANSWER_BUDGET) throw new Error(`the card has ${card.resource.text.length} characters, more than a tool answer holds - the snapshot alone describes the screen`);
+        answer.content.push(card);
       } catch (e) {
         answer.content.push({ type: 'text', text: `no Adaptive Card for this screen: ${(e && e.message) || e}` });
       }

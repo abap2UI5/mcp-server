@@ -203,6 +203,26 @@ test('editsFromForm keeps only what the user changed', async () => {
   assert.deepEqual(editsFromForm(snap, changed), { [text.id]: 'typed' });
 });
 
+test('an untouched choice without a matching key and an unchecked box with an ABAP value send nothing', () => {
+  const fields = [
+    { id: 'f1', path: '/C', name: 'C', label: 'C', kind: 'choice', value: '', editable: true, values: [{ key: 'DE', text: 'Germany' }, { key: 'FR', text: 'France' }] },
+    { id: 'f2', path: '/R', name: 'R', label: 'R', kind: 'choice', value: -1, editable: true, values: [{ key: '0', text: 'a' }, { key: '1', text: 'b' }] },
+    { id: 'f3', path: '/B', name: 'B', label: 'B', kind: 'boolean', value: null, editable: true },
+    { id: 'f4', path: '/X', name: 'X', label: 'X', kind: 'boolean', value: 'X', editable: true },
+  ];
+  const snap = { snapshotVersion: 1, session: 'S1', app: 'Z', title: '', layer: 'main', fields, actions: [], tables: [], messages: [], texts: [], unsupported: [] };
+  const html = renderScreen({ snapshot: snap, canAct: true });
+  assert.match(html, /<select id="in-f1"[^>]*><option value="" selected hidden><\/option><option value="DE">/, 'the empty key is the shown option, not Germany');
+  assert.match(html, /<option value="-1" selected hidden><\/option>/);
+  assert.deepEqual(editsFromForm(snap, [{ key: 'f1', value: '' }, { key: 'f2', value: '-1' }, { key: 'f3', value: false }, { key: 'f4', value: true }]), {});
+  assert.deepEqual(editsFromForm(snap, [{ key: 'f3', value: true }, { key: 'f4', value: false }]), { f3: true, f4: false });
+});
+
+test('message box choices with parentheses stay whole', () => {
+  const box = { id: 'a2', event: 'CLOSED', args: ['$action'], label: 'close message box (Save (draft) | Discard)' };
+  assert.deepEqual(boxChoices(box), ['Save (draft)', 'Discard']);
+});
+
 test('renderScreen shows every field, action and table of each recorded screen, and escapes every value', async () => {
   for (const name of FIXTURES) {
     for (const snap of await snapshotsOf(name)) {
