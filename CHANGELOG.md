@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **`run_app` and `interact_app` keep the 50 newest pictures**, not every
+  one: each call wrote a full-page PNG of its own name and nothing removed
+  them. Only files of the server's own name pattern are removed, so a
+  directory `A2UI5_MCP_SCREENSHOT_DIR` names keeps the user's files.
+- **A failed boot setup no longer leaks a browser context.** A throw of
+  `newPage`, of the benign-rules import or of `page.route` in `run_app` /
+  `interact_app` left the context open for the life of the server and a
+  listener on the request's signal; both are released now.
 - **A failed mirror download is not retried on every call.** Without a
   checkout and with GitHub unreachable, every call of a mirrored tool waited
   out the 20 s fetch timeout again (`examples`, three mirrors, a minute).

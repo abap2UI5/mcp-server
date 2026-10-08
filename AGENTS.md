@@ -68,7 +68,9 @@ no GitHub mirror either), `A2UI5_MCP_CHROMIUM` (browser path; `CHROMIUM_BIN`,
 the linter's variable, is read after it — then Playwright's managed browser,
 then a system binary, `resolveChromium`),
 `A2UI5_MCP_SCREENSHOT_DIR` (where `run_app` and `interact_app` write their
-PNGs; default `<tmp>/abap2ui5-mcp-screenshots`, and deliberately not the
+PNGs - the newest `SHOTS_KEPT` (50) of them, older ones of that name
+pattern are removed after each picture, no other file ever is; default
+`<tmp>/abap2ui5-mcp-screenshots`, and deliberately not the
 install directory — that is inside `node_modules` for an npx/npm install;
 the default is used only while it is a real directory of the user's own,
 created 0700 - otherwise the PNG is returned but not saved, under

@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnWithTimeout, buildBackend, killChildren } from '../lib/runtime.mjs';
+import { spawnWithTimeout, buildBackend, killChildren, pruneShots, SHOTS_KEPT, openPage } from '../lib/runtime.mjs';
 import { treeKillCommand } from '../lib/spawn.mjs';
 
 // ------------------------------------------------------- spawnWithTimeout ----
@@ -618,4 +618,63 @@ test('every client of the backend connects to the address it binds, never to the
     const hit = code.findIndex((l) => /localhost/i.test(l));
     assert.equal(hit, -1, `${rel} names localhost in code: ${code[hit]}`);
   }
+});
+
+test('pruneShots keeps the newest pictures of this server and never touches another file', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-shots-'));
+  try {
+    const t0 = Date.now() - 1e6;
+    const names = [];
+    for (let i = 0; i < 7; i++) {
+      const name = `zcl_app${i % 2 ? '-interact' : ''}-${(t0 + i * 1000).toString(36)}${i + 1}.png`;
+      fs.writeFileSync(path.join(dir, name), 'png');
+      fs.utimesSync(path.join(dir, name), new Date(t0 + i * 1000), new Date(t0 + i * 1000));
+      names.push(name);
+    }
+    const foreign = ['holiday.png', 'zcl_app.png', 'last-build.json', 'zcl_app-notes.txt'];
+    for (const f of foreign) fs.writeFileSync(path.join(dir, f), 'mine');
+    fs.utimesSync(path.join(dir, 'holiday.png'), new Date(t0 - 1e5), new Date(t0 - 1e5));
+    assert.equal(pruneShots(dir, 3), 4);
+    const left = fs.readdirSync(dir).sort();
+    assert.deepEqual(left, [...foreign, ...names.slice(4)].sort(), 'the three newest pictures and every foreign file');
+    assert.equal(pruneShots(dir, 3), 0, 'nothing more to take');
+    assert.equal(pruneShots(path.join(dir, 'nowhere')), 0, 'a missing directory is no error');
+    assert.ok(SHOTS_KEPT >= 10);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('openPage: a throw of newPage or the setup closes the context and takes the abort listener off', async () => {
+  const fake = (failAt) => {
+    const state = { closed: 0 };
+    const ctx = {
+      close: async () => { state.closed += 1; },
+      newPage: async () => {
+        if (failAt === 'newPage') throw new Error('Target page, context or browser has been closed');
+        return { route: async () => {} };
+      },
+    };
+    return { state, browser: { newContext: async () => ctx } };
+  };
+  for (const failAt of ['newPage', 'setup']) {
+    const { state, browser } = fake(failAt);
+    const ctl = new AbortController();
+    await assert.rejects(openPage(browser, {}, ctl.signal, async () => {
+      if (failAt === 'setup') throw new Error('route failed');
+    }), failAt === 'setup' ? /route failed/ : /has been closed/);
+    assert.equal(state.closed, 1, `${failAt}: the context is closed`);
+    ctl.abort();
+    await new Promise((r) => setImmediate(r));
+    assert.equal(state.closed, 1, `${failAt}: no listener left on the signal`);
+  }
+  // the good path: the context stays open, an abort closes it
+  const { state, browser } = fake(null);
+  const ctl = new AbortController();
+  const opened = await openPage(browser, {}, ctl.signal, async (page) => { await page.route(); });
+  assert.ok(opened.page && opened.ctx && opened.onAbort);
+  assert.equal(state.closed, 0);
+  ctl.abort();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(state.closed, 1);
 });
