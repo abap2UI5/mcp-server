@@ -389,6 +389,71 @@ test('an incremental build after remove_app no longer transpiles the removed cla
   assert.ok(fs.existsSync(path.join(root, 'shots', 'last-build.json')), 'the build log stays in the test\'s own dir');
 }));
 
+/* The first build on a checkout downloads the framework's prebuilt backend,
+ * which carries the FRAMEWORK - no dev app is in it. build_backend's auto
+ * (and verify_app's build stage) answered built and pointed at run_app, and
+ * the deployed app was then "not in the system" (app_start: HTTP 500,
+ * app_list: nothing) until a second build_backend made the incremental one.
+ * Now auto goes on into that incremental build in the same call; an explicit
+ * prebuilt stays the framework alone and names the apps it left out. */
+test('a first auto build on a checkout transpiles the deployed apps on top of the prebuilt backend', { skip: process.platform === 'win32' && 'tar and POSIX stand-ins' }, withFakeFramework(async (t, { root, a2 }) => {
+  const { execFileSync } = await import('node:child_process');
+  const http = await import('node:http');
+  fs.mkdirSync(path.join(a2, 'node_modules', 'express'), { recursive: true }); // no npm ci in a test
+  fs.mkdirSync(path.join(a2, 'node/setup'), { recursive: true });
+  fs.writeFileSync(path.join(a2, 'node/setup/abap_transpile.json'), JSON.stringify({
+    input_folder: 'node/downport', output_folder: 'node/output', libs: [{ url: 'https://github.com/open-abap/open-abap-core', folder: '/node/deps/open-abap-core' }],
+  }));
+  const cli = path.join(a2, 'node_modules/@abaplint/transpiler-cli');
+  fs.mkdirSync(cli, { recursive: true });
+  fs.writeFileSync(path.join(cli, 'package.json'), JSON.stringify({ bin: { abap_transpile: './abap_transpile' } }));
+  fs.writeFileSync(path.join(cli, 'abap_transpile'), "console.log('INPUT ' + require('fs').readdirSync('node/downport').filter((f) => !f.startsWith('.')).sort().join(','));");
+  // the release asset: the framework transpiled, nothing of the sandbox
+  const src = path.join(root, 'asset');
+  for (const d of ['node/output', 'node/downport', 'node/deps/open-abap-core/src']) fs.mkdirSync(path.join(src, d), { recursive: true });
+  fs.writeFileSync(path.join(src, 'node/output/init.mjs'), 'export const init = 1;');
+  fs.writeFileSync(path.join(src, 'node/downport/z2ui5_cl_x.clas.abap'), 'CLASS z2ui5_cl_x DEFINITION.');
+  fs.writeFileSync(path.join(src, 'backend-manifest.json'), JSON.stringify({ version: '1.144.0', commit: 'abc123', builtAt: '2026-09-19T00:00:00Z', contents: ['node/downport', 'node/output', 'node/deps'] }));
+  const tar = path.join(root, 'backend.tar.gz');
+  execFileSync('tar', ['-czf', tar, '-C', src, '.']);
+  const srv = http.createServer((req, res) => res.writeHead(200, { 'content-type': 'application/gzip' }).end(fs.readFileSync(tar)));
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  process.env.A2UI5_MCP_PREBUILT_URL = `http://127.0.0.1:${srv.address().port}/backend.tar.gz`;
+  const savedBackend = process.env.A2UI5_MCP_BACKEND;
+  delete process.env.A2UI5_MCP_BACKEND;
+  try {
+    deployApp({ className: 'zcl_probe', source: APP });
+
+    // explicit prebuilt: the framework alone, the deployed app named as left out
+    const alone = await buildBackend({ mode: 'prebuilt' });
+    assert.equal(alone.ok, true, alone.tail);
+    assert.equal(alone.mode, 'prebuilt');
+    assert.deepEqual(alone.devAppsNotBuilt, ['zcl_probe']);
+    assert.doesNotMatch(alone.tail, /INPUT/, 'no transpile ran');
+
+    // auto on a checkout with no prior build: prebuilt, then the incremental build of the sandbox
+    fs.rmSync(path.join(a2, 'node/output'), { recursive: true, force: true });
+    const auto = await buildBackend({ mode: 'auto' });
+    assert.equal(auto.ok, true, auto.tail);
+    assert.equal(auto.mode, 'prebuilt+incremental');
+    assert.equal(auto.devAppsNotBuilt, undefined);
+    assert.match(auto.tail, /incremental build of the 1 deployed dev app\(s\) on top of it: zcl_probe/);
+    assert.match(auto.tail, /INPUT .*zcl_probe\.clas\.abap/, 'the deployed app was transpiled into the backend');
+
+    // nothing deployed: auto is the prebuilt alone, as before
+    removeApp('zcl_probe');
+    fs.rmSync(path.join(a2, 'node/output'), { recursive: true, force: true });
+    const bare = await buildBackend({ mode: 'auto' });
+    assert.equal(bare.ok, true, bare.tail);
+    assert.equal(bare.mode, 'prebuilt');
+    assert.doesNotMatch(bare.tail, /INPUT/);
+  } finally {
+    delete process.env.A2UI5_MCP_PREBUILT_URL;
+    if (savedBackend !== undefined) process.env.A2UI5_MCP_BACKEND = savedBackend;
+    srv.close();
+  }
+}));
+
 test('two dev apps deployed without a description do not share one', withFakeFramework(async () => {
   // abaplint's identical_descriptions (on in app-template's config) failed
   // every second app while the default was the constant 'MCP dev app'

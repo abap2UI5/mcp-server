@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **A first `build_backend` on a checkout builds the deployed apps too.**
+  With an abap2UI5 checkout and no prior build, mode `auto` downloaded
+  the prebuilt backend - the framework alone - and answered `built` with
+  `next: run_app`; the app deployed before it was in none of it, so
+  `app_start` answered HTTP 500 "does not exist", `app_list` was empty
+  and `verify_app` failed its boot stage on every first run. `auto` now
+  goes on into the incremental build of the deployed apps in the same call
+  (`mode: prebuilt+incremental`); an explicit `prebuilt` or `transpile`
+  still builds the framework alone and names the apps it left out
+  (`devAppsNotBuilt`, and a `next` that says how to add them).
 - **A `build_backend` that joined the running build reports progress.**
   Its description promises progress notifications to a call with a
   `progressToken`; a call that joined the build in flight heard none
