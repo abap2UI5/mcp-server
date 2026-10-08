@@ -1123,7 +1123,10 @@ legitimately slower.
   tools that can grow past it page against — `scaffold_app` (`files`),
   `pitfalls`, `examples`, `capabilities` and `api_reference` (`offset`, the
   last three with `limit`) — and each page names the arguments that fetch
-  the rest; `run_unit_tests` counts a long run's tests per object instead;
+  the rest; `read_app` (`from_line`) and `build_log` (`offset`, its `cut`
+  names the call) page by line, a log line past `LOG_LINE_SHOWN` shown
+  cut, and `build_backend`'s 30-line tail shortens each long line;
+  `run_unit_tests` counts a long run's tests per object instead;
   `test/paging.test.mjs` walks the pages to the end over fake checkouts. A
   tool whose answer can grow with upstream content pages the same way, never
   by dropping content. **Measure what is sent**: `text()` writes indented

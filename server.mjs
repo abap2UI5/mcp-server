@@ -993,15 +993,19 @@ async function handle(name, args = {}, ctx = {}) {
           + 'remove_app without arguments lists the deployed ones');
       }
       /* Paged by whole lines: a class of 1,500 lines (migrate_report
-       * deploys them) answered 107,304 characters. */
+       * deploys them) answered 107,304 characters. Each line is measured
+       * as the answer writes it - JSON-escaped, its line break a `\n` - not
+       * raw: a class of JSON string templates went out ~35% over. */
       const all = res.source.split('\n');
       const from = boundedInt(args.from_line, { name: 'from_line', dflt: 1, min: 1, max: Math.max(1, all.length) });
       const page = [];
       let used = 0;
       for (let i = from - 1; i < all.length; i += 1) {
-        if (page.length && used + all[i].length + 1 > ANSWER_BUDGET - 5000) break;
+        // the escaped line between its quotes, plus the two characters of `\n`
+        const n = JSON.stringify(all[i]).length;
+        if (page.length && used + n > ANSWER_BUDGET - 5000) break;
         page.push(all[i]);
-        used += all[i].length + 1;
+        used += n;
       }
       const to = from + page.length - 1;
       const paged = from > 1 || to < all.length;

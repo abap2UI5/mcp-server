@@ -116,19 +116,20 @@ async function withServer(fn) {
       AI_VIEW_CHECK_HOME: nowhere,
       DOCS_HOME: nowhere,
       A2UI5_MCP_REMOTE: '0',
+      A2UI5_MCP_SCREENSHOT_DIR: path.join(base, 'shots'),
     },
     stderr: 'ignore',
   });
   const client = new Client({ name: 'paging', version: '0' }, { capabilities: {} });
   await client.connect(transport);
   try {
-    await fn(async (name, args) => {
+    await fn(async (name, args, { budget = LIMIT, error = false } = {}) => {
       const r = await client.callTool({ name, arguments: args });
       const t = r.content[0].text;
-      assert.ok(!r.isError, `${name} errored: ${t.slice(0, 500)}`);
-      assert.ok(t.length < LIMIT, `${name} ${JSON.stringify(args)} answered ${t.length} characters`);
-      return JSON.parse(t);
-    });
+      assert.equal(Boolean(r.isError), error, `${name} ${error ? 'did not error' : 'errored'}: ${t.slice(0, 500)}`);
+      assert.ok(t.length < budget, `${name} ${JSON.stringify(args)} answered ${t.length} characters`);
+      return error ? t : JSON.parse(t);
+    }, base);
   } finally {
     await client.close();
     fs.rmSync(base, { recursive: true, force: true });
@@ -154,6 +155,78 @@ test('scaffold_app pages the template: the small files first, then every other o
     assert.equal(remaining.length, 0, 'the pages end');
     assert.equal(got.size, 7, 'every template file arrived exactly once');
     assert.match(got.get('AGENTS.md'), /^# AGENTS/);
+  });
+});
+
+/* read_app paged by raw characters while the answer is JSON: a class whose
+ * lines carry JSON templates (abap2UI5 apps build them in string templates)
+ * went out with every quote and line break escaped, ~35% over the budget. */
+test('read_app pages a class by lines, measured as the answer is written', async () => {
+  await withServer(async (call, base) => {
+    const line = '    lv_json = lv_json && `{"a":"1","b":"2","c":"3","d":"4","e":"5","f":"6"}`.';
+    const total = 1600;
+    const src = ['CLASS zcl_json_heavy DEFINITION PUBLIC.', ...Array.from({ length: total - 2 }, () => line), 'ENDCLASS.'].join('\n');
+    const dir = path.join(base, 'samples-controls', 'src', 'zz_dev');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'zcl_json_heavy.clas.abap'), src);
+    const seen = [];
+    let from;
+    for (let page = 0; page < 10; page += 1) {
+      const r = await call('read_app', { class_name: 'zcl_json_heavy', ...(from ? { from_line: from } : {}) }, { budget: ANSWER_BUDGET });
+      seen.push(...r.source.split('\n'));
+      if (!r.next) break;
+      assert.equal(r.lines.to + 1, r.next.from_line);
+      from = r.next.from_line;
+    }
+    assert.ok(from, 'more than one page');
+    assert.equal(seen.length, total, 'every line arrives once');
+    assert.equal(seen.join('\n'), src);
+  });
+});
+
+/* build_log answered `tail` lines (up to 2,000) whatever their length: the
+ * kept log is up to 256 KiB, and a transpiler that prints long lines filled
+ * an answer several times over. */
+test('build_log fits its lines into one answer and says how to read the rest', async () => {
+  await withServer(async (call, base) => {
+    const lines = Array.from({ length: 2000 }, (_, i) => `line ${String(i).padStart(4, '0')} "${'x'.repeat(110)}"`);
+    lines[1990] = `a minified bundle on one line ${'y'.repeat(200_000)}`;
+    fs.mkdirSync(path.join(base, 'shots'), { recursive: true });
+    fs.writeFileSync(path.join(base, 'shots', 'last-build.json'), JSON.stringify({ startedAt: 'x', finishedAt: 'y', mode: 'incremental', code: 1, ok: false, lines }));
+    // the tail: the LAST lines that fit, the cut said with the offset that reads on before them
+    const last = await call('build_log', { tail: 2000 }, { budget: ANSWER_BUDGET });
+    assert.equal(last.totalLines, 2000);
+    assert.equal(last.lines[last.lines.length - 1], lines[1999], 'the tail ends with the last line');
+    assert.equal(last.start + last.lines.length, 2000);
+    assert.ok(last.start > 0);
+    assert.match(last.cut, /build_log \{ offset: \d+, tail: \d+ \}/);
+    const long = last.lines[1990 - last.start];
+    assert.ok(long.length < 10_000 && /more characters\]$/.test(long), 'one huge line is shortened, not the whole answer');
+    // paging from an offset: the first lines that fit, then on to the end
+    let offset = 0;
+    const seen = [];
+    for (let page = 0; page < 20 && offset < 2000; page += 1) {
+      const r = await call('build_log', { offset, tail: 2000 }, { budget: ANSWER_BUDGET });
+      assert.equal(r.start, offset);
+      seen.push(...r.lines);
+      offset = r.start + r.lines.length;
+      if (offset < 2000) assert.match(r.cut, new RegExp(`offset: ${offset}`));
+    }
+    assert.equal(seen.length, 2000, 'every line arrives once');
+    assert.equal(seen[0], lines[0]);
+    assert.equal(seen[1999], lines[1999]);
+  });
+});
+
+test('a failed build_backend answers its tail with every long line shortened', async () => {
+  await withServer(async (call, base) => {
+    fs.writeFileSync(path.join(base, 'samples-controls', 'scripts', 'e2e-build.mjs'),
+      `for (let i = 0; i < 40; i++) console.log('step ' + i + ' ' + 'z'.repeat(50000));\nprocess.exitCode = 1;\n`);
+    const t = await call('build_backend', { mode: 'full' }, { budget: ANSWER_BUDGET, error: true });
+    assert.match(t, /^build failed \(exit 1, mode full\)/);
+    assert.match(t, /step 39 z+ \[\.\.\. \d+ more characters - build_log has the line\]/);
+    const log = await call('build_log', { tail: 1 }, { budget: ANSWER_BUDGET });
+    assert.match(log.lines[0], /^step 39 z+ \[\.\.\. \d+ more characters\]$/, 'build_log shows the line, cut to what one answer holds');
   });
 });
 

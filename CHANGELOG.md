@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **`build_log`, `build_backend` and `read_app` answers fit.** `build_log`
+  answered `tail` lines whatever their length (2,000 transpiler lines:
+  464,000 characters) - the last lines that fit come back now, a line past
+  4,000 characters shortened, and `cut` names the call that reads the
+  rest. A failed `build_backend` put its 30-line tail into the answer
+  unshortened (1.5 million characters for a build that prints a bundle per
+  line). `read_app` paged by raw characters while the answer escapes every
+  quote: a class of JSON templates went out at 73,000 characters.
 - **`interact_app` refuses a step it would perform otherwise than asked.**
   The tool's arguments are type-checked, its steps were not: `{ comit:
   false }` and `{ commit: "false" }` committed the fill anyway and
