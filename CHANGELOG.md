@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **A `build_backend` that joined the running build can be cancelled.** A
+  second call of the same mode joins the build in flight, and its own
+  cancel was ignored: the request stayed open until the build ended (tens
+  of minutes for a full one). It stops waiting now and answers as
+  cancelled; the build goes on for the call that started it.
 - **`api_reference` pages its compact list too.** Without `query`,
   `offset` and `limit` were ignored and the whole surface came back to a
   call that asked for its second page. Both lists page by entry now; the

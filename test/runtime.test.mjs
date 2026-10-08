@@ -229,6 +229,40 @@ test('buildBackend joins a same-mode call and fails fast on a conflicting mode',
   );
 });
 
+/* A second identical build_backend joined the running build and ignored its
+ * own cancel: the request stayed open to the end of the build. The joiner
+ * stops waiting on its cancel; the build goes on for the call that started it. */
+test('buildBackend: a joined call stops waiting on its own cancel and leaves the build running', async () => {
+  await withFakeRepos(
+    'console.log("slow build"); setTimeout(() => process.exit(0), 1500);',
+    {},
+    async () => {
+      const first = new AbortController();
+      const p1 = buildBackend({ mode: 'full', signal: first.signal });
+      const joiner = new AbortController();
+      const p2 = buildBackend({ mode: 'full', signal: joiner.signal });
+      const t0 = Date.now();
+      setTimeout(() => joiner.abort(), 100);
+      const left = await p2;
+      assert.ok(Date.now() - t0 < 1000, `the joiner answered after ${Date.now() - t0} ms`);
+      assert.equal(left.ok, false);
+      assert.equal(left.aborted, true);
+      assert.equal(left.joined, true);
+      assert.match(left.tail, /stopped waiting for the full build another call started/);
+      const res = await p1;
+      assert.equal(res.ok, true, 'the first caller still gets its build');
+      assert.equal(res.aborted, undefined);
+      // a joiner whose request is already cancelled does not wait at all
+      const p3 = buildBackend({ mode: 'full', signal: first.signal });
+      const gone = new AbortController();
+      gone.abort();
+      const p4 = await buildBackend({ mode: 'full', signal: gone.signal });
+      assert.equal(p4.joined, true);
+      await p3;
+    },
+  );
+});
+
 test('buildBackend kills and reports a build that exceeds its timeout', async () => {
   await withFakeRepos(
     'console.log("building forever"); setInterval(() => {}, 1000);',

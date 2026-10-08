@@ -1319,6 +1319,7 @@ async function handle(name, args = {}, ctx = {}) {
       /* the running backend is stopped once the build really starts: a call
        * the in-flight build of another mode refuses leaves it running */
       const res = await buildBackend({ mode, onLine: progressReporter(ctx), signal: ctx.signal, beforeBuild: stopBackend });
+      if (res.joined) return toolError(`build_backend cancelled by the client: ${res.tail}`);
       if (res.aborted) return toolError(`build cancelled by the client (mode ${res.mode || mode}):\n${res.tail}`);
       if (!res.ok) return toolError(`build failed (exit ${res.code}, mode ${res.mode || mode}):\n${res.tail}`);
       return text({
