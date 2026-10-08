@@ -911,25 +911,32 @@ async function handle(name, args = {}, ctx = {}) {
       const miss = missingSibling('docs');
       if (miss) return miss;
       if (!args.query) return toolError('pass `query` — keywords to search the documentation for, e.g. "value help" or "launchpad"');
-      const entries = searchDocs({
-        query: args.query,
-        limit: boundedInt(args.limit, { name: 'limit', dflt: 10, min: 1, max: 50 }),
-      });
+      const limit = boundedInt(args.limit, { name: 'limit', dflt: 10, min: 1, max: 50 });
+      const offset = boundedInt(args.offset, { name: 'offset', dflt: 0, min: 0 });
+      /* Every hit, then the page: `matches` said how many were RETURNED - 10
+       * for a query 37 pages answer - so a narrow answer read as the whole
+       * site's, and nothing said where the rest was. */
+      const all = searchDocs({ query: args.query, limit: Number.MAX_SAFE_INTEGER });
       // the checkout can be there and the tree not: a half-finished pull, a
       // layout change upstream. Name the directory, the way app_guide does.
-      if (entries === null || !fs.existsSync(docsRoot())) {
+      if (all === null || !fs.existsSync(docsRoot())) {
         return toolError(`the docs checkout has no docs/ page tree (looked in ${docsRoot()}) — `
           + 'update it (git pull); the site sources live there');
       }
-      if (!entries.length) {
+      if (!all.length) {
         return text({
           matches: 0,
           hint: `no documentation page carries every term of "${args.query}" — fewer or broader terms widen the net; `
             + 'app_guide covers building an app, api_reference the client API',
         });
       }
+      const entries = all.slice(offset, offset + limit);
+      const next = offset + entries.length;
       return text({
-        matches: entries.length,
+        matches: all.length,
+        ...(offset ? { offset } : {}),
+        returned: entries.length,
+        ...(next < all.length ? { more: `${all.length - next} more - call again with offset: ${next} (same query), or add terms` } : {}),
         entries,
         next: 'fetch the `markdown` URL of the best hit for the whole page — or read docs/<path>.md in the checkout',
       });

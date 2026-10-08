@@ -96,6 +96,10 @@ function fakes() {
   const chapters = Array.from({ length: 30 }, (_, i) => `## ${i + 1}. Chapter ${i + 1}\n\n` + `guide prose for chapter ${i + 1}. `.repeat(140));
   write('abap2UI5/docs/agents/building-apps.md', `# Building apps\n\nHow to read this guide.\n\n${chapters.join('\n\n')}\n`);
   write('abap2UI5/.claude/skills/ui5-check/SKILL.md', '---\nname: ui5-check\n---\nPreamble.\n\n## View case\n\nsmall\n');
+  // the documentation site: more matching pages than one default answer lists
+  write('docs/package.json', JSON.stringify({ name: 'abap2ui5-docs' }));
+  write('docs/docs/index.md', '# Home\n\nThe start page.\n');
+  for (let i = 0; i < 25; i++) write(`docs/docs/cookbook/page_${String(i).padStart(2, '0')}.md`, `# Page ${i}\n\n## Binding\n\nhow binding works, part ${i}.\n`);
   // a sample catalogue with many rows
   const rows = Array.from({ length: 400 }, (_, i) => `| **Sample ${i}** — table demo number ${i}<br>${'a long summary of what it shows '.repeat(6)}<br><sub>table demo</sub> | [\`Z2UI5_CL_SMP_APP_${String(i).padStart(3, '0')}\`](src/01/z2ui5_cl_smp_app_${i}.clas.abap) |`);
   write('samples/SAMPLES.md', ['# Samples', '', '## Tables', '', '| Sample | Class |', '|---|---|', ...rows].join('\n'));
@@ -117,7 +121,7 @@ async function withServer(fn) {
       AI_DEMOKIT_HOME: '',
       SAMPLES_STACK_HOME: nowhere,
       AI_VIEW_CHECK_HOME: nowhere,
-      DOCS_HOME: nowhere,
+      DOCS_HOME: path.join(base, 'docs'),
       A2UI5_MCP_REMOTE: '0',
       A2UI5_MCP_SCREENSHOT_DIR: path.join(base, 'shots'),
     },
@@ -312,6 +316,27 @@ test('app_guide pages its chapters and every chapter arrives once', async () => 
     const one = await call('app_guide', { section: '7' });
     assert.deepEqual(one.sections.map((c) => c.heading), ['7. Chapter 7']);
     assert.equal(one.more, undefined, 'one chapter names no page');
+  });
+});
+
+/* docs_search answered `matches: 10` for a query 25 pages answer: the
+ * count of what it returned, and nothing said where the rest was. */
+test('docs_search counts every matching page and pages the rest', async () => {
+  await withServer(async (call) => {
+    const first = await call('docs_search', { query: 'binding' });
+    assert.equal(first.matches, 25);
+    assert.equal(first.returned, 10);
+    assert.match(first.more, /15 more - call again with offset: 10 \(same query\)/);
+    const seen = new Set(first.entries.map((e) => e.path));
+    for (const offset of [10, 20]) {
+      const page = await call('docs_search', { query: 'binding', offset });
+      assert.equal(page.offset, offset);
+      for (const e of page.entries) seen.add(e.path);
+    }
+    assert.equal(seen.size, 25, 'every page arrives once');
+    const last = await call('docs_search', { query: 'binding', offset: 20 });
+    assert.equal(last.returned, 5);
+    assert.equal(last.more, undefined);
   });
 });
 

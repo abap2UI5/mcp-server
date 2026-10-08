@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **`docs_search` counts every matching page.** `matches` was the number
+  of pages it returned - 10 for a query 37 pages answer - so a cut answer
+  read as the whole site's, and nothing said where the rest was. `matches`
+  counts every hit now, `returned` the page, and `more` names the new
+  `offset` that continues it.
 - **`read_example` pages a long sample by lines.** It answered the file
   whole, and samples-controls' largest ports are 84,000 characters - past
   what a client accepts, so the agent read none of it. A long sample comes
