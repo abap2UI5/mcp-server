@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   hydrate, fetchRemoteFile, safeRelPath, isRemoteCheckout, readMarker, remoteRoot, remoteEnabled,
-  mirrorFresh, remoteStatus, lastHydrate, resetRemote, REMOTE_FILES, REMOTE_TOOLS, resourceRepos, MARKER, TEXT_MAX_BYTES,
+  mirrorFresh, remoteStatus, lastHydrate, resetRemote, FAILURE_BACKOFF_MS, REMOTE_FILES, REMOTE_TOOLS, resourceRepos, MARKER, TEXT_MAX_BYTES,
 } from '../lib/remote.mjs';
 import { resolveKey, REPO_DIRS } from '../lib/repos.mjs';
 import { privateDirProblem } from '../lib/private-dir.mjs';
@@ -147,7 +147,8 @@ test('a failed download leaves no half mirror, keeps a stale one, and the reason
   assert.match(remoteStatus('corpus'), /could not be fetched either: HTTP 404/);
   // a complete mirror, then the network goes away: the stale copy is kept
   const full = fakeFetch(Object.fromEntries(REMOTE_FILES.corpus.map((f) => [`/${f}`, `v1 ${f}`])));
-  assert.equal((await hydrate('corpus', { local: null, fetchImpl: full })).fetched, true);
+  // the failure is the answer for a while (FAILURE_BACKOFF_MS) - force tries regardless
+  assert.equal((await hydrate('corpus', { local: null, fetchImpl: full, force: true })).fetched, true);
   process.env.A2UI5_MCP_REMOTE_TTL_MS = '1';
   await new Promise((r) => setTimeout(r, 5));
   assert.equal(mirrorFresh('corpus'), false);
@@ -157,6 +158,37 @@ test('a failed download leaves no half mirror, keeps a stale one, and the reason
   assert.equal(stale.root, remoteRoot('corpus'));
   assert.equal(fs.readFileSync(path.join(stale.root, 'CAPABILITIES.md'), 'utf8'), 'v1 CAPABILITIES.md');
   assert.equal(remoteStatus('corpus'), '', 'a stale mirror still stands in, so the missing-checkout message says nothing');
+}));
+
+test('a failed download is not tried again for FAILURE_BACKOFF_MS - with or without a stale copy', withEnv(async () => {
+  assert.ok(FAILURE_BACKOFF_MS >= 60_000 && FAILURE_BACKOFF_MS <= 10 * 60_000, 'a few minutes');
+  const dead = fakeFetch({});
+  const first = await hydrate('corpus', { local: null, fetchImpl: dead });
+  assert.equal(first.root, null);
+  const calls = dead.calls.length;
+  assert.ok(calls > 0);
+  const again = await hydrate('corpus', { local: null, fetchImpl: dead });
+  assert.equal(dead.calls.length, calls, 'no second download while the failure is fresh');
+  assert.equal(again.root, null);
+  assert.equal(again.error, first.error);
+  assert.match(again.backoff, /^not retried for \d+ s$/);
+  assert.match(remoteStatus('corpus'), /could not be fetched either: HTTP 404/, 'the reason stays in the message');
+  // a stale mirror stands in for the failure the same way
+  const full = fakeFetch(Object.fromEntries(REMOTE_FILES.corpus.map((f) => [`/${f}`, `v1 ${f}`])));
+  assert.equal((await hydrate('corpus', { local: null, fetchImpl: full, force: true })).fetched, true);
+  process.env.A2UI5_MCP_REMOTE_TTL_MS = '1';
+  await new Promise((r) => setTimeout(r, 5));
+  const staleFirst = await hydrate('corpus', { local: null, fetchImpl: dead });
+  assert.equal(staleFirst.stale, true);
+  const n = dead.calls.length;
+  const staleAgain = await hydrate('corpus', { local: null, fetchImpl: dead });
+  assert.equal(dead.calls.length, n, 'the stale copy, without waiting out another fetch');
+  assert.equal(staleAgain.stale, true);
+  assert.equal(staleAgain.root, remoteRoot('corpus'));
+  // once the backoff is over it is tried again
+  lastHydrate('corpus').failedAt -= FAILURE_BACKOFF_MS;
+  await hydrate('corpus', { local: null, fetchImpl: dead });
+  assert.ok(dead.calls.length > n);
 }));
 
 test('the template mirror follows template.json, the docs mirror the repository tree', withEnv(async () => {

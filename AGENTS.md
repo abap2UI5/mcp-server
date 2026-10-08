@@ -151,7 +151,10 @@ Four rules, each pinned by `test/remote.test.mjs` and
   mirror the stale copy stands in (`stale: true`); without one the tool
   degrades with its usual message plus the reason (`remoteStatus`). A
   half-fetched mirror is never written: every file arrives first, then all of
-  them are written, then the marker.
+  them are written, then the marker. A failure is the answer for
+  `FAILURE_BACKOFF_MS` (3 min) before the download is tried again - every
+  tool call hydrates, and a network that swallows requests cost each call
+  the 20 s fetch timeout once more.
 
 `read_example` is the tool that made the mirror worth having: an `examples`
 hit is a class name and a path, and an agent without the checkout could not
