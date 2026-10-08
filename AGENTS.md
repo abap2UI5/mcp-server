@@ -314,7 +314,10 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
   through express' `app.listen()`, whose callback express 5 also calls with
   the bind error (the host said "Listening on", exited, and the port wait
   was answered by the other process). `startBackend` fails a child that
-  has exited by the time the port answers, on both backends. Start, stop,
+  exits within `LIVENESS_MS` (0.5 s) of its "Listening on", on both
+  backends - the port's owner answers the port wait at once, before the
+  exit is seen, so the wait alone lost that race; a backend that dies
+  later is caught by the next call (its sessions' generation). Start, stop,
   port and orphan handling are the checkout's, unchanged. The child's
   environment never carries `ALLOWED_HOSTS` (`backendEnv`): the framework's
   `express.mjs` reads `*` there as "no DNS-rebinding guard".

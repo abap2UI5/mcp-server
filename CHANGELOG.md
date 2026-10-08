@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **A backend that dies right after "Listening on" fails the start
+  reliably.** Over a port another process holds, that process answered the
+  port wait before the child's exit was seen, and two starts in three still
+  reported the backend running. The child has to stay up for half a second
+  past its "Listening on" now (the start ends early when it exits).
 - **`setup_status` finds git, tar, npm and npx without `which`.** It
   spawned `which` (`where` on Windows) once per program, with no timeout,
   and on an image without `which` reported every program missing. The PATH

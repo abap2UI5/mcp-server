@@ -37,8 +37,10 @@ if (process.env.ENV_MARKER) fs.writeFileSync(process.env.ENV_MARKER, JSON.string
 if (process.env.SAY_LISTENING_AND_EXIT) {
   // express 5's app.listen over a port in use: the callback runs with the
   // error, the host prints its line, and the process ends with nothing bound
+  // (EXIT_AFTER_MS: a boot that crashes a moment after it said so)
   console.log('Listening on ' + process.env.PORT);
-  process.exit(0);
+  if (process.env.EXIT_AFTER_MS) setTimeout(() => process.exit(0), Number(process.env.EXIT_AFTER_MS));
+  else process.exit(0);
 }
 setTimeout(listen, Number(process.env.LISTEN_DELAY_MS || 0));
 process.on('SIGTERM', () => {
@@ -60,7 +62,7 @@ process.env.A2UI5_MCP_PORT = String(PORT);
 process.env.A2UI5_HOME = a2;
 process.env.BOOT_MARKER = marker;
 
-const { startBackend, stopBackend, backendStatus, backendEnv } = await import('../lib/runtime.mjs');
+const { startBackend, stopBackend, backendStatus, backendEnv, LIVENESS_MS } = await import('../lib/runtime.mjs');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const portOpen = () =>
@@ -186,6 +188,27 @@ test('a backend that exits right after "Listening on" fails the start; the port\
     assert.equal(backendStatus().running, false);
   } finally {
     delete process.env.SAY_LISTENING_AND_EXIT;
+    await new Promise((r) => blocker.close(r));
+  }
+});
+
+/* The port's owner answering AT ONCE: the port wait's first GET came back
+ * before the child's exit was seen, and two starts in three reported
+ * "running" - the test above only passed because its blocker answers late.
+ * The child must outlive LIVENESS_MS past its "Listening on". */
+test('a port owner that answers at once does not hide a backend that exits after "Listening on"', async () => {
+  const blocker = http.createServer((req, res) => res.end('somebody else'));
+  await new Promise((r) => blocker.listen(PORT, '127.0.0.1', r));
+  process.env.SAY_LISTENING_AND_EXIT = '1';
+  try {
+    for (const after of ['', '', '', '50', String(LIVENESS_MS - 200)]) {
+      process.env.EXIT_AFTER_MS = after;
+      await assert.rejects(startBackend(), /exited \(0\) right after it said it was listening/, `exit after ${after || 0} ms`);
+      assert.equal(backendStatus().running, false);
+    }
+  } finally {
+    delete process.env.SAY_LISTENING_AND_EXIT;
+    delete process.env.EXIT_AFTER_MS;
     await new Promise((r) => blocker.close(r));
   }
 });
