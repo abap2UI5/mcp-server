@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **An npm build that cannot write its files fails with a reason.** A
+  workspace whose `open-abap-core/` or sandbox the build could not write
+  (a file where the directory belongs, a read-only or full disk) threw out
+  of the build: `build_backend` answered a bare `ENOTDIR` and `build_log`
+  kept the previous build's record. The fetch and the transpile answer a
+  sentence now, and the failed build is the one `build_log` shows.
 - **An action list that is no list is refused with a sentence.** A
   response whose `S_ACTION.T_SYSTEM` or `T_CUSTOM` was an object or a
   number made `app_start` / `app_act` answer "object is not iterable" -
