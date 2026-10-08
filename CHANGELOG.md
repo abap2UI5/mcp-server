@@ -11,6 +11,13 @@
   now and exits 1 with "port N on 127.0.0.1 is in use by another process"
   (also over a release whose own `serve()` has the bug), and a start whose
   child has exited by the time the port answers fails, on both backends.
+- **System mode never logs the password of a refused URL.** With
+  credentials in `A2UI5_MCP_SYSTEM_URL` (refused) or a URL that does not
+  parse, the "ready in SYSTEM MODE" notification showed the raw URL, user
+  and password included. It shows a masked URL now, masked up to the LAST
+  `@` - `https://alice:pa@ss@host` used to keep `ss` - and an `@` before
+  the query is refused as credentials (`https://alice:12/ss@host` parsed
+  as a host `alice` and was shown as the endpoint).
 - **`ALLOWED_HOSTS` from the user's shell no longer reaches the backend.**
   The framework's `express.mjs` reads `ALLOWED_HOSTS=*` as "answer any Host
   and any Origin", which switched its DNS-rebinding guard off for the dev

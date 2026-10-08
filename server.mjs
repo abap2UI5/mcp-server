@@ -100,7 +100,7 @@ import { toolsWithUi, uiEnabled } from './lib/mcp-app.mjs';
 import { appCard, cardContent, defaultAppFormat, APP_FORMATS } from './lib/adaptive-card.mjs';
 import { migrateReport, deployFiles, resolvePopups, validTargetClass, SetupError } from './lib/migrate.mjs';
 import { explicitEnv } from './lib/repos.mjs';
-import { systemConfig, createSystemHttp, createSystemClient, systemClassName, searchClasses, checkSystem } from './lib/system.mjs';
+import { systemConfig, createSystemHttp, createSystemClient, systemClassName, searchClasses, checkSystem, maskedUrl } from './lib/system.mjs';
 import { SYSTEM_TOOLS } from './lib/system-tools.mjs';
 
 function text(s) {
@@ -1701,7 +1701,7 @@ process.stdout.on('error', () => shutdown('stdout closed'));
 const transport = new StdioServerTransport();
 await server.connect(transport);
 if (SYSTEM) {
-  diagnostic(SYSTEM.problems.length ? 'warning' : 'info', `abap2ui5 MCP server ready in SYSTEM MODE (${SYSTEM.endpoint || SYSTEM.url}, user ${SYSTEM.user || '-'})`
+  diagnostic(SYSTEM.problems.length ? 'warning' : 'info', `abap2ui5 MCP server ready in SYSTEM MODE (${SYSTEM.endpoint || maskedUrl(SYSTEM.url)}, user ${SYSTEM.user || '-'})`
     + (SYSTEM.problems.length ? ` - misconfigured: ${SYSTEM.problems.join('; ')}` : ''));
 } else diagnostic('info', `abap2ui5 MCP server ready (samples-controls: ${resolveSamplesControls({ local: true })}, backend built: ${backendBuilt()}, `
   + `GitHub mirror for missing checkouts: ${Object.keys(RESOLVERS).some((k) => !resolveKey(k, { local: true })) ? 'on demand' : 'not needed'})`);
