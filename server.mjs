@@ -59,7 +59,7 @@ import { agentTargetProblem, planAgentSetup, writePlan, pinProblems, pinWarning,
 import { fixSource } from './lib/fixview.mjs';
 import { lintOptionsFor } from './lib/lintopts.mjs';
 import { withRenderFallback, renderSkippedNote, warmThenCold } from './lib/validate.mjs';
-import { ANSWER_BUDGET, takeWithin, takeSmallestWithin, fitSnapshot } from './lib/budget.mjs';
+import { ANSWER_BUDGET, sizeOf, takeWithin, takeSmallestWithin, fitSnapshot, fitUnitResult } from './lib/budget.mjs';
 import { getRenderer, dropRenderer, closeRenderers, rendererLooksDead } from './lib/renderer.mjs';
 import { TOOLS } from './lib/tools.mjs';
 import { RESOURCES, RESOURCE_TEMPLATES, GUIDE_CHAPTER_TEMPLATE, readResource } from './lib/resources.mjs';
@@ -455,6 +455,29 @@ async function deployMigrated(res, ctx) {
   return stop(null);
 }
 
+/* One page of `items` for a tool that pages by `offset` and `limit` (no
+ * limit: every match that fits), cut at the answer budget like examples and
+ * pitfalls. `taken` is the page; `notes` the answer's paging fields - where
+ * it starts, how many it carries, and the exact arguments that fetch the
+ * rest (`more`, absent when nothing is left; `same` names the arguments to
+ * repeat). */
+function pageWithin(items, args, same) {
+  const offset = boundedInt(args.offset, { name: 'offset', dflt: 0, min: 0 });
+  const limit = boundedInt(args.limit, { name: 'limit', dflt: 'every match that fits one answer', min: 1 });
+  const slice = items.slice(offset, typeof limit === 'number' ? offset + limit : undefined);
+  // entries sit two levels deep: { entries: [ ... ] }, { methods: [ ... ] }
+  const { taken } = takeWithin(slice, ANSWER_BUDGET - 5000, { depth: 2 });
+  const next = offset + taken.length;
+  return {
+    taken,
+    notes: {
+      ...(offset ? { offset } : {}),
+      returned: taken.length,
+      ...(next < items.length ? { more: `${items.length - next} more - call again with offset: ${next} ${same}` } : {}),
+    },
+  };
+}
+
 async function handle(name, args = {}, ctx = {}) {
   switch (name) {
     case 'capabilities': {
@@ -475,7 +498,10 @@ async function handle(name, args = {}, ctx = {}) {
         allowed: ['direct', 'workaround', 'needs-live-test', 'not-expressible'],
       });
       const hits = searchCapabilities({ query: args.query, status });
-      return text({ matches: hits.length, entries: hits });
+      /* Paged against the answer budget (lib/budget.mjs): a one-letter query
+       * matched most of the map, ~61,000 characters. */
+      const { taken, notes } = pageWithin(hits, args, '(same query and status)');
+      return text({ matches: hits.length, ...notes, entries: taken });
     }
     case 'examples': {
       /* Not `missingSibling`: one catalogue out of three being absent is not a
@@ -512,7 +538,7 @@ async function handle(name, args = {}, ctx = {}) {
       const all = searchExamples({ query: args.query, area, repo, limit: Number.MAX_SAFE_INTEGER });
       /* Paged against the answer budget too (lib/budget.mjs): 200 entries
        * were ~135 KB, over what a client accepts as one answer. */
-      const page = takeWithin(all.slice(offset, offset + limit), ANSWER_BUDGET - 5000);
+      const page = takeWithin(all.slice(offset, offset + limit), ANSWER_BUDGET - 5000, { depth: 2 });
       const nextOffset = offset + page.taken.length;
       return text({
         matches: all.length,
@@ -810,7 +836,15 @@ async function handle(name, args = {}, ctx = {}) {
           hint: `nothing in z2ui5_if_client matches "${args.query}" — call without arguments for the compact list of every method and constant group`,
         });
       }
-      return text({ matches: total, source: 'abap2UI5/' + API_PATH.join('/'), ...found });
+      /* Paged by ENTRY - a method, a constant group, a type, in that order -
+       * against the answer budget: "e" matched almost the whole interface,
+       * ~75,000 characters. An entry is never cut (a signature belongs with
+       * its documentation). */
+      const flat = ['methods', 'constants', 'types'].flatMap((group) => (found[group] || []).map((entry) => ({ group, entry })));
+      const { taken, notes } = pageWithin(flat, args, '(same query and kind)');
+      const groups = {};
+      for (const { group, entry } of taken) (groups[group] ||= []).push(entry);
+      return text({ matches: total, ...notes, source: 'abap2UI5/' + API_PATH.join('/'), ...groups });
     }
     case 'generation_rules': {
       const miss = missingSibling('samples-controls');
@@ -883,7 +917,8 @@ async function handle(name, args = {}, ctx = {}) {
        * `offset` counts sections across the catalogues, in order. */
       const offset = boundedInt(args.offset, { name: 'offset', dflt: 0, min: 0 });
       const flat = found.flatMap((c) => c.sections.map((sec) => ({ area: c.area, sec })));
-      const page = takeWithin(flat.slice(offset), ANSWER_BUDGET - 5000);
+      // a section sits four levels deep: { catalogues: [ { sections: [ ... ] } ] }
+      const page = takeWithin(flat.slice(offset), ANSWER_BUDGET - 5000, { depth: 4 });
       const nextOffset = offset + page.taken.length;
       const catalogues = found
         .map((c) => ({ ...c, sections: page.taken.filter((x) => x.area === c.area).map((x) => x.sec) }))
@@ -1438,24 +1473,17 @@ async function handle(name, args = {}, ctx = {}) {
       if (miss) return miss;
       const report = progressReporter(ctx);
       const classNames = args.class_names === undefined ? undefined : stringArray(args.class_names, { name: 'class_names', example: '["zcl_my_app", "zcl_my_other_app"]' });
-      const res = await runUnitTests({ className: args.class_name, classNames, signal: ctx.signal, onLine: report });
-      if (res.aborted || res.timedOut) return toolError(res.error);
-      /* Every test of a checkout's full run was 1,522 entries, 194,772
-       * characters: past the budget, the tests are counted per object and
-       * only the skipped ones are listed (the failure is `failed`). */
-      if (JSON.stringify(res).length > ANSWER_BUDGET - 5000) {
-        const perObject = {};
-        for (const t of res.tests) perObject[t.object] = (perObject[t.object] || 0) + 1;
-        const skippedTests = res.tests.filter((t) => t.skipped);
-        res.tests = undefined;
-        res.testsPerObject = perObject;
-        res.skippedTests = skippedTests.slice(0, 50);
-        res.testsNote = 'too many tests to list in one answer - counted per object; class_name or class_names lists a class\'s tests';
-      }
+      const ran = await runUnitTests({ className: args.class_name, classNames, signal: ctx.signal, onLine: report });
+      if (ran.aborted || ran.timedOut) return toolError(ran.error);
+      /* Past the budget the tests are counted per object (lib/budget.mjs) -
+       * measured as text() writes the answer, indented: the compact size it
+       * was measured by let a 600-test class through at 68,000 characters. */
+      const res = fitUnitResult(ran);
       /* No test line at all is "no test class" only for a run that passed: a
        * class_setup that threw prints none either, and that hint sent an
-       * agent to redeploy tests that were there all along. */
-      if (res.class && res.ok && res.tests.length === 0) {
+       * agent to redeploy tests that were there all along. A run counted
+       * per object has tests - and no `tests` array to read (it threw). */
+      if (res.class && res.ok && Array.isArray(res.tests) && res.tests.length === 0) {
         return text({
           ...res,
           hint: `no test class of ${res.class} in the built backend — deploy_app with \`testclasses\`, then build_backend (a deploy after the last build is not in it yet: read_app says so)`,
@@ -1524,14 +1552,15 @@ async function handle(name, args = {}, ctx = {}) {
           : 'every refusal is a place the report does something a browser app does not do - rewrite those statements in the report (or decide on a design) and convert again',
       };
       // a big report is a big class: the mapped table goes first, never the class
-      if (JSON.stringify(reply).length > ANSWER_BUDGET) {
+      // (measured as text() writes it - indented, the size the client sees)
+      if (sizeOf(reply) > ANSWER_BUDGET) {
         const cut = reply.migration_report.indexOf('\n## Mapped');
         if (cut > 0) reply.migration_report = `${reply.migration_report.slice(0, cut)}\n\n## Mapped\n\n(left out - the answer would pass the client's size limit; convert with the report2cloud CLI for the full table)\n`;
       }
       if (args.deploy === true) reply.deploy = await deployMigrated(res, ctx);
       /* then the files: a report of 2,000 lines converted to 212,028
        * characters of them - named with their size, never cut mid-file */
-      if (JSON.stringify(reply).length > ANSWER_BUDGET && reply.files && typeof reply.files === 'object') {
+      if (sizeOf(reply) > ANSWER_BUDGET && reply.files && typeof reply.files === 'object') {
         reply.files = Object.fromEntries(Object.entries(reply.files).map(([k, v]) => [k, `(${String(v).length} characters - left out)`]));
         reply.files_left_out = 'the files would pass the client\'s size limit - deploy: true writes them to the dev sandbox, read_app reads them back page by page';
       }

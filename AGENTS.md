@@ -1113,10 +1113,15 @@ legitimately slower.
   a tool result over 25,000 tokens and the agent then sees nothing at all.
   `lib/budget.mjs` (`ANSWER_BUDGET`, about 60,000 characters) is what the
   tools that can grow past it page against — `scaffold_app` (`files`),
-  `pitfalls` and `examples` (`offset`) — and each page names the arguments
-  that fetch the rest; `test/paging.test.mjs` walks the pages to the end
-  over fake checkouts. A tool whose answer can grow with upstream content
-  pages the same way, never by dropping content.
+  `pitfalls`, `examples`, `capabilities` and `api_reference` (`offset`, the
+  last three with `limit`) — and each page names the arguments that fetch
+  the rest; `run_unit_tests` counts a long run's tests per object instead;
+  `test/paging.test.mjs` walks the pages to the end over fake checkouts. A
+  tool whose answer can grow with upstream content pages the same way, never
+  by dropping content. **Measure what is sent**: `text()` writes indented
+  JSON, so a size is `sizeOf` (with the `depth` an item sits at in the
+  answer), never `JSON.stringify(x).length` - the compact size let a
+  600-test run through at 68,000 characters.
 - **Never `npx <tool>` inside a checkout.** Under an MCP client stdin is no
   TTY, so npx answers its own install prompt and runs whatever the registry
   holds under that name when the checkout has no local bin — `abap_transpile`

@@ -18,6 +18,16 @@
   `@` - `https://alice:pa@ss@host` used to keep `ss` - and an `@` before
   the query is refused as credentials (`https://alice:12/ss@host` parsed
   as a host `alice` and was shown as the endpoint).
+- **`run_unit_tests` no longer throws on a long passing run of one class,
+  and its answer fits.** Past the budget it dropped `tests` and then read
+  `tests.length` (a TypeError); and it measured compact JSON while the
+  answer is indented, so 600 tests went out at 68,000 characters. Measured
+  as written now (`sizeOf`); `migrate_report`'s cuts the same way.
+- **`capabilities` and `api_reference` are paged** like `examples`:
+  `offset` and `limit`, a `more` that names the next offset, every entry
+  whole. A broad query answered ~61,000 and ~75,000 characters. Pages are
+  measured at the depth their entries sit in the answer, `examples` and
+  `pitfalls` too - a full `examples` page came out ~2% over the budget.
 - **`ALLOWED_HOSTS` from the user's shell no longer reaches the backend.**
   The framework's `express.mjs` reads `ALLOWED_HOSTS=*` as "answer any Host
   and any Origin", which switched its DNS-rebinding guard off for the dev
