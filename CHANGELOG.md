@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **`interact_app` refuses a step it would perform otherwise than asked.**
+  The tool's arguments are type-checked, its steps were not: `{ comit:
+  false }` and `{ commit: "false" }` committed the fill anyway and
+  `{ ms: true }` waited 1 ms, each reported as performed. A step's unknown
+  field, a `commit` that is no boolean and an `ms` that is no number are
+  refused naming the step.
 - **A backend that dies right after "Listening on" fails the start
   reliably.** Over a port another process holds, that process answered the
   port wait before the child's exit was seen, and two starts in three still

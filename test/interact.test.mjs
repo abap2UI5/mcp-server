@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { execFileSync } from 'node:child_process';
-import { parseActions, cssAttr, ACTIONS, MAX_ACTIONS } from '../lib/interact.mjs';
+import { parseActions, cssAttr, ACTIONS, MAX_ACTIONS, STEP_KEYS } from '../lib/interact.mjs';
 import { parseUnitOutput, downloadPrebuilt, prebuiltUrl, prebuiltManifest, RUNNER_LOOP, runUnitTests, backendBuilt, PREBUILT_MAX_BYTES } from '../lib/runtime.mjs';
 import { resolveA2UI5 } from '../lib/repos.mjs';
 import { TOOLS } from '../lib/tools.mjs';
@@ -55,9 +55,20 @@ test('parseActions normalises a valid script and refuses every malformed one wit
   refuse([{ action: 'click', id: 'x'.repeat(201) }], /longer than 200/);
 });
 
+test('parseActions refuses a step field it does not know, a commit that is no boolean and an ms that is no number', () => {
+  // each of these used to run as something else than asked: committed, waited 1 ms
+  assert.throws(() => parseActions([{ action: 'fill', id: 'f', value: 'v', comit: false }]), /action 0: no field 'comit' - a step takes action, id, selector/);
+  assert.throws(() => parseActions([{ action: 'fill', id: 'f', value: 'v', commit: 'false' }]), /action 0: `commit` must be true or false, not "false"/);
+  assert.throws(() => parseActions([{ action: 'wait', ms: true }]), /wait `ms` must be between 1 and/);
+  assert.throws(() => parseActions([{ action: 'wait', ms: [250] }]), /wait `ms` must be between 1 and/);
+  assert.equal(parseActions([{ action: 'fill', id: 'f', value: 'v', commit: false }])[0].commit, false);
+  assert.equal(parseActions([{ action: 'wait', ms: '250' }])[0].ms, 250, 'a numeric string is still a number');
+});
+
 test('the tool schema and the parser agree on the action names', () => {
   const tool = TOOLS.find((t) => t.name === 'interact_app');
   assert.deepEqual(tool.inputSchema.properties.actions.items.properties.action.enum, ACTIONS);
+  assert.deepEqual(Object.keys(tool.inputSchema.properties.actions.items.properties), STEP_KEYS, 'and on the fields of a step');
 });
 
 test('cssAttr escapes what would end an attribute selector early', () => {
