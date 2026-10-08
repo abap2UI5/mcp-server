@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnWithTimeout, buildBackend, killChildren, pruneShots, SHOTS_KEPT, openPage } from '../lib/runtime.mjs';
+import { spawnWithTimeout, buildBackend, killChildren, pruneShots, SHOTS_KEPT, openPage, onPath } from '../lib/runtime.mjs';
 import { treeKillCommand } from '../lib/spawn.mjs';
 
 // ------------------------------------------------------- spawnWithTimeout ----
@@ -677,4 +677,36 @@ test('openPage: a throw of newPage or the setup closes the context and takes the
   ctl.abort();
   await new Promise((r) => setImmediate(r));
   assert.equal(state.closed, 1);
+});
+
+test('onPath scans PATH in-process: executables only, PATHEXT on Windows, no which needed', () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-path-'));
+  try {
+    const a = path.join(base, 'a');
+    const b = path.join(base, 'b');
+    fs.mkdirSync(a);
+    fs.mkdirSync(b);
+    fs.writeFileSync(path.join(a, 'tool'), '#!/bin/sh\n', { mode: 0o644 }); // not executable
+    fs.writeFileSync(path.join(b, 'tool'), '#!/bin/sh\n', { mode: 0o755 });
+    fs.mkdirSync(path.join(a, 'dir-not-file'));
+    // PATHEXT is upper case on Windows, whose file system ignores case; this
+    // one may not, so the file carries the extension as PATHEXT spells it
+    fs.writeFileSync(path.join(b, 'npm.CMD'), '@echo off\r\n');
+    const posix = { PATH: `${a}:${b}` };
+    if (process.platform !== 'win32') {
+      assert.equal(onPath('tool', { env: { PATH: a }, platform: 'linux' }), false, 'a file without the x bit is no program');
+      assert.equal(onPath('tool', { env: posix, platform: 'linux' }), true, 'the next directory has it');
+    }
+    assert.equal(onPath('dir-not-file', { env: posix, platform: 'linux' }), false);
+    assert.equal(onPath('missing', { env: posix, platform: 'linux' }), false);
+    assert.equal(onPath('tool', { env: {}, platform: 'linux' }), false, 'no PATH, nothing found');
+    // Windows: the Path key in any case, PATHEXT, a quoted entry
+    assert.equal(onPath('npm', { env: { Path: `"${a}";${b}`, PATHEXT: '.COM;.EXE;.BAT;.CMD' }, platform: 'win32' }), true);
+    assert.equal(onPath('npm.CMD', { env: { Path: b }, platform: 'win32' }), true, 'a name with its extension');
+    assert.equal(onPath('npm', { env: { Path: b, PATHEXT: '.EXE' }, platform: 'win32' }), false, 'only the PATHEXT extensions');
+    // a PATH whose `which` is gone still answers (the old spawn read every program as missing)
+    assert.equal(onPath('tool', { env: { PATH: b }, platform: 'linux' }), process.platform !== 'win32');
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
 });

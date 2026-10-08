@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **`setup_status` finds git, tar, npm and npx without `which`.** It
+  spawned `which` (`where` on Windows) once per program, with no timeout,
+  and on an image without `which` reported every program missing. The PATH
+  is scanned in-process now, with PATHEXT on Windows.
 - **`migrate_report { deploy: true }` installs the template's abaplint.**
   It runs `build_backend`, whose npm install reads app-template's
   `@abaplint/cli` pin, but the mirror is hydrated per tool the client
