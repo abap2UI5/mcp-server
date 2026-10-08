@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **abap2UI5-bench no longer counts the app's own method as a client call**
+  (`bench/`, not part of the package). The `expect` check's `calls`
+  matched any `->name(`, and the canonical template names its helpers
+  like the client methods they wrap - so `me->popup_display( )` passed
+  "calls: popup_display" for a solution that never called
+  `client->popup_display` (a dialog sent through `popover_display`
+  graded PASS). A call on `me` no longer counts; the new broken variant
+  `own-method-not-client` pins it, and every reference still passes.
 - **A first `build_backend` on a checkout builds the deployed apps too.**
   With an abap2UI5 checkout and no prior build, mode `auto` downloaded
   the prebuilt backend - the framework alone - and answered `built` with

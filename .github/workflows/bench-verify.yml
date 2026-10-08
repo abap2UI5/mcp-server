@@ -7,7 +7,7 @@
 #
 #   verify    node verify.mjs - the gate versions equal the pinned
 #             app-template's lockfile, all 20 reference solutions pass every
-#             check, the 7 broken variants fail exactly the checks they name,
+#             check, the 8 broken variants fail exactly the checks they name,
 #             and the Claude Code adapter reads a recorded transcript.
 #             About 2 minutes of grading on a 4-core machine.
 #   plumbing  the pipeline bench.yml runs - run.mjs through the Claude Code
