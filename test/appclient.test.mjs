@@ -379,6 +379,16 @@ test('the default transport hands fetch the same request as before: POST to base
   assert.deepEqual(JSON.parse(seen.body), { value: { S_FRONT: { ORIGIN: 'http://127.0.0.1:4471', PATHNAME: '/', SEARCH: '?app_start=z_x' } } });
 });
 
+test('a T_SYSTEM or T_CUSTOM that is no list is refused with a sentence, not a TypeError', async () => {
+  for (const [list, value] of [['T_SYSTEM', { VIEW_SLOTS: 1 }], ['T_CUSTOM', 5]]) {
+    const client = createAppClient({
+      baseUrl: BASE,
+      fetchImpl: async () => new Response(JSON.stringify({ S_FRONT: { ID: 'd1', APP: 'Z_X', S_ACTION: { [list]: value } } }), { status: 200 }),
+    });
+    await rejects(client.start('z_x'), new RegExp(`answered an S_ACTION\\.${list} that is no list`));
+  }
+});
+
 // ------------------------------------------- selection dialogs: the pick ----
 
 test('a selection dialog\'s confirm: `row` is needed to pick one, it must exist, a search value comes from args', async () => {

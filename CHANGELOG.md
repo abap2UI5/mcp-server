@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **An action list that is no list is refused with a sentence.** A
+  response whose `S_ACTION.T_SYSTEM` or `T_CUSTOM` was an object or a
+  number made `app_start` / `app_act` answer "object is not iterable" -
+  `applyResponse` threw a TypeError. The client now refuses such a
+  response naming the list, and `applyResponse` folds it as an empty list.
+  Both are in the vendored modules (`lib/appclient.mjs`,
+  `lib/snapshot.mjs`): the VS Code extension and abap2UI5/protocol pick
+  the change up with their next re-vendor.
 - **A `build_backend` that joined the running build can be cancelled.** A
   second call of the same mode joins the build in flight, and its own
   cancel was ignored: the request stayed open until the build ended (tens
