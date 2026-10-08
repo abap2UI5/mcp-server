@@ -190,6 +190,33 @@ test('read_app pages a class by lines, measured as the answer is written', async
 /* build_log answered `tail` lines (up to 2,000) whatever their length: the
  * kept log is up to 256 KiB, and a transpiler that prints long lines filled
  * an answer several times over. */
+/* read_example answered a sample whole: samples-controls' largest ports
+ * are 84,000 characters, past what a client accepts as one answer. */
+test('read_example pages a long sample by lines and every line arrives once', async () => {
+  await withServer(async (call, base) => {
+    const line = '      ->input( value = client->_bind_edit( ms_data-field ) description = `{"k":"v"}` ).';
+    const total = 1400;
+    const src = ['CLASS z2ui5_cl_smp_app_900 DEFINITION PUBLIC.', ...Array.from({ length: total - 2 }, () => line), 'ENDCLASS.'].join('\n');
+    fs.mkdirSync(path.join(base, 'samples', 'src', '01'), { recursive: true });
+    fs.writeFileSync(path.join(base, 'samples', 'src', '01', 'z2ui5_cl_smp_app_900.clas.abap'), src);
+    const seen = [];
+    let from;
+    for (let page = 0; page < 10; page += 1) {
+      const r = await call('read_example', { repo: 'samples', path: 'src/01/z2ui5_cl_smp_app_900.clas.abap', ...(from ? { from_line: from } : {}) }, { budget: ANSWER_BUDGET });
+      assert.equal(r.lines, total);
+      seen.push(...r.source.split('\n'));
+      if (!r.nextPage) break;
+      assert.equal(r.page.to_line + 1, r.nextPage.from_line);
+      from = r.nextPage.from_line;
+    }
+    assert.ok(from, 'more than one page');
+    assert.equal(seen.join('\n'), src, 'every line arrives once');
+    const small = await call('read_example', { repo: 'samples', path: 'src/01/z2ui5_cl_smp_app_900.clas.abap', from_line: total });
+    assert.deepEqual(small.page, { from_line: total, to_line: total });
+    assert.equal(small.nextPage, undefined);
+  });
+});
+
 test('build_log fits its lines into one answer and says how to read the rest', async () => {
   await withServer(async (call, base) => {
     const lines = Array.from({ length: 2000 }, (_, i) => `line ${String(i).padStart(4, '0')} "${'x'.repeat(110)}"`);

@@ -1124,7 +1124,7 @@ legitimately slower.
   `pitfalls`, `app_guide`, `examples`, `capabilities` and `api_reference`
   (`offset`, all but `pitfalls` with `limit`; `app_guide` and `pitfalls`
   by chapter / section, never cut) — and each page names the arguments that fetch
-  the rest; `read_app` (`from_line`) and `build_log` (`offset`, its `cut`
+  the rest; `read_app` and `read_example` (`from_line`) and `build_log` (`offset`, its `cut`
   names the call) page by line, a log line past `LOG_LINE_SHOWN` shown
   cut, and `build_backend`'s 30-line tail shortens each long line;
   `validate_view` and `fix_view` list the most severe findings that fit

@@ -461,6 +461,24 @@ async function deployMigrated(res, ctx) {
  * it starts, how many it carries, and the exact arguments that fetch the
  * rest (`more`, absent when nothing is left; `same` names the arguments to
  * repeat). */
+/* The whole lines from `fromLine` (1-based) that fit one answer: `{ from,
+ * to, page }`. Each line is measured as the answer writes it - JSON-escaped,
+ * its line break a `\n` - not raw: a class of JSON string templates went
+ * out ~35% over. At least one line, however long. */
+function linePage(all, fromLine) {
+  const from = boundedInt(fromLine, { name: 'from_line', dflt: 1, min: 1, max: Math.max(1, all.length) });
+  const page = [];
+  let used = 0;
+  for (let i = from - 1; i < all.length; i += 1) {
+    // the escaped line between its quotes, plus the two characters of `\n`
+    const n = JSON.stringify(all[i]).length;
+    if (page.length && used + n > ANSWER_BUDGET - 5000) break;
+    page.push(all[i]);
+    used += n;
+  }
+  return { from, to: from + page.length - 1, page };
+}
+
 function pageWithin(items, args, same) {
   const offset = boundedInt(args.offset, { name: 'offset', dflt: 0, min: 0 });
   const limit = boundedInt(args.limit, { name: 'limit', dflt: 'every match that fits one answer', min: 1 });
@@ -588,13 +606,19 @@ async function handle(name, args = {}, ctx = {}) {
             + (root ? `; the checkout at ${root} does not have it either (git pull?)` : ''));
         }
       }
-      const source = fs.readFileSync(at, 'utf8');
+      /* Paged by whole lines, like read_app: samples-controls' largest
+       * ports answered 84,000 characters, past what a client accepts as
+       * one answer - and the agent then read none of it. */
+      const all = fs.readFileSync(at, 'utf8').split('\n');
+      const page = linePage(all, args.from_line);
+      const paged = page.from > 1 || page.to < all.length;
       return text({
         repo,
         path: file,
         from,
-        lines: source.split('\n').length,
-        source,
+        lines: all.length,
+        ...(paged ? { page: { from_line: page.from, to_line: page.to }, ...(page.to < all.length ? { nextPage: { from_line: page.to + 1 } } : {}) } : {}),
+        source: page.page.join('\n'),
         next: 'take the pattern, not the file: an app of your own keeps its own class name, package and events (app_guide chapter 2)',
       });
     }
@@ -1014,17 +1038,7 @@ async function handle(name, args = {}, ctx = {}) {
        * as the answer writes it - JSON-escaped, its line break a `\n` - not
        * raw: a class of JSON string templates went out ~35% over. */
       const all = res.source.split('\n');
-      const from = boundedInt(args.from_line, { name: 'from_line', dflt: 1, min: 1, max: Math.max(1, all.length) });
-      const page = [];
-      let used = 0;
-      for (let i = from - 1; i < all.length; i += 1) {
-        // the escaped line between its quotes, plus the two characters of `\n`
-        const n = JSON.stringify(all[i]).length;
-        if (page.length && used + n > ANSWER_BUDGET - 5000) break;
-        page.push(all[i]);
-        used += n;
-      }
-      const to = from + page.length - 1;
+      const { from, to, page } = linePage(all, args.from_line);
       const paged = from > 1 || to < all.length;
       return text({
         ...res,

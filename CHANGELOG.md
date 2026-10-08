@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **`read_example` pages a long sample by lines.** It answered the file
+  whole, and samples-controls' largest ports are 84,000 characters - past
+  what a client accepts, so the agent read none of it. A long sample comes
+  in pages of whole lines now (`page`, `nextPage`, `from_line`), measured
+  as the answer is written, like `read_app`.
 - **An npm build that cannot write its files fails with a reason.** A
   workspace whose `open-abap-core/` or sandbox the build could not write
   (a file where the directory belongs, a read-only or full disk) threw out
