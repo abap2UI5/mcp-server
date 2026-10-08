@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **A client's cancel reaches the app tools' roundtrip.** `app_start` and
+  `app_act` (sandbox and system mode) waited out the client's 120 s
+  timeout after `notifications/cancelled`, holding the session's queue the
+  whole time. The request's signal is combined with the timeout now
+  (`start`/`act` take a `signal` option, so the vendored client keeps its
+  defaults): the roundtrip is aborted, the act refused as cancelled and its
+  edits taken back.
 - **A port another process holds fails the backend start instead of
   handing the app tools to that process.** Under express 5 the npm host's
   `app.listen()` called back with the bind error too: the host printed

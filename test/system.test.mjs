@@ -9,6 +9,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -372,6 +373,46 @@ test('system mode over stdio: list, status, ADT search, start, act and describe 
   } finally {
     s.stop();
     await sys.close();
+  }
+});
+
+test('system mode over stdio: a client\'s cancel of app_start aborts the roundtrip to the system', async () => {
+  // a system that takes every POST and never answers it: only an abort of
+  // the request (the socket closed by the client) ends it before the 120 s
+  const seen = { posts: 0, closed: 0 };
+  const hung = http.createServer((req, res) => {
+    if (req.method !== 'POST') {
+      res.writeHead(200);
+      res.end();
+      return;
+    }
+    seen.posts += 1;
+    res.on('close', () => { seen.closed += 1; });
+    req.resume();
+  });
+  await new Promise((r) => hung.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${hung.address().port}/sap/bc/z2ui5?app_start={class}`;
+  const s = startServer({ A2UI5_MCP_SYSTEM_URL: url, A2UI5_MCP_SYSTEM_USER: USER, A2UI5_MCP_SYSTEM_PASSWORD: PASSWORD });
+  const waitFor = async (pred, ms = 10000) => {
+    const t0 = Date.now();
+    while (!pred()) {
+      if (Date.now() - t0 > ms) throw new Error(`timeout: ${JSON.stringify(seen)}`);
+      await new Promise((r) => setTimeout(r, 20));
+    }
+  };
+  try {
+    await s.rpc('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'system', version: '0' } });
+    s.p.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 900, method: 'tools/call', params: { name: 'app_start', arguments: { app: 'z2ui5_cl_smp_app_381' } } })}\n`);
+    await waitFor(() => seen.posts === 1);
+    s.p.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 900, reason: 'test' } })}\n`);
+    await waitFor(() => seen.closed === 1);
+    // the server is still there for the next call
+    const status = await s.rpc('tools/list', {});
+    assert.ok(status.result.tools.length);
+  } finally {
+    s.stop();
+    hung.closeAllConnections();
+    await new Promise((r) => hung.close(r));
   }
 });
 

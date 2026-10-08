@@ -576,7 +576,11 @@ default:
   once the backend handed them out - the session's `sap-contextid` and the
   `x-csrf-token`). `method: 'HEAD'` is the CSRF token fetch
   (`x-csrf-token: Fetch`, no body). `signal` is the client's timeout
-  (`timeoutMs`, 120 s, one for the roundtrip and its handshake), `draftId`
+  (`timeoutMs`, 120 s, one for the roundtrip and its handshake) - combined
+  with the caller's own `signal` when `start(app, { signal })` or
+  `act(session, { signal })` passed one (the MCP server passes the request's,
+  so a client's cancel aborts the roundtrip; the act is then refused as
+  cancelled and its edits taken back) - `draftId`
   the `S_FRONT.ID` the request continues — `null` for an app start. Its
   answer is `{ status, headers?, body }`; the client reads `sap-contextid`
   and `x-csrf-token` from `headers` (any case, a repeated header joined), a

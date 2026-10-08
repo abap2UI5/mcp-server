@@ -356,7 +356,7 @@ async function systemSide() {
 /* The system mode's tools. The app tools answer through snapshotAnswer like
  * the sandbox's (the same snapshot, the same Adaptive Card); a refusal of
  * the configuration or of the breaker comes back before anything is sent. */
-async function handleSystem(name, args = {}) {
+async function handleSystem(name, args = {}, { signal } = {}) {
   const { sys, client } = await systemSide();
   switch (name) {
     case 'system_status':
@@ -386,7 +386,7 @@ async function handleSystem(name, args = {}) {
       const maxRows = boundedInt(args.max_rows, { name: 'max_rows', dflt: 20, min: 0, max: 200 });
       return snapshotAnswer(async () => {
         await sys.ready();
-        return client.start(cls, { values: args.values, maxRows });
+        return client.start(cls, { values: args.values, maxRows, signal });
       }, { format, client });
     }
     case 'app_describe': {
@@ -401,7 +401,7 @@ async function handleSystem(name, args = {}) {
         /* a pending-only act sends nothing, so it needs no logon either */
         if (args.event !== undefined && args.event !== null && args.event !== '') await sys.ready();
         // `row` as given: the client checks it (as the sandbox's app_act does)
-        return client.act(args.session, { values: args.values, event: args.event, args: args.args, row: args.row, maxRows });
+        return client.act(args.session, { values: args.values, event: args.event, args: args.args, row: args.row, maxRows, signal });
       }, { format, client });
     }
     default:
@@ -1450,7 +1450,7 @@ async function handle(name, args = {}, ctx = {}) {
       const maxRows = boundedInt(args.max_rows, { name: 'max_rows', dflt: 20, min: 0, max: 200 });
       await startBackend();
       const client = await agentClient();
-      return snapshotAnswer(() => client.start(cls, { values: args.values, maxRows }), { format, client });
+      return snapshotAnswer(() => client.start(cls, { values: args.values, maxRows, signal: ctx.signal }), { format, client });
     }
     case 'app_describe': {
       const maxRows = boundedInt(args.max_rows, { name: 'max_rows', dflt: undefined, min: 0, max: 200 });
@@ -1465,7 +1465,7 @@ async function handle(name, args = {}, ctx = {}) {
       // "", false and [] row 0 and true row 1
       const client = await agentClient();
       return snapshotAnswer(() => client.act(args.session, {
-        values: args.values, event: args.event, args: args.args, row: args.row, maxRows,
+        values: args.values, event: args.event, args: args.args, row: args.row, maxRows, signal: ctx.signal,
       }), { format, client });
     }
     case 'run_unit_tests': {
@@ -1653,7 +1653,7 @@ server.setRequestHandler(CompleteRequestSchema, async (req) => {
 server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
   try {
     checkStringArgs(ACTIVE_TOOLS.find((t) => t.name === req.params.name), req.params.arguments || {});
-    if (SYSTEM) return await handleSystem(req.params.name, req.params.arguments || {});
+    if (SYSTEM) return await handleSystem(req.params.name, req.params.arguments || {}, { signal: extra && extra.signal });
     await hydrateRepos(REMOTE_TOOLS[req.params.name]);
     return await handle(req.params.name, req.params.arguments || {}, {
       progressToken: req.params._meta && req.params._meta.progressToken,

@@ -1056,3 +1056,37 @@ test('the default transport: the token fetch is a HEAD to baseUrl without a body
   await client.act(s.session, { event: 'CHECK' });
   assert.deepEqual(seen[3].headers, { 'content-type': 'application/json', 'sap-contextid-accept': 'header', 'sap-contextid': 'SID:1', 'x-csrf-token': 'abc' });
 });
+
+test('signal: a caller\'s cancel aborts the roundtrip in flight, refuses the act as cancelled and takes its edits back', async () => {
+  // a transport that answers the start and then hangs until its signal aborts
+  let n = 0;
+  const signals = [];
+  const transport = (req) => {
+    n += 1;
+    signals.push(req.signal);
+    if (n === 1) return Promise.resolve({ status: 200, body: JSON.stringify(startAnswer()) });
+    return new Promise((resolve, reject) => {
+      req.signal.addEventListener('abort', () => reject(req.signal.reason), { once: true });
+    });
+  };
+  const c = createAppClient({ transport, location: (app) => ({ origin: 'x', pathname: '/', search: `?app_start=${app}` }) });
+  const s = await c.start('z_t');
+  assert.ok(!signals[0].aborted, 'no signal given: the timeout alone');
+  const ctl = new AbortController();
+  const t0 = Date.now();
+  const acting = c.act(s.session, { values: { '/NAME': 'Ann' }, event: 'CHECK', signal: ctl.signal });
+  setTimeout(() => ctl.abort(), 30);
+  await rejects(acting, /^cancelled by the caller - nothing of this roundtrip was adopted$/);
+  assert.ok(Date.now() - t0 < 5000, 'not the 120 s timeout');
+  assert.ok(signals[1].aborted, 'the transport\'s signal aborted with the caller\'s');
+  const after = c.describe(s.session);
+  assert.equal(after.session, 'D1');
+  assert.deepEqual(after.pending || [], [], 'the act\'s edits are taken back');
+  // an already-cancelled signal sends nothing
+  const sent = n;
+  const gone = new AbortController();
+  gone.abort();
+  await rejects(c.act(s.session, { event: 'CHECK', signal: gone.signal }), /^cancelled by the caller/);
+  await rejects(c.start('z_t', { signal: gone.signal }), /^cancelled by the caller/);
+  assert.equal(n, sent, 'nothing reached the transport');
+});
