@@ -7,6 +7,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { resolveViewCheck, importViewCheck } from '../lib/repos.mjs';
 import { fixSource } from '../lib/fixview.mjs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { ANSWER_BUDGET } from '../lib/budget.mjs';
 
 const HAVE_LINTER = Boolean(resolveViewCheck());
 const HAVE_FIX = await (async () => {
@@ -97,4 +102,39 @@ ENDCLASS.
   assert.ok(res.remaining.some((f) => f.type === 'binding-to-local'),
     `the unfixable finding stands: ${JSON.stringify(res.remaining.map((f) => f.type))}`);
   assert.equal(res.source, src, 'a source with nothing to fix comes back byte-identical');
+});
+
+/* A view of a few hundred defects: validate_view answered 538,000
+ * characters and fix_view 584,000 - past what a client accepts, so the agent
+ * saw none of them. The most severe findings that fit are listed, the
+ * counts stay whole, and the cut is said. */
+test('validate_view and fix_view fit a view of hundreds of findings into one answer', { skip }, async () => {
+  const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const n = 600;
+  const xml = '<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m"><Page>'
+    + Array.from({ length: n }, (_, i) => `<Button text="b${i}" notaprop${i}="x" icon="sap-icon://nonexistent${i}"/>`).join('')
+    + '</Page></mvc:View>';
+  const env = { ...process.env, A2UI5_MCP_REMOTE: '0' };
+  const transport = new StdioClientTransport({ command: process.execPath, args: [path.join(ROOT, 'server.mjs')], env, stderr: 'ignore' });
+  const client = new Client({ name: 'findings', version: '0' }, { capabilities: {} });
+  await client.connect(transport);
+  try {
+    const v = await client.callTool({ name: 'validate_view', arguments: { xml, render: false } });
+    const vt = v.content[0].text;
+    assert.ok(vt.length < ANSWER_BUDGET, `validate_view answered ${vt.length} characters`);
+    const vr = JSON.parse(vt);
+    const total = vr.counts.error + vr.counts.warning + vr.counts.hint;
+    assert.ok(total >= n, 'the counts carry every finding');
+    assert.ok(vr.findings.length > 0 && vr.findings.length < total);
+    assert.match(vr.findingsCut, new RegExp(`^${total - vr.findings.length} more finding\\(s\\) did not fit one answer`));
+    assert.equal(vr.ok, false);
+    const f = await client.callTool({ name: 'fix_view', arguments: { xml } });
+    const ft = f.content[0].text;
+    assert.ok(ft.length < ANSWER_BUDGET, `fix_view answered ${ft.length} characters`);
+    const fr = JSON.parse(ft);
+    assert.equal(typeof fr.source, 'string', 'the corrected source goes whole');
+    assert.match(fr.remainingCut, /more remaining finding\(s\) did not fit one answer - validate_view the corrected source/);
+  } finally {
+    await client.close();
+  }
 });

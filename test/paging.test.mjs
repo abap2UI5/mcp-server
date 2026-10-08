@@ -16,7 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { ANSWER_BUDGET, sizeOf, takeWithin, takeSmallestWithin, fitSnapshot, fitUnitResult } from '../lib/budget.mjs';
+import { ANSWER_BUDGET, sizeOf, takeWithin, takeSmallestWithin, fitSnapshot, fitUnitResult, fitFindings } from '../lib/budget.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const LIMIT = 90_000; // characters: comfortably under the client's token cap for this kind of text
@@ -399,4 +399,20 @@ test('fitSnapshot: a snapshot that fits is the same; long values are cut and rea
   assert.equal(snapshot.tables[0].rowCount, 300);
   assert.equal(big.fields[0].value.length, 120000, 'the input is not changed');
   assert.match(notes.join(' '), /f1 are cut.*table t1: cells of NOTE.*table t1 shows its first \d+ row\(s\)/);
+});
+
+test('fitFindings: a list that fits is the same; past the budget the most severe stay, in their own order', () => {
+  const few = [{ type: 'a', severity: 'hint' }];
+  assert.equal(fitFindings(few).findings, few);
+  assert.equal(fitFindings(few).cut, 0);
+  const rank = { hint: 0, warning: 1, error: 2 };
+  const many = Array.from({ length: 300 }, (_, i) => ({ type: `t${i}`, severity: i % 3 === 0 ? 'error' : (i % 3 === 1 ? 'warning' : 'hint'), message: 'm'.repeat(200) }));
+  const { findings, cut } = fitFindings(many, { budget: 20_000, rankOf: (f) => rank[f.severity] });
+  assert.ok(cut > 0 && findings.length + cut === many.length);
+  assert.ok(sizeOf(findings, 1) <= 20_000 + 2000);
+  const kept = new Set(findings.map((f) => f.type));
+  const errors = many.filter((f) => f.severity === 'error');
+  assert.ok(errors.every((f) => kept.has(f.type)) || findings.every((f) => f.severity === 'error'), 'errors go first');
+  assert.deepEqual(findings, many.filter((f) => kept.has(f.type)), 'in the order the gate reported them');
+  assert.equal(fitFindings([{ big: 'x'.repeat(100_000) }]).findings.length, 1, 'always one');
 });

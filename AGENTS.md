@@ -1126,7 +1126,10 @@ legitimately slower.
   the rest; `read_app` (`from_line`) and `build_log` (`offset`, its `cut`
   names the call) page by line, a log line past `LOG_LINE_SHOWN` shown
   cut, and `build_backend`'s 30-line tail shortens each long line;
-  `run_unit_tests` counts a long run's tests per object instead;
+  `validate_view` and `fix_view` list the most severe findings that fit
+  (`fitFindings`; the counts stay whole, `findingsCut` / `remainingCut`
+  say what was left - a validator needs no paging, the agent fixes and
+  validates again); `run_unit_tests` counts a long run's tests per object instead;
   `test/paging.test.mjs` walks the pages to the end over fake checkouts. A
   tool whose answer can grow with upstream content pages the same way, never
   by dropping content. **Measure what is sent**: `text()` writes indented

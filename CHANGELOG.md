@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **`validate_view` and `fix_view` fit a view with hundreds of findings.**
+  600 broken buttons answered 538,000 and 584,000 characters, and the
+  client showed the agent none of them. The most severe findings that fit
+  are listed (in the gate's order), `counts` stays whole and
+  `findingsCut` / `remainingCut` say how many were left out; `fix_view`'s
+  corrected source always goes whole.
 - **`build_log`, `build_backend` and `read_app` answers fit.** `build_log`
   answered `tail` lines whatever their length (2,000 transpiler lines:
   464,000 characters) - the last lines that fit come back now, a line past

@@ -59,7 +59,7 @@ import { agentTargetProblem, planAgentSetup, writePlan, pinProblems, pinWarning,
 import { fixSource } from './lib/fixview.mjs';
 import { lintOptionsFor } from './lib/lintopts.mjs';
 import { withRenderFallback, renderSkippedNote, warmThenCold } from './lib/validate.mjs';
-import { ANSWER_BUDGET, sizeOf, takeWithin, takeSmallestWithin, fitSnapshot, fitUnitResult } from './lib/budget.mjs';
+import { ANSWER_BUDGET, sizeOf, takeWithin, takeSmallestWithin, fitSnapshot, fitUnitResult, fitFindings } from './lib/budget.mjs';
 import { getRenderer, dropRenderer, closeRenderers, rendererLooksDead } from './lib/renderer.mjs';
 import { TOOLS } from './lib/tools.mjs';
 import { RESOURCES, RESOURCE_TEMPLATES, GUIDE_CHAPTER_TEMPLATE, readResource } from './lib/resources.mjs';
@@ -1093,11 +1093,15 @@ async function handle(name, args = {}, ctx = {}) {
       const rules = await explainRules(result.findings, args.explain === true);
       // additive: fixable: true per finding fix_view can clear (older linter
       // without ./fix: no flag, findings untouched)
-      const findings = await flagFixable(result.findings);
+      /* the counts stay whole; the findings listed are the most severe that
+       * fit one answer (lib/budget.mjs fitFindings) */
+      const fitted = fitFindings(await flagFixable(result.findings), { rankOf: (f) => severityRank(severityOf(f)) });
+      const findings = fitted.findings;
       return text({
         ok,
         counts,
         findings,
+        ...(fitted.cut ? { findingsCut: `${fitted.cut} more finding(s) did not fit one answer - the most severe are listed, counts has them all: fix these and validate again` } : {}),
         ...(rules ? { rules } : {}),
         renderErrors: result.renderErrors,
         reconstructedDocs: result.docs.length,
@@ -1138,11 +1142,19 @@ async function handle(name, args = {}, ctx = {}) {
         xml: args.xml,
         opt,
       });
-      const remaining = await flagFixable(res.remaining);
+      /* the corrected source is the answer's point and goes whole; the
+       * findings around it get what room is left (lib/budget.mjs) */
+      const room = Math.max(10_000, ANSWER_BUDGET - 10_000 - sizeOf(res.source || ''));
+      const fixedFit = fitFindings(res.fixed, { budget: Math.floor(room / 3) });
+      const { severityOf: sevOf, severityRank: sevRank } = await importViewCheck('./findings');
+      const remainingFit = fitFindings(await flagFixable(res.remaining), { budget: room - Math.floor(room / 3), rankOf: (f) => sevRank(sevOf(f)) });
+      const remaining = remainingFit.findings;
       return text({
         applied: res.applied,
-        fixed: res.fixed,
+        fixed: fixedFit.findings,
+        ...(fixedFit.cut ? { fixedCut: `${fixedFit.cut} more fix(es) applied - all of them are in \`source\`` } : {}),
         remaining,
+        ...(remainingFit.cut ? { remainingCut: `${remainingFit.cut} more remaining finding(s) did not fit one answer - validate_view the corrected source for them` } : {}),
         config: configFile || undefined,
         source: res.source,
         note: res.applied
