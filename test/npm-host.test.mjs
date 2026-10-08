@@ -77,6 +77,8 @@ test('a release that exports compress gets it in front of the handler; one witho
     const res = await get();
     assert.equal(res.headers['x-fake-compress'], 'yes', 'the middleware ran');
     assert.equal(JSON.parse(res.body).accelerated, false);
+    assert.deepEqual(JSON.parse(res.body).createAppOptions, { compression: false },
+      'the host mounts the release\'s compress itself - createApp( ) must not add a second one');
   } finally {
     await stopBackend();
   }
@@ -160,6 +162,57 @@ test('the host refuses a request addressed to another name or sent from another 
   assert.equal(loopbackRequest({}), false, 'no Host at all');
   assert.equal(loopbackRequest({ host: '127.0.0.1.rebound.example' }), false);
   assert.equal(loopbackRequest({ host: '127.0.0.1', origin: 'file:///x' }), false);
+});
+
+/* Express 5 calls app.listen's callback with the bind error too: over a port
+ * somebody else held, the host printed "Listening on" and exited 0 a moment
+ * later - and startBackend's port wait was answered by the other process,
+ * so the app tools talked to a foreign server. The host fails now, on both
+ * serve paths and over a release whose serve() has that bug itself. */
+test('a port somebody else holds fails the host, never "Listening on"', async () => {
+  const { startHost } = await import('../lib/npm-host.mjs');
+  const blocker = http.createServer((req, res) => res.end('somebody else'));
+  await new Promise((r) => blocker.listen(0, '127.0.0.1', r));
+  const held = blocker.address().port;
+  try {
+    for (const opts of [{ compress: true }, { compress: false }, { compress: false, lyingServe: true }]) {
+      const dir = fakeRelease(path.join(base, `held-${JSON.stringify(opts).replace(/\W/g, '')}`), opts);
+      await assert.rejects(startHost({ dir, port: held }), (e) => {
+        assert.equal(e.code, 'EADDRINUSE', `${JSON.stringify(opts)}: ${e.stack}`);
+        assert.match(e.message, new RegExp(`port ${held} on 127\\.0\\.0\\.1 is in use by another process`));
+        return true;
+      });
+    }
+    // as startBackend runs it: a sentence on stderr, exit 1, no "Listening on"
+    const dir = fakeRelease(path.join(base, 'held-main'), { compress: true });
+    const child = spawn(process.execPath, [path.join(ROOT, 'lib', 'npm-host.mjs'), dir], { env: { ...process.env, PORT: String(held) } });
+    let out = '';
+    let err = '';
+    child.stdout.on('data', (d) => (out += d));
+    child.stderr.on('data', (d) => (err += d));
+    const code = await new Promise((r) => child.on('exit', r));
+    assert.equal(code, 1);
+    assert.doesNotMatch(out, /Listening on/);
+    assert.match(err, /^abap2ui5 npm host: port \d+ on 127\.0\.0\.1 is in use by another process - stop it, or start the server with another A2UI5_MCP_PORT\n$/);
+  } finally {
+    await new Promise((r) => blocker.close(r));
+  }
+});
+
+test('startBackend on the npm backend: a port in use is the reason the start failed', async () => {
+  fs.rmSync(workspace, { recursive: true, force: true });
+  fakeRelease(workspace, { compress: true });
+  deployApp({ className: 'zcl_hosted', source: APP('zcl_hosted') });
+  assert.equal((await buildBackend({ mode: 'auto' })).ok, true);
+  const blocker = http.createServer((req, res) => res.end('somebody else'));
+  await new Promise((r) => blocker.listen(PORT, '127.0.0.1', r));
+  try {
+    await assert.rejects(startBackend(), /backend exited \(1\) before listening:[\s\S]*port 4431 on 127\.0\.0\.1 is in use by another process/);
+    assert.equal(backendStatus().running, false);
+  } finally {
+    await stopBackend();
+    await new Promise((r) => blocker.close(r));
+  }
 });
 
 test.after(() => {

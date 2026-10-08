@@ -16,18 +16,21 @@ export const CORE_SHA = 'b2d219df61f8c077df7a038bc43d168f9f280fbf';
 /* The package: initialize() counts boots, accelerate() is optional,
  * serve() answers every request with the classes registered at that moment
  * (so a GET proves the host imported the dev apps), compress optional too. */
-function hostModule({ accelerate, compress }) {
+function hostModule({ accelerate, compress, lyingServe }) {
   return `
 import http from 'node:http';
 export const HANDLER_CLASS = 'ZCL_SICF';
 export async function initialize() { globalThis.__boots = (globalThis.__boots || 0) + 1; globalThis.abap = globalThis.abap || { Classes: {} }; }
 ${accelerate ? 'export async function accelerate() { globalThis.__accelerated = true; }' : ''}
 ${compress ? `export function compress() { return (req, res, next) => { res.setHeader('x-fake-compress', 'yes'); next(); }; }` : ''}
-const answer = (req, res) => res.end(JSON.stringify({ classes: Object.keys(globalThis.abap.Classes).sort(), accelerated: Boolean(globalThis.__accelerated), boots: globalThis.__boots }));
-export async function createApp() { return (req, res) => answer(req, res); }
+const answer = (req, res) => res.end(JSON.stringify({ classes: Object.keys(globalThis.abap.Classes).sort(), accelerated: Boolean(globalThis.__accelerated), boots: globalThis.__boots, createAppOptions: globalThis.__createAppOptions ?? null }));
+export async function createApp(options) { globalThis.__createAppOptions = options ?? {}; return (req, res) => answer(req, res); }
 export async function serve({ port, host }) {
   await initialize();
-  return new Promise((resolve, reject) => { const s = http.createServer(answer); s.listen(port, host, () => resolve(s)); s.on('error', reject); });
+${lyingServe
+    // express 5's app.listen: the callback runs with the bind error as well
+    ? "  return new Promise((resolve) => { const s = http.createServer(answer); s.on('error', () => resolve(s)); s.listen(port, host, () => resolve(s)); });"
+    : "  return new Promise((resolve, reject) => { const s = http.createServer(answer); s.listen(port, host, () => resolve(s)); s.on('error', reject); });"}
 }
 `;
 }
@@ -114,7 +117,7 @@ function write(file, text) {
 
 /** Install the fake release into `<workspace>/runtime/<version>` and fetch
  *  the fake open-abap-core; returns the runtime directory. */
-export function fakeRelease(workspace, { version = VERSION, accelerate = true, compress = false } = {}) {
+export function fakeRelease(workspace, { version = VERSION, accelerate = true, compress = false, lyingServe = false } = {}) {
   const dir = path.join(workspace, 'runtime', version);
   const nm = path.join(dir, 'node_modules');
   const pkg = path.join(nm, '@abap2ui5', 'node-runtime');
@@ -127,7 +130,7 @@ export function fakeRelease(workspace, { version = VERSION, accelerate = true, c
     peerDependencies: { express: '^5.0.0' },
     abap2ui5: { transpiler: '2.13.91' },
   }));
-  write(path.join(pkg, 'srv', 'host.mjs'), hostModule({ accelerate, compress }));
+  write(path.join(pkg, 'srv', 'host.mjs'), hostModule({ accelerate, compress, lyingServe }));
   write(path.join(pkg, 'output', 'init.mjs'), 'export async function initializeABAP() {}\n');
   write(path.join(pkg, 'output', 'cx_root.clas.mjs'), 'export class cx_root {}\nglobalThis.abap = globalThis.abap || { Classes: {} };\nglobalThis.abap.Classes.CX_ROOT = cx_root;\n');
   write(path.join(pkg, 'downport', '02', 'z2ui5_if_app.intf.abap'), 'INTERFACE z2ui5_if_app PUBLIC. ENDINTERFACE.\n');

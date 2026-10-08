@@ -33,6 +33,13 @@ s.on('error', (e) => {
   if (e.code === 'EADDRINUSE') setTimeout(listen, 100);
   else throw e;
 });
+if (process.env.ENV_MARKER) fs.writeFileSync(process.env.ENV_MARKER, JSON.stringify({ allowedHosts: process.env.ALLOWED_HOSTS ?? null, port: process.env.PORT }));
+if (process.env.SAY_LISTENING_AND_EXIT) {
+  // express 5's app.listen over a port in use: the callback runs with the
+  // error, the host prints its line, and the process ends with nothing bound
+  console.log('Listening on ' + process.env.PORT);
+  process.exit(0);
+}
 setTimeout(listen, Number(process.env.LISTEN_DELAY_MS || 0));
 process.on('SIGTERM', () => {
   stopping = true;
@@ -53,7 +60,7 @@ process.env.A2UI5_MCP_PORT = String(PORT);
 process.env.A2UI5_HOME = a2;
 process.env.BOOT_MARKER = marker;
 
-const { startBackend, stopBackend, backendStatus } = await import('../lib/runtime.mjs');
+const { startBackend, stopBackend, backendStatus, backendEnv } = await import('../lib/runtime.mjs');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const portOpen = () =>
@@ -115,26 +122,71 @@ test('a stale child exiting late does not orphan the live backend', async () => 
   assert.equal(await portOpen(), false, 'the backend survived stopBackend as an orphan');
 });
 
-/* `node` not on the PATH (a desktop client starts its servers with a minimal
- * one): spawn emits 'error' and no 'exit', which used to be an uncaught
- * exception and a 30 s wait for a start that had already failed. */
-test('a backend that cannot be spawned fails the start at once, with the reason', { skip: process.platform === 'win32' && 'PATH lookup differs' }, async () => {
+/* A node that cannot be spawned (the program gone - a node upgrade under a
+ * running server): spawn emits 'error' and no 'exit', which used to be an
+ * uncaught exception and a 30 s wait for a start that had already failed.
+ * The backend is spawned with this server's own node (process.execPath), so
+ * an empty PATH - a desktop client starts its servers with a minimal one -
+ * no longer is that case. */
+test('a backend that cannot be spawned fails the start at once, with the reason', async () => {
   const savedPath = process.env.PATH;
+  const savedExec = process.execPath;
   const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-nopath-'));
   const uncaught = [];
   const onUncaught = (e) => uncaught.push(e);
   process.on('uncaughtException', onUncaught);
-  process.env.PATH = empty;
-  const t0 = Date.now();
   try {
-    await assert.rejects(startBackend(), /could not be started \(node\).*ENOENT/);
+    process.env.PATH = empty;
+    const st = await startBackend();
+    assert.equal(st.running, true, 'no node on the PATH: the server\'s own node starts the backend');
+    await stopBackend();
+    await sleep(1400); // let the killed child free the port
+    process.execPath = path.join(empty, 'no-such-node');
+    const t0 = Date.now();
+    await assert.rejects(startBackend(), /could not be started \(.*no-such-node\).*ENOENT/);
     assert.ok(Date.now() - t0 < 10000, `the start failed only after ${Date.now() - t0} ms`);
     assert.equal(uncaught.length, 0, `uncaught: ${uncaught.map(String).join(', ')}`);
     assert.equal(backendStatus().running, false);
   } finally {
+    process.execPath = savedExec;
     process.env.PATH = savedPath;
     process.off('uncaughtException', onUncaught);
     fs.rmSync(empty, { recursive: true, force: true });
+  }
+});
+
+/* ALLOWED_HOSTS=* switches the framework express.mjs' DNS-rebinding guard
+ * off; one the user's shell exports must not reach the dev backend. */
+test('the backend child never inherits ALLOWED_HOSTS', async () => {
+  const envMarker = path.join(base, 'env.json');
+  process.env.ENV_MARKER = envMarker;
+  process.env.ALLOWED_HOSTS = '*';
+  try {
+    await startBackend();
+    assert.deepEqual(JSON.parse(fs.readFileSync(envMarker, 'utf8')), { allowedHosts: null, port: String(PORT) });
+  } finally {
+    await stopBackend();
+    delete process.env.ENV_MARKER;
+    delete process.env.ALLOWED_HOSTS;
+    await sleep(1400);
+  }
+  assert.deepEqual(backendEnv({ allowed_hosts: '*', Allowed_Hosts: 'x', KEEP: '1', PORT: '1' }, { port: 9, host: '127.0.0.1' }),
+    { KEEP: '1', PORT: '9', HOST: '127.0.0.1' }, 'any spelling - Windows reads environment names case-insensitively');
+});
+
+/* Express 5 calls app.listen's callback with the bind error: a backend over a
+ * port somebody else holds said "Listening on" and exited, and the port wait
+ * was answered by the other process - the app tools then talked to it. */
+test('a backend that exits right after "Listening on" fails the start; the port\'s owner is not taken for it', async () => {
+  const blocker = http.createServer((req, res) => setTimeout(() => res.end('somebody else'), 400));
+  await new Promise((r) => blocker.listen(PORT, '127.0.0.1', r));
+  process.env.SAY_LISTENING_AND_EXIT = '1';
+  try {
+    await assert.rejects(startBackend(), /exited \(0\) right after it said it was listening - port \d+ is answered by another process/);
+    assert.equal(backendStatus().running, false);
+  } finally {
+    delete process.env.SAY_LISTENING_AND_EXIT;
+    await new Promise((r) => blocker.close(r));
   }
 });
 

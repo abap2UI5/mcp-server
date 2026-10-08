@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **A port another process holds fails the backend start instead of
+  handing the app tools to that process.** Under express 5 the npm host's
+  `app.listen()` called back with the bind error too: the host printed
+  "Listening on", exited 0 a moment later, and `startBackend`'s port wait
+  was answered by whoever held the port - `app_start` and `run_app` then
+  talked to a foreign server. The host listens on a plain `http.Server`
+  now and exits 1 with "port N on 127.0.0.1 is in use by another process"
+  (also over a release whose own `serve()` has the bug), and a start whose
+  child has exited by the time the port answers fails, on both backends.
+- **`ALLOWED_HOSTS` from the user's shell no longer reaches the backend.**
+  The framework's `express.mjs` reads `ALLOWED_HOSTS=*` as "answer any Host
+  and any Origin", which switched its DNS-rebinding guard off for the dev
+  backend.
+- The checkout backend, the corpus' e2e build, `scope_of` and the checkout's
+  unit-test runner run on this server's own node (`process.execPath`), as
+  the npm backend already did, not on whichever `node` the PATH finds first.
+- The npm host no longer mounts the release's compression twice
+  (`createApp({ compression: false })` behind its own `compress`); the
+  responses are byte for byte the same.
 - **Evicting an app session leaves a newer one with the same draft id
   reachable.** Sessions started from one screen share its id (the
   playground's Pilot starts one per change of the reader's typing), and the

@@ -304,8 +304,15 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
   `test/runtime.test.mjs` fails on a `localhost` in the code of
   `server.mjs`, `lib/` or `scripts/`. It prints a banner (release, dev modules,
   accelerate, compression - `backend status` shows it) and the "Listening
-  on" the start waits for. Start, stop, port and orphan handling are the
-  checkout's, unchanged.
+  on" the start waits for - and over a port another process holds, an
+  error and exit 1 instead: it listens on a plain `http.Server`, never
+  through express' `app.listen()`, whose callback express 5 also calls with
+  the bind error (the host said "Listening on", exited, and the port wait
+  was answered by the other process). `startBackend` fails a child that
+  has exited by the time the port answers, on both backends. Start, stop,
+  port and orphan handling are the checkout's, unchanged. The child's
+  environment never carries `ALLOWED_HOSTS` (`backendEnv`): the framework's
+  `express.mjs` reads `*` there as "no DNS-rebinding guard".
 - **Unit tests**: `apps/index.mjs`, filtered like the checkout's runner.
   NEVER the package's `output/index.mjs` - that is the framework's own suite.
 - **Lint**: app-template's `abaplint.jsonc` retargeted
