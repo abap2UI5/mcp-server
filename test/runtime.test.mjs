@@ -253,12 +253,37 @@ test('buildBackend: a joined call stops waiting on its own cancel and leaves the
       assert.equal(res.ok, true, 'the first caller still gets its build');
       assert.equal(res.aborted, undefined);
       // a joiner whose request is already cancelled does not wait at all
+      // (and a joined call hears the build's lines: build_backend's progress)
       const p3 = buildBackend({ mode: 'full', signal: first.signal });
       const gone = new AbortController();
       gone.abort();
       const p4 = await buildBackend({ mode: 'full', signal: gone.signal });
       assert.equal(p4.joined, true);
       await p3;
+    },
+  );
+});
+
+/* build_backend's progress notifications are the build's lines through
+ * onLine: a call that joined the build in flight passed its own onLine and
+ * heard nothing - its progressToken got no notification at all. */
+test('buildBackend: a joined call hears the build\'s lines too, until it leaves', async () => {
+  await withFakeRepos(
+    'console.log("step one"); setTimeout(() => { console.log("step two"); process.exit(0); }, 600);',
+    {},
+    async () => {
+      const first = [];
+      const joined = [];
+      const p1 = buildBackend({ mode: 'full', onLine: (l) => first.push(l) });
+      const p2 = buildBackend({ mode: 'full', onLine: (l) => joined.push(l) });
+      await Promise.all([p1, p2]);
+      assert.ok(first.includes('step two'));
+      assert.ok(joined.includes('step one') && joined.includes('step two'), `the joined call heard: ${JSON.stringify(joined)}`);
+      // the next build is heard by its own caller only
+      const later = [];
+      await buildBackend({ mode: 'full', onLine: (l) => later.push(l) });
+      assert.equal(joined.filter((l) => l === 'step two').length, 1, 'a finished joiner hears no later build');
+      assert.ok(later.includes('step two'));
     },
   );
 });

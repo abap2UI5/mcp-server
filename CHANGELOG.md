@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **A `build_backend` that joined the running build reports progress.**
+  Its description promises progress notifications to a call with a
+  `progressToken`; a call that joined the build in flight heard none
+  until the build ended. Every joined call now follows the build's lines
+  until it ends or the call is cancelled.
 - **`docs_search` counts every matching page.** `matches` was the number
   of pages it returned - 10 for a query 37 pages answer - so a cut answer
   read as the whole site's, and nothing said where the rest was. `matches`
