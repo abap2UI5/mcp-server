@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **`migrate_report { deploy: true }` installs the template's abaplint.**
+  It runs `build_backend`, whose npm install reads app-template's
+  `@abaplint/cli` pin, but the mirror is hydrated per tool the client
+  called - on a machine without the template checkout the build fell back
+  to `ABAPLINT_CLI_FALLBACK`. `migrate_report` hydrates the template like
+  `build_backend` and `verify_app` do.
 - **`run_app` and `interact_app` keep the 50 newest pictures**, not every
   one: each call wrote a full-page PNG of its own name and nothing removed
   them. Only files of the server's own name pattern are removed, so a

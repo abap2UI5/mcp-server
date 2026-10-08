@@ -78,6 +78,10 @@ test('the tool and resource tables name real tools, resources and repo keys', ()
   // verify_app runs deploy_app's handler inside one request: the hydrate step
   // is keyed on the tool the client called, so it has to name the same reads
   for (const k of REMOTE_TOOLS.deploy_app) assert.ok(REMOTE_TOOLS.verify_app.includes(k), `verify_app must hydrate '${k}' like deploy_app`);
+  // so do the tools that compose build_backend: verify_app, and migrate_report { deploy: true }
+  for (const composer of ['verify_app', 'migrate_report']) {
+    for (const k of REMOTE_TOOLS.build_backend) assert.ok((REMOTE_TOOLS[composer] || []).includes(k), `${composer} must hydrate '${k}' like build_backend`);
+  }
   assert.deepEqual(resourceRepos('abap2ui5://guide/5'), ['a2ui5']);
   assert.deepEqual(resourceRepos('abap2ui5://nothing'), []);
 });
