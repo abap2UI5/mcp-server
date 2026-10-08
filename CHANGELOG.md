@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **`app_guide` pages by chapter.** The default call - the one its
+  description tells an agent to make first - answered the whole guide,
+  48,000 characters of the 60,000 an answer may carry, and the guide grows
+  upstream. Chapters that fit come back, `more` names the `offset` to
+  continue at, and `limit` caps the chapters, like `capabilities` and
+  `api_reference`; a chapter is never cut.
 - **`run_app` and `interact_app` list a repeated error once.** A page that
   throws from a timer, or a poll the backend answers 500, pushed the same
   line into `errors` for every occurrence - a 100 ms interval over a 60 s

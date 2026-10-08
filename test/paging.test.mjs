@@ -92,6 +92,9 @@ function fakes() {
   ].join('\n'));
   const sections = Array.from({ length: 40 }, (_, i) => `## Case ${i + 1}\n\n` + `evidence for case ${i + 1}. `.repeat(250));
   write('abap2UI5/.claude/skills/abap-check/SKILL.md', `---\nname: abap-check\n---\nPreamble.\n\n${sections.join('\n\n')}\n`);
+  // the app-building guide: more chapters than one answer carries
+  const chapters = Array.from({ length: 30 }, (_, i) => `## ${i + 1}. Chapter ${i + 1}\n\n` + `guide prose for chapter ${i + 1}. `.repeat(140));
+  write('abap2UI5/docs/agents/building-apps.md', `# Building apps\n\nHow to read this guide.\n\n${chapters.join('\n\n')}\n`);
   write('abap2UI5/.claude/skills/ui5-check/SKILL.md', '---\nname: ui5-check\n---\nPreamble.\n\n## View case\n\nsmall\n');
   // a sample catalogue with many rows
   const rows = Array.from({ length: 400 }, (_, i) => `| **Sample ${i}** — table demo number ${i}<br>${'a long summary of what it shows '.repeat(6)}<br><sub>table demo</sub> | [\`Z2UI5_CL_SMP_APP_${String(i).padStart(3, '0')}\`](src/01/z2ui5_cl_smp_app_${i}.clas.abap) |`);
@@ -247,6 +250,41 @@ test('pitfalls pages its sections and every section arrives once', async () => {
     assert.equal(seen.length, total);
     assert.equal(new Set(seen).size, total, 'no section twice');
     assert.ok(seen.includes('abap:Case 40') && seen.includes('view:View case'));
+  });
+});
+
+/* app_guide answered every chapter at once - 48,000 characters for the
+ * real guide, and the guide grows upstream; the default call is the one
+ * the description tells an agent to make first. */
+test('app_guide pages its chapters and every chapter arrives once', async () => {
+  await withServer(async (call) => {
+    const seen = [];
+    let offset = 0;
+    let first = null;
+    for (let i = 0; i < 20; i++) {
+      const page = await call('app_guide', offset ? { offset } : {});
+      first ||= page;
+      assert.ok(sizeOf(page) <= ANSWER_BUDGET, `${sizeOf(page)} characters`);
+      assert.equal(page.returned, page.sections.length);
+      assert.equal(page.chapters.length, 31, 'the table of contents comes with every page');
+      seen.push(...page.sections.map((c) => c.heading));
+      const m = page.more && /offset: (\d+)/.exec(page.more);
+      if (!m) break;
+      offset = Number(m[1]);
+    }
+    assert.equal(first.matches, 31, 'the intro and 30 chapters');
+    assert.ok(first.returned < 31, 'the budget cut the first page');
+    assert.match(first.more, /call again with offset: \d+ \(same section and query\)/);
+    assert.equal(seen.length, 31);
+    assert.equal(new Set(seen).size, 31, 'no chapter twice');
+    assert.ok(seen.includes('(intro)') && seen.includes('30. Chapter 30'));
+    const limited = await call('app_guide', { query: 'guide prose', offset: 3, limit: 2 });
+    assert.deepEqual(limited.sections.map((c) => c.heading), ['4. Chapter 4', '5. Chapter 5']);
+    assert.equal(limited.offset, 3);
+    assert.match(limited.more, /25 more - call again with offset: 5/);
+    const one = await call('app_guide', { section: '7' });
+    assert.deepEqual(one.sections.map((c) => c.heading), ['7. Chapter 7']);
+    assert.equal(one.more, undefined, 'one chapter names no page');
   });
 });
 

@@ -618,12 +618,19 @@ async function handle(name, args = {}, ctx = {}) {
             + ' — the chapters are listed above, or call it without arguments to read the whole guide',
         });
       }
+      /* Paged by CHAPTER, like pitfalls (lib/budget.mjs): the whole guide was
+       * 48,000 characters as written and grows with every chapter upstream -
+       * a few more and the default call, the one the description tells an
+       * agent to make first, would answer past the client's cap and show
+       * nothing. A chapter is never cut. */
+      const { taken, notes } = pageWithin(sections, args, '(same section and query)');
       return text({
         source: 'abap2UI5/' + GUIDE_PATH.join('/'),
         about: 'building an app WITH abap2UI5 (for porting a demo-kit sample, call generation_rules)',
         chapters,
         matches: sections.length,
-        sections,
+        ...notes,
+        sections: taken,
         next: 'write the class, then validate_view + screenshot_view — both answer in seconds, before any build',
       });
     }

@@ -1121,8 +1121,9 @@ legitimately slower.
   a tool result over 25,000 tokens and the agent then sees nothing at all.
   `lib/budget.mjs` (`ANSWER_BUDGET`, about 60,000 characters) is what the
   tools that can grow past it page against — `scaffold_app` (`files`),
-  `pitfalls`, `examples`, `capabilities` and `api_reference` (`offset`, the
-  last three with `limit`) — and each page names the arguments that fetch
+  `pitfalls`, `app_guide`, `examples`, `capabilities` and `api_reference`
+  (`offset`, all but `pitfalls` with `limit`; `app_guide` and `pitfalls`
+  by chapter / section, never cut) — and each page names the arguments that fetch
   the rest; `read_app` (`from_line`) and `build_log` (`offset`, its `cut`
   names the call) page by line, a log line past `LOG_LINE_SHOWN` shown
   cut, and `build_backend`'s 30-line tail shortens each long line;
