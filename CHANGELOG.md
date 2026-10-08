@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **`run_app` and `interact_app` list a repeated error once.** A page that
+  throws from a timer, or a poll the backend answers 500, pushed the same
+  line into `errors` for every occurrence - a 100 ms interval over a 60 s
+  boot is 600 lines, 180,000 characters, and the client showed the agent
+  nothing. A repeated message is listed once with its count (`(600
+  times)`), at most 20 distinct ones are listed and `errorsCut` counts the
+  rest; `ok` still counts every error.
 - **`validate_view` and `fix_view` fit a view with hundreds of findings.**
   600 broken buttons answered 538,000 and 584,000 characters, and the
   client showed the agent none of them. The most severe findings that fit

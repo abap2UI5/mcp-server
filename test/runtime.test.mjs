@@ -7,7 +7,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnWithTimeout, buildBackend, killChildren, pruneShots, SHOTS_KEPT, openPage, onPath } from '../lib/runtime.mjs';
+import { spawnWithTimeout, buildBackend, killChildren, pruneShots, SHOTS_KEPT, openPage, onPath, createErrorLog, ERRORS_KEPT } from '../lib/runtime.mjs';
+import { sizeOf, ANSWER_BUDGET } from '../lib/budget.mjs';
 import { treeKillCommand } from '../lib/spawn.mjs';
 
 // ------------------------------------------------------- spawnWithTimeout ----
@@ -709,4 +710,34 @@ test('onPath scans PATH in-process: executables only, PATHEXT on Windows, no whi
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }
+});
+
+// ------------------------------------------------------------ error log ----
+
+test('createErrorLog counts a repeated page error once and caps the distinct ones', () => {
+  const log = createErrorLog();
+  // a timer that throws every 100 ms over a 60 s boot, and a poll answered 500
+  // with a fresh query string each time
+  const thrown = 'pageerror: ' + 'Cannot read properties of undefined (reading "getModel") '.repeat(5).slice(0, 289);
+  for (let i = 0; i < 600; i += 1) log.push(thrown);
+  for (let i = 0; i < 400; i += 1) log.push(`backend HTTP 500 for /sap/bc/z2ui5?sap-client=001&t=${1700000000000 + i}`);
+  assert.equal(log.length, 1000, 'length counts every error - ok asks it');
+  const list = log.list();
+  assert.equal(list.length, ERRORS_KEPT);
+  assert.equal(list[0], `${thrown} (600 times)`);
+  assert.match(log.cut(), /^381 more errors past the first 20 distinct messages not listed \(1000 in all\)$/);
+  assert.ok(sizeOf({ errors: list, errorsCut: log.cut() }, 1) < ANSWER_BUDGET / 4, 'the report stays small');
+});
+
+test('createErrorLog lists distinct errors in order and says nothing was cut', () => {
+  const log = createErrorLog(3);
+  log.push('a');
+  log.push('b');
+  log.push('a');
+  assert.deepEqual(log.list(), ['a (2 times)', 'b']);
+  assert.equal(log.cut(), null);
+  assert.equal(log.length, 3);
+  const empty = createErrorLog();
+  assert.equal(empty.length, 0);
+  assert.deepEqual(empty.list(), []);
 });
