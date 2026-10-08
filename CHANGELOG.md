@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **`api_reference` pages its compact list too.** Without `query`,
+  `offset` and `limit` were ignored and the whole surface came back to a
+  call that asked for its second page. Both lists page by entry now; the
+  compact answer counts `entries` and says `returned` / `more` like the
+  queried one.
 - **`app_guide` pages by chapter.** The default call - the one its
   description tells an agent to make first - answered the whole guide,
   48,000 characters of the 60,000 an answer may carry, and the guide grows

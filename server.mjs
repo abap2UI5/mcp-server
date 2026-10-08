@@ -827,11 +827,24 @@ async function handle(name, args = {}, ctx = {}) {
         ...(kind !== 'methods' && kind !== 'types' && r.constants.length ? { constants: r.constants } : {}),
         ...(kind !== 'methods' && kind !== 'constants' && r.types.length ? { types: r.types } : {}),
       });
+      /* Both lists page the same way, by ENTRY - a method, a constant group,
+       * a type, in that order. The compact list ignored offset and limit and
+       * answered the whole surface to a call that asked for its second page. */
+      const paged = (found, same) => {
+        const flat = ['methods', 'constants', 'types'].flatMap((group) => (found[group] || []).map((entry) => ({ group, entry })));
+        const { taken, notes } = pageWithin(flat, args, same);
+        const groups = {};
+        for (const { group, entry } of taken) (groups[group] ||= []).push(entry);
+        return { total: flat.length, notes, groups };
+      };
       if (!args.query) {
+        const { total, notes, groups } = paged(pick(apiSummary(parsed)), '(same kind, no query)');
         return text({
           source: 'abap2UI5/' + API_PATH.join('/'),
           about: 'z2ui5_if_client — the complete API an app may call on `client`',
-          ...pick(apiSummary(parsed)),
+          entries: total,
+          ...notes,
+          ...groups,
           hint: 'pass `query` (keywords) for the matching methods/constants/types in full — signature, defaults, documentation',
         });
       }
@@ -847,10 +860,7 @@ async function handle(name, args = {}, ctx = {}) {
        * against the answer budget: "e" matched almost the whole interface,
        * ~75,000 characters. An entry is never cut (a signature belongs with
        * its documentation). */
-      const flat = ['methods', 'constants', 'types'].flatMap((group) => (found[group] || []).map((entry) => ({ group, entry })));
-      const { taken, notes } = pageWithin(flat, args, '(same query and kind)');
-      const groups = {};
-      for (const { group, entry } of taken) (groups[group] ||= []).push(entry);
+      const { notes, groups } = paged(found, '(same query and kind)');
       return text({ matches: total, ...notes, source: 'abap2UI5/' + API_PATH.join('/'), ...groups });
     }
     case 'generation_rules': {

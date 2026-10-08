@@ -361,6 +361,19 @@ test('api_reference pages its matches by entry - methods, constant groups, types
     assert.deepEqual(last.methods.map((m) => m.name), ['method_119']);
     assert.deepEqual(last.constants.map((c) => c.name), ['cs_event']);
     assert.equal(last.more, undefined);
+    // the compact list pages the same way - it ignored offset and limit and
+    // answered the whole surface again to a call asking for its second page
+    const compact = await call('api_reference', { offset: 118, limit: 5 });
+    assert.equal(compact.entries, 121);
+    assert.equal(compact.offset, 118);
+    assert.deepEqual(compact.methods.map((m) => m.name), ['method_118', 'method_119']);
+    assert.deepEqual(compact.constants.map((c) => c.name), ['cs_event']);
+    assert.equal(compact.more, undefined);
+    const head = await call('api_reference', { kind: 'methods', limit: 2 });
+    assert.deepEqual(head.methods.map((m) => m.name), ['method_000', 'method_001']);
+    assert.match(head.more, /118 more - call again with offset: 2 \(same kind, no query\)/);
+    const whole = await call('api_reference', {});
+    assert.equal(whole.returned, 121, 'the whole compact list still fits one answer');
     const kind = await call('api_reference', { query: 'entry', kind: 'constants' });
     assert.equal(kind.matches, 1);
     assert.equal(kind.methods, undefined);
