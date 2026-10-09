@@ -37,7 +37,7 @@
   once transpiled, and that code runs in the backend and unit-test children
   with `process.env` in reach. Running the app is trusted code (SECURITY.md);
   this is defence in depth, not a substitute for not deploying untrusted
-  ABAP.
+  ABAP. Two changes:
   - The children no longer inherit this server's environment: they get an
     ALLOWLIST (`appChildEnv` in `lib/runtime.mjs`) - `PATH`, the home and
     temp directories, `TZ` and the locale, `NODE_OPTIONS`, the CA/TLS and
@@ -58,6 +58,20 @@
     The build, lint, git and npm children run no app code and keep the
     full environment. `test/backend.test.mjs` pins it, the spawned child
     included.
+  - `migrate_report` refuses a report that contains the escape (comments
+    aside), and any converter output that does, before anything is
+    converted or written - with the place and the remedy. On an SAP system
+    the statement writes a line of text, so no classic report has a reason
+    to carry it, and report2cloud copies a refused statement into the
+    `partial` draft as it is (a local class's `WRITE`), where a later
+    deploy would run it; flagging it instead would leave the live escape
+    in the files of the answer. open-abap has no other source-level escape
+    (`CALL '<kernel>'` dispatches to a fixed list, `GENERATE SUBROUTINE
+    POOL` and `INSERT REPORT` throw) - but `@abaplint/runtime` evaluates a
+    dynamic `LOOP AT ... WHERE (<condition>)` with `eval()`, so a condition
+    built from a selection-screen field is code injection on the backend.
+    That is ordinary ABAP: converted, and flagged in a new `warnings` list.
+    `test/migrate.test.mjs` pins both.
 
 - **`scope_of` says when the OpenUI5 checkout is what is missing.**
   Without the checkout samples-controls' `scripts/scope-of.mjs` reads

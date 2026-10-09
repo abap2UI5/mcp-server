@@ -99,7 +99,7 @@ import {
 import { createAppClient, AgentError } from './lib/appclient.mjs';
 import { toolsWithUi, uiEnabled } from './lib/mcp-app.mjs';
 import { appCard, cardContent, defaultAppFormat, APP_FORMATS } from './lib/adaptive-card.mjs';
-import { migrateReport, deployFiles, resolvePopups, validTargetClass, SetupError } from './lib/migrate.mjs';
+import { migrateReport, deployFiles, resolvePopups, validTargetClass, SetupError, KernelEscapeError } from './lib/migrate.mjs';
 import { explicitEnv } from './lib/repos.mjs';
 import { systemConfig, createSystemHttp, createSystemClient, systemClassName, searchClasses, checkSystem, maskedUrl } from './lib/system.mjs';
 import { SYSTEM_TOOLS } from './lib/system-tools.mjs';
@@ -1649,7 +1649,7 @@ async function handle(name, args = {}, ctx = {}) {
       try {
         res = await migrateReport({ source: args.source, textsXml: args.texts_xml, className: args.class_name || undefined, partial: args.partial === true });
       } catch (e) {
-        if (e instanceof SetupError) return toolError(e.message);
+        if (e instanceof SetupError || e instanceof KernelEscapeError) return toolError(e.message);
         throw e;
       }
       const reply = {
@@ -1659,6 +1659,7 @@ async function handle(name, args = {}, ctx = {}) {
         files: res.ok ? res.files : (res.draft || {}),
         ...(res.ok ? {} : { files_are: res.draft ? 'the draft (partial): refused statements are marked, it does not compile as it is' : 'none - the report was refused; pass partial: true for the draft' }),
         refusals: res.refusals,
+        ...(res.warnings.length ? { warnings: res.warnings } : {}),
         todos: res.todos.length,
         release: res.release.map((x) => `${x.kind} ${x.name}${x.successor ? ` (successor: ${x.successor})` : ''}`),
         migration_report: res.report,

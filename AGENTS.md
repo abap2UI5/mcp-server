@@ -1170,6 +1170,12 @@ legitimately slower.
   JSON, so a size is `sizeOf` (with the `depth` an item sits at in the
   answer), never `JSON.stringify(x).length` - the compact size let a
   600-test run through at 68,000 characters.
+- **`migrate_report` refuses open-abap's `@KERNEL` escape.** `WRITE
+  '@KERNEL <js>'.` writes text on SAP and runs `<js>` once transpiled;
+  `transpilerHazards` (lib/migrate.mjs) finds it in the report (comments
+  aside) and in the converter's output, before anything is converted or
+  written. A dynamic `LOOP ... WHERE (cond)` is converted and flagged
+  (`warnings`): @abaplint/runtime eval()s the condition.
 - **Never `npx <tool>` inside a checkout.** Under an MCP client stdin is no
   TTY, so npx answers its own install prompt and runs whatever the registry
   holds under that name when the checkout has no local bin — `abap_transpile`

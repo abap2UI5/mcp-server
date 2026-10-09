@@ -64,6 +64,16 @@ Worth knowing before assessing a report:
   an allowlist does not change that. The build, lint, git and npm children
   run no app code and keep the full environment their own configuration
   lives in.
+- **`migrate_report` refuses a report that carries the transpiler's code
+  escape.** On an SAP system `WRITE '@KERNEL <text>'.` writes a line; the
+  transpiler copies `<text>` into the generated module as JavaScript. No
+  classic report has a reason to contain it, so the tool refuses such a
+  source (and any converter output that contains one) before anything is
+  converted or written. A dynamic `LOOP AT ... WHERE (<condition>)` is
+  ordinary ABAP and is converted, but flagged: `@abaplint/runtime`
+  evaluates the condition with `eval()`, so one built from user input is
+  code injection on the backend - an upstream property of the runtime this
+  server reports rather than fixes.
 - **It runs with the privileges of whoever started it**, over the checkouts
   beside it, and the expensive half of its tool loop (`build_backend`,
   `run_app`) **executes code**: it transpiles the ABAP and boots the resulting
