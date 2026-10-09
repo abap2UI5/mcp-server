@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **`run_unit_tests { class_name: "" }` is refused instead of running
+  everything.** A blank name was read as no name, and on a framework
+  checkout that runs the whole transpiled tree - minutes - for what was a
+  name gone missing; it is refused now, naming what leaving the argument
+  out does (`optionalName` in `lib/args.mjs`). And `class_names: null` is
+  absent, as null is for every other argument, where it was refused as "not
+  an array" (an empty list stays refused).
 - **`examples` survives a catalogue field of an unexpected type.** A
   `catalogue.json` entry with a numeric `title` (or an object `summary`,
   keywords that are a number) threw out of `.trim()` in `catalogueEntries`,

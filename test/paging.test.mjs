@@ -487,6 +487,24 @@ test('run_unit_tests counts a class\'s tests per object past the budget, measure
   });
 });
 
+/* `class_name: ""` was read as "no class": the whole tree ran - minutes on
+ * a framework checkout - and `class_names: null` was refused although null
+ * is "absent" for every other argument. A blank name is refused naming what
+ * leaving it out does; null is absent, alone or beside a class. */
+test('run_unit_tests refuses a blank class_name and reads a null class_names as absent', async () => {
+  await withServer(async (call) => {
+    for (const blank of ['', '   ']) {
+      const t = await call('run_unit_tests', { class_name: blank }, { error: true });
+      assert.match(t, /class_name is empty - name one.*leave class_name out \(or null\) to run every deployed app's tests/);
+    }
+    const one = await call('run_unit_tests', { class_name: 'zcl_mid', class_names: null });
+    assert.equal(one.ran, 600);
+    const all = await call('run_unit_tests', { class_names: null, class_name: null });
+    assert.equal(all.ran, 2100, 'null for both is the whole run, as leaving both out is');
+    assert.match(await call('run_unit_tests', { class_names: [] }, { error: true }), /class_names is empty/);
+  });
+});
+
 test('fitUnitResult: a result that fits is the same object; past the budget tests are counted per object', () => {
   const small = { ok: true, ran: 1, skipped: 0, tests: [{ object: 'ZCL_A', localClass: 'L', method: 'M' }], failed: null, class: 'ZCL_A' };
   assert.equal(fitUnitResult(small), small);

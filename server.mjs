@@ -68,7 +68,7 @@ import { missingSiblingMessage, missingLocalSiblingMessage } from './lib/sibling
 import { hydrate, REMOTE_TOOLS, resourceRepos, fetchRemoteFile, isRemoteCheckout, remoteBase, resolvedInside } from './lib/remote.mjs';
 import { readInside } from './lib/contain.mjs';
 import { resolveKey, RESOLVERS } from './lib/repos.mjs';
-import { oneOf, boundedInt, stringArray, checkStringArgs } from './lib/args.mjs';
+import { oneOf, boundedInt, stringArray, optionalName, checkStringArgs } from './lib/args.mjs';
 import {
   deployApp,
   removeApp,
@@ -1591,8 +1591,13 @@ async function handle(name, args = {}, ctx = {}) {
       const miss = missingBackend();
       if (miss) return miss;
       const report = progressReporter(ctx);
-      const classNames = args.class_names === undefined ? undefined : stringArray(args.class_names, { name: 'class_names', example: '["zcl_my_app", "zcl_my_other_app"]' });
-      const ran = await runUnitTests({ className: args.class_name, classNames, signal: ctx.signal, onLine: report });
+      /* null is absent, as for every argument here (an empty list is refused
+       * by stringArray); a blank class_name is refused rather than read as
+       * "every test" - on a framework checkout that is minutes */
+      const everything = 'to run every deployed app\'s tests (on a framework checkout: the whole transpiled tree, which takes minutes)';
+      const className = optionalName(args.class_name, { name: 'class_name', absent: everything });
+      const classNames = args.class_names === undefined || args.class_names === null ? undefined : stringArray(args.class_names, { name: 'class_names', example: '["zcl_my_app", "zcl_my_other_app"]' });
+      const ran = await runUnitTests({ className, classNames, signal: ctx.signal, onLine: report });
       if (ran.aborted || ran.timedOut) return toolError(ran.error);
       /* Past the budget the tests are counted per object (lib/budget.mjs) -
        * measured as text() writes the answer, indented: the compact size it
