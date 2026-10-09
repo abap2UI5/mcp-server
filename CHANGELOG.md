@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **`add_agent_setup` refuses the home directory and the forbidden
+  directories on Windows whatever their spelling.** The checks compared
+  paths case-sensitively, and on Windows neither the resolved path nor
+  `os.homedir()` comes back in one canonical case - `C:\USERS\ME` was "not
+  the home directory", a differently cased path into this server's
+  installation not inside it. Under the win32 path semantics both sides are
+  folded now (`pathWithin`), the same for the writes' own containment
+  checks; POSIX stays case-sensitive. Tested with `path.win32` over a fake
+  Windows disk, so it is pinned on every machine.
 - **`system_status` no longer reads a logon page as a working logon.** Any
   `200` was "accepted the logon" - and an ICF node with a form or SSO logon
   answers Basic credentials it does not take with its HTML logon page, a

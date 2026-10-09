@@ -950,7 +950,9 @@ agent) find these artifacts in a dirty sibling worktree, mcp-server caused them:
   folder `.abapgit.xml` names, never through a symbolic link out of the
   project, and never the file system root, the home directory, this
   server's installation, the template checkout, the mirror cache or the
-  workspace (`agentTargetProblem`).
+  workspace (`agentTargetProblem`; on Windows compared case-insensitively,
+  `pathWithin` - neither the resolved path nor the home directory comes back
+  there in one canonical case).
 - `<tmp>/abap2ui5-mcp-remote/<repo>/` — the read-only GitHub mirrors (not a
   sibling worktree, but the same question "where did this come from": a
   directory that carries `.abap2ui5-mirror.json` is one, and deleting it is
