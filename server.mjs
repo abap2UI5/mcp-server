@@ -568,11 +568,17 @@ async function handle(name, args = {}, ctx = {}) {
        * were ~135 KB, over what a client accepts as one answer. */
       const page = takeWithin(all.slice(offset, offset + limit), ANSWER_BUDGET - 5000, { depth: 2 });
       const nextOffset = offset + page.taken.length;
+      /* A generic word matches most of a catalogue through the controls the
+       * views build ("button": 424 matches, 135 of them only because the
+       * view has a Button) - said, so `matches` is not read as that many
+       * samples ABOUT the word. They are ranked after the others. */
+      const byBuilds = all.filter((e) => e.builds).length;
       return text({
         matches: all.length,
         ...(offset ? { offset } : {}),
         returned: page.taken.length,
         ...(nextOffset < all.length ? { more: `${all.length - nextOffset} more - call again with offset: ${nextOffset}` } : {}),
+        ...(byBuilds ? { foundByBuilds: `${byBuilds} of the ${all.length} matches needed a control their view builds to match (named under \`builds\`) - they come after the ${all.length - byBuilds} that match in the catalogues' own words; a sample that only builds a control is seldom about it` } : {}),
         searched,
         ...(notSearched.length ? { notSearched } : {}),
         repositories: Object.fromEntries(found.map((c) => [c.repo, c.url])),

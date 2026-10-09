@@ -1105,9 +1105,35 @@ test('examples finds a sample by a control its view builds (catalogue-derived.js
   // the full control list never travels in the answer
   assert.ok(!JSON.stringify(q('bar')).includes('PlanningCalendar'), 'only the matched controls are named');
   assert.equal(JSON.stringify(q('appointments')[0]).includes('builds'), false, 'a hit not found by a control names none');
+  // a hit whose catalogue words carry every term names no `builds`, even
+  // when its view builds a match: the field says what a hit was found BY
+  assert.equal(q('sap.m.Dialog')[0].builds, undefined, 'the Dialog port was found by its own words');
   // the samples shape keys its list `samples`; anything else is no derived file
   assert.equal(derivedControls({ controls: ['sap.m.Table'], samples: [{ class: 'z2ui5_cl_smp_app_001', controls: [0] }] }).get('Z2UI5_CL_SMP_APP_001')[0], 'sap.m.Table');
   for (const bad of [null, {}, { controls: 'x' }, { controls: [] }, { controls: [], ports: 'x' }]) assert.equal(derivedControls(bad), null, JSON.stringify(bad));
+});
+
+/* A hit found in the catalogue's own words for EVERY term ranks above one
+ * that needed the built controls for a term - whatever their keyword hits.
+ * The keyword score came first, so a port with "dialog" among its keywords
+ * that merely builds a Select outranked one whose words carry both terms:
+ * "select dialog" moved a match of the catalogue's words off the first
+ * page. The catalogue-word matches keep the order they had without the
+ * derived file, and the rest follow. */
+test('examples ranks every match in the catalogue\'s own words above one that needed the built controls', () => {
+  const cat = {
+    ports: [
+      { class: 'z2ui5_cl_smpc_app_011', file: 'src/a.clas.abap', library: 'sap.m', entity: 'sap.m.Panel', title: 'Panel', summary: 'select a dialog option', keywords: 'panel', status: 'generated' },
+      { class: 'z2ui5_cl_smpc_app_012', file: 'src/b.clas.abap', library: 'sap.m', entity: 'sap.m.Dialog', title: 'Dialog', summary: 'a dialog', keywords: 'dialog popup', status: 'checked' },
+    ],
+  };
+  const derived = { controls: ['sap.m.Select', 'sap.m.Dialog'], ports: [{ class: 'z2ui5_cl_smpc_app_011', controls: [0] }, { class: 'z2ui5_cl_smpc_app_012', controls: [0, 1] }] };
+  const without = searchExamples({ query: 'select dialog', repo: 'samples-controls', rawCatalogue: cat }).map((e) => e.cls);
+  assert.deepEqual(without, ['Z2UI5_CL_SMPC_APP_011']);
+  const hits = searchExamples({ query: 'select dialog', repo: 'samples-controls', rawCatalogue: cat, rawDerived: derived });
+  assert.deepEqual(hits.map((e) => e.cls), ['Z2UI5_CL_SMPC_APP_011', 'Z2UI5_CL_SMPC_APP_012'], 'the catalogue-word match first, as without the derived file');
+  assert.equal(hits[0].builds, undefined);
+  assert.deepEqual(hits[1].builds, ['sap.m.Select'], 'only the control the hit needed - not the Dialog its words already name');
 });
 
 /* Which FILE answers, pinned against a checkout on disk: catalogue.json where

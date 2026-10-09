@@ -101,8 +101,13 @@ function fakes() {
   write('docs/docs/index.md', '# Home\n\nThe start page.\n');
   for (let i = 0; i < 25; i++) write(`docs/docs/cookbook/page_${String(i).padStart(2, '0')}.md`, `# Page ${i}\n\n## Binding\n\nhow binding works, part ${i}.\n`);
   // a sample catalogue with many rows
-  const rows = Array.from({ length: 400 }, (_, i) => `| **Sample ${i}** — table demo number ${i}<br>${'a long summary of what it shows '.repeat(6)}<br><sub>table demo</sub> | [\`Z2UI5_CL_SMP_APP_${String(i).padStart(3, '0')}\`](src/01/z2ui5_cl_smp_app_${i}.clas.abap) |`);
+  const rows = Array.from({ length: 400 }, (_, i) => `| **Sample ${i}${i < 3 ? ' button' : ''}** — table demo number ${i}<br>${'a long summary of what it shows '.repeat(6)}<br><sub>table demo</sub> | [\`Z2UI5_CL_SMP_APP_${String(i).padStart(3, '0')}\`](src/01/z2ui5_cl_smp_app_${i}.clas.abap) |`);
   write('samples/SAMPLES.md', ['# Samples', '', '## Tables', '', '| Sample | Class |', '|---|---|', ...rows].join('\n'));
+  // what the linter knows: the first 50 views build a Button, three say so in their words
+  write('samples/catalogue-derived.json', JSON.stringify({
+    controls: ['sap.m.Button', 'sap.m.Table'],
+    samples: Array.from({ length: 400 }, (_, i) => ({ class: `z2ui5_cl_smp_app_${String(i).padStart(3, '0')}`, controls: i < 50 ? [1, 0] : [1] })),
+  }));
   return base;
 }
 
@@ -362,6 +367,23 @@ test('examples pages a large limit instead of answering past the client cap', as
     assert.notEqual(second.entries[0].cls, first.entries[0].cls);
     const small = await call('examples', { query: 'table', repo: 'samples' });
     assert.equal(small.returned, 20, 'the default page is unchanged');
+    assert.equal(small.foundByBuilds, undefined, 'every match in the catalogue\'s own words: nothing to say');
+  });
+});
+
+/* A generic word matches most of a catalogue through the controls the views
+ * build ("button": 424 matches, 135 of them only because the view has a
+ * Button). Those come after the catalogue-word matches, and the answer says
+ * how many there are, so a long `matches` is not read as that many samples
+ * ABOUT the word. */
+test('examples says how many matches were found only by a control the view builds', async () => {
+  await withServer(async (call) => {
+    const r = await call('examples', { query: 'button', repo: 'samples' });
+    assert.equal(r.matches, 50);
+    assert.deepEqual(r.entries.slice(0, 3).map((e) => [e.cls, e.builds]), [0, 1, 2].map((i) => [`Z2UI5_CL_SMP_APP_00${i}`, undefined]),
+      'the three found by their own words first, naming no builds');
+    assert.deepEqual(r.entries[3].builds, ['sap.m.Button']);
+    assert.match(r.foundByBuilds, /^47 of the 50 matches needed a control their view builds to match \(named under `builds`\) - they come after the 3 that match in the catalogues' own words/);
   });
 });
 
