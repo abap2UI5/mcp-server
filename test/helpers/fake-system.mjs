@@ -61,7 +61,9 @@ export async function fakeSystem({ sample = 'form-381' } = {}) {
       }
       if (req.method === 'GET') {
         res.writeHead(200, { ...headers, 'content-type': 'text/html' });
-        res.end('<html><head><title>abap2UI5</title></head></html>');
+        // the shell z2ui5_cl_ui5_http_handler=>_http_get answers, abbreviated
+        res.end('<html><head><title>abap2UI5</title></head><body>'
+          + '<div data-sap-ui-component data-name="z2ui5" data-id="container"></div></body></html>');
         return;
       }
       if (req.method === 'HEAD') {

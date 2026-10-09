@@ -548,6 +548,13 @@ share a tool name inside one server.
   refusal reads as itself rather than as "the backend did not answer". The
   `401`'s body is replaced by a sentence (the system's logon page is HTML
   noise) - the client shows it as `HTTP 401: ...`.
+- **`system_status` wants the start page, not any 200.** An ICF node
+  with a form logon answers Basic credentials it does not take with its
+  HTML logon page - a 200 - and that read as "accepted the logon".
+  `checkSystem` now requires the component the framework's shell declares
+  (`data-name="z2ui5"`, or the bootstrap's `"z2ui5": "./"` resource root -
+  `z2ui5_cl_ui5_http_handler=>_http_get`, `isStartPage`); the endpoint's
+  path alone is no marker, a logon page's form action carries it.
 - **A misconfiguration starts the server.** `systemConfig` collects
   `problems` instead of throwing, and every tool answers with them: in a
   desktop client the tool answer is the only place a user sees anything.

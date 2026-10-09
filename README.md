@@ -403,7 +403,7 @@ without the variable, to have both.
 
 | Tool | What it does |
 |---|---|
-| `system_status` | The endpoint and user (never the password) and ONE request that shows whether the host answers, the certificate is accepted and the logon works — call it first |
+| `system_status` | The endpoint and user (never the password) and ONE request that shows whether the host answers, the certificate is accepted and the logon works — `ok` only when the abap2UI5 start page answers, not a form logon page that also answers 200 — call it first |
 | `app_list` | Class names on the system, from the ADT quick search (`filter`: start of the name, `*` as wildcard; at most 50) |
 | `app_start` | Start an app on the system and get its agent snapshot — the same snapshot, arguments and refusals as the sandbox's `app_start` |
 | `app_describe` | The current snapshot of a session, from memory — nothing is sent |

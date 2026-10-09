@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **`system_status` no longer reads a logon page as a working logon.** Any
+  `200` was "accepted the logon" - and an ICF node with a form or SSO logon
+  answers Basic credentials it does not take with its HTML logon page, a
+  `200`. The answer is `ok` now only when the abap2UI5 start page answers
+  (the `z2ui5` component the framework's `_http_get` shell declares); a
+  logon page is a problem that says the endpoint must accept Basic
+  authentication, any other page one that asks whether the URL is the ICF
+  service's path.
 - **No tool answer can pass the client's size limit any more - a backstop at
   the one place answers are serialised.** Every tool already fits its own
   answer (the paging vocabulary), but a composed or unbounded one could still

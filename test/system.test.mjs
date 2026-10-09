@@ -14,7 +14,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   systemEndpoint, maskedUrl, systemLocation, systemConfig, describeConfig, systemClassName, cookieJar, createSystemHttp,
-  parseAdtClassRefs, adtSearchUrl, networkProblem, runPasswordCommand, checkSystem, PROBE_CLASS,
+  parseAdtClassRefs, adtSearchUrl, networkProblem, runPasswordCommand, checkSystem, isStartPage, PROBE_CLASS,
 } from '../lib/system.mjs';
 import { SYSTEM_TOOLS, SYSTEM_TOOL_NAMES } from '../lib/system-tools.mjs';
 import { AgentError } from '../lib/appclient.mjs';
@@ -264,13 +264,42 @@ test('the ADT quick search: the URL, and only classes from the answer', () => {
   assert.deepEqual(refs, [{ name: 'ZCL_A', description: 'A & B', packageName: 'ZP' }]);
 });
 
+/* What z2ui5_cl_ui5_http_handler=>_http_get answers (abbreviated - the
+ * inline preload script left out), and what an ICF node with a form logon
+ * answers to Basic credentials it does not take: a 200 as well. */
+const START_PAGE = '<!DOCTYPE html>\n<html lang="en">\n<head>\n<title>abap2UI5</title>\n'
+  + '<script id="sap-ui-bootstrap" data-sap-ui-resourceroots=\'{ "z2ui5": "./" }\' data-sap-ui-oninit="onInitComponent" '
+  + 'src="https://ui5.sap.com/resources/sap-ui-core.js" ></script></head>\n<body class="sapUiBody sapUiSizeCompact" id="content">\n'
+  + '    <div data-sap-ui-component data-name="z2ui5" data-id="container" data-settings=\'{"id" : "z2ui5"}\' data-handle-validation="true"></div>\n </body></html>';
+const LOGON_PAGE = '<html><head><title>Logon</title></head><body><form id="LOGIN_FORM" method="post" action="/sap/bc/z2ui5?sap-client=100">'
+  + '<input name="sap-user"><input name="sap-password" type="password"></form></body></html>';
+
+/* A 200 used to be "accepted the logon" whatever it carried - a form logon
+ * page included, which is exactly a logon that did NOT happen. */
+test('system_status: a 200 is accepted only with the abap2UI5 start page in it', async () => {
+  const at = (body) => checkSystem(cfg(), createSystemHttp(cfg(), { request: async () => ({ status: 200, headers: {}, body }) }));
+  const logon = await at(LOGON_PAGE);
+  assert.equal(logon.ok, false);
+  assert.match(logon.problem, /HTTP 200, but with a logon page.*Basic/);
+  assert.equal(logon.status, 200);
+  const other = await at('<html><body>Welcome to the gateway</body></html>');
+  assert.equal(other.ok, false);
+  assert.match(other.problem, /not the abap2UI5 start page.*ICF/);
+  assert.equal((await at('')).ok, false, 'an empty 200 is no start page either');
+  // the standalone index (z2ui5_cl_ui5f_index_html) declares the same component
+  assert.equal((await at('<div data-sap-ui-component data-name=\'z2ui5\' data-id="container"></div>')).ok, true);
+  assert.equal(isStartPage(START_PAGE), true);
+  assert.equal(isStartPage(LOGON_PAGE), false, 'the endpoint path in a form action is no marker');
+});
+
 test('system_status: misconfigured, accepted, rejected', async () => {
   const bad = await checkSystem(cfg({ problems: ['p1'] }), createSystemHttp(cfg()));
   assert.equal(bad.ok, false);
   assert.deepEqual(bad.problems, ['p1']);
-  const ok = await checkSystem(cfg(), createSystemHttp(cfg(), { request: async () => ({ status: 200, headers: {}, body: '' }) }));
+  const ok = await checkSystem(cfg(), createSystemHttp(cfg(), { request: async () => ({ status: 200, headers: {}, body: START_PAGE }) }));
   assert.equal(ok.ok, true);
   assert.equal(ok.user, 'DEV');
+  assert.match(ok.verdict, /abap2UI5 start page and accepted the logon of DEV/);
   const no = await checkSystem(cfg(), createSystemHttp(cfg(), { request: async () => ({ status: 401, headers: {}, body: '' }) }));
   assert.equal(no.ok, false);
   assert.match(no.problem, /rejected the logon/);
@@ -279,7 +308,7 @@ test('system_status: misconfigured, accepted, rejected', async () => {
   const moved = await checkSystem(cfg(), createSystemHttp(cfg(), { request: async () => ({ status: 302, headers: { location: 'https://idp/saml' }, body: '' }) }));
   assert.match(moved.problem, /HTTP 302 to https:\/\/idp\/saml.*Basic/);
   let signal;
-  await checkSystem(cfg(), createSystemHttp(cfg(), { request: async (url, init) => { signal = init.signal; return { status: 200, headers: {}, body: '' }; } }));
+  await checkSystem(cfg(), createSystemHttp(cfg(), { request: async (url, init) => { signal = init.signal; return { status: 200, headers: {}, body: START_PAGE }; } }));
   assert.ok(signal instanceof AbortSignal, 'the check is bounded');
 });
 
