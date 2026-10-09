@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **`run_app` and `interact_app` say when UI5 itself did not load.** The
+  UI5 runtime comes from the corpus' `@openui5` packages or the CDN, and a
+  failed load of it was in no report: with `sdk.openui5.org` out of reach
+  and no local packages, the answer was "boot: page.waitForFunction:
+  Timeout 60000ms exceeded" and a blank picture - nothing an agent could
+  tell from a broken app - and an app that booted without its theme was
+  `ok` with an unstyled screenshot. A UI5 bootstrap that did not load is
+  now an error naming the URL, the reason and the remedy (and that
+  `app_start` needs no browser); a booted app whose theme or a library
+  did not load carries a `ui5` note.
 - **`validate_view`'s hint is about the findings that are left.** Any
   hint made it explain that "an event without a handler is intended when
   the roundtrip alone is the point" - beside an unused namespace or a

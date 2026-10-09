@@ -1446,6 +1446,8 @@ async function handle(name, args = {}, ctx = {}) {
         ok: res.ok,
         errors: res.errors,
         ...(res.errorsCut ? { errorsCut: res.errorsCut } : {}),
+        // UI5 resources that did not load while the app booted (a theme, a library)
+        ...(res.ui5 ? { ui5: res.ui5 } : {}),
         screenshot: res.screenshotPath,
         ...(res.screenshotNotSaved ? { screenshotNotSaved: res.screenshotNotSaved } : {}),
         ...(res.screenshotCut ? { screenshotCut: res.screenshotCut } : {}),
@@ -1477,6 +1479,8 @@ async function handle(name, args = {}, ctx = {}) {
         ...(res.notPerformed ? { notPerformed: res.notPerformed } : {}),
         errors: res.errors,
         ...(res.errorsCut ? { errorsCut: res.errorsCut } : {}),
+        // UI5 resources that did not load while the app booted (a theme, a library)
+        ...(res.ui5 ? { ui5: res.ui5 } : {}),
         screenshot: res.screenshotPath,
         ...(res.screenshotNotSaved ? { screenshotNotSaved: res.screenshotNotSaved } : {}),
         ...(res.screenshotCut ? { screenshotCut: res.screenshotCut } : {}),
