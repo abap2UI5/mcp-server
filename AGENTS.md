@@ -1170,6 +1170,16 @@ legitimately slower.
   JSON, so a size is `sizeOf` (with the `depth` an item sits at in the
   answer), never `JSON.stringify(x).length` - the compact size let a
   600-test run through at 68,000 characters.
+- **Every answer leaves through ONE place, and that place is guarded.**
+  `server.mjs` registers a single tools/call handler, `answerToolCall` =
+  `guardAnswer(await dispatchToolCall(...))` (lib/budget.mjs): the system
+  mode, the sandbox tools and the error of a throw all pass the backstop,
+  which also holds the pictures of one answer to `IMAGE_BUDGET`. Do not
+  register a second handler, return from around it, or answer tools through
+  the SDK's high-level `registerTool`: `test/answer-guard.test.mjs` reads
+  the registration and sweeps every tool name over stdio under a loader hook
+  (`test/helpers/guard-probe.mjs`) that marks what guardAnswer returned - an
+  unmarked answer fails it.
 - **`migrate_report` refuses open-abap's `@KERNEL` escape.** `WRITE
   '@KERNEL <js>'.` writes text on SAP and runs `<js>` once transpiled;
   `transpilerHazards` (lib/migrate.mjs) finds it in the report (comments

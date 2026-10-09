@@ -19,7 +19,17 @@
   could pass the budget while only the findings beside it were ever shrunk
   (`rulesCut` now names what was left out, the most severe findings' rules
   kept first) - and `migrate_report { deploy: true }` fits its composed
-  deploy/build/start stages together (`fitObject`).
+  deploy/build/start stages together (`fitObject`). The guard wraps the
+  WHOLE dispatch - `server.mjs` registers one tools/call handler,
+  `guardAnswer(await dispatchToolCall(...))`, so the error answer of a
+  throw (whose message can carry a build's output) passes it too - and it
+  holds an answer's pictures to `IMAGE_BUDGET` as well (8 MB of base64,
+  formerly `screenshot_view`'s alone). `test/answer-guard.test.mjs` makes
+  the guarantee fail-able: it checks the single registration in the source,
+  and sweeps every tool name (sandbox and system mode, an unknown name, a
+  bad argument) over stdio under a test-only loader hook that marks what
+  guardAnswer returned - an answer that bypassed it carries no mark, and
+  every content block is measured against its budget.
 - **Security: a hostile checkout can no longer steer a read or a write
   outside it through a symbolic link.** The path checks (`safeRelPath`, the
   sandbox name gate) stopped a `..` or an absolute path in a STRING; they did

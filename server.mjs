@@ -59,7 +59,7 @@ import { agentTargetProblem, planAgentSetup, writePlan, pinProblems, pinWarning,
 import { fixSource } from './lib/fixview.mjs';
 import { lintOptionsFor } from './lib/lintopts.mjs';
 import { withRenderFallback, renderSkippedNote, warmThenCold, validateHint, bySeverity } from './lib/validate.mjs';
-import { ANSWER_BUDGET, sizeOf, takeWithin, takeSmallestWithin, fitSnapshot, fitUnitResult, fitFindings, fitRules, fitObject, fitVerifyStages, guardAnswer } from './lib/budget.mjs';
+import { ANSWER_BUDGET, sizeOf, takeWithin, takeSmallestWithin, fitSnapshot, fitUnitResult, fitFindings, fitRules, fitObject, fitVerifyStages, guardAnswer, IMAGE_BUDGET } from './lib/budget.mjs';
 import { getRenderer, dropRenderer, closeRenderers, rendererLooksDead } from './lib/renderer.mjs';
 import { TOOLS } from './lib/tools.mjs';
 import { RESOURCES, RESOURCE_TEMPLATES, GUIDE_CHAPTER_TEMPLATE, readResource } from './lib/resources.mjs';
@@ -293,7 +293,6 @@ async function agentClient() {
 /* An image block's limits: the Claude API takes no side over 8000 px, and
  * the base64 of every picture in one answer stays under IMAGE_BUDGET. */
 const MAX_IMAGE_EDGE = 8000;
-const IMAGE_BUDGET = 8_000_000;
 
 /** A PNG's width and height from its IHDR chunk, or null. */
 function pngSize(png) {
@@ -1766,17 +1765,15 @@ server.setRequestHandler(CompleteRequestSchema, async (req) => {
     .slice(0, 100); // the protocol's ceiling per answer
   return { completion: { values, total: values.length, hasMore: false } };
 });
-server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
+/* Every tool call, answered: the arguments checked, the call dispatched to
+ * the system mode's handlers or the sandbox's, and a throw turned into the
+ * tool error it is. Never registered on its own - answerToolCall below is. */
+async function dispatchToolCall(req, extra) {
   try {
     checkStringArgs(ACTIVE_TOOLS.find((t) => t.name === req.params.name), req.params.arguments || {});
-    /* guardAnswer is the last-line backstop (lib/budget.mjs): every tool
-     * fits its own answer, but a composed or unbounded one can still add up
-     * past the client's cap, and an over-cap answer shows the agent nothing.
-     * Applied here, at the one place a tool result is handed back, so no tool
-     * can escape it - whatever a per-tool fitter missed. */
-    if (SYSTEM) return guardAnswer(await handleSystem(req.params.name, req.params.arguments || {}, { signal: extra && extra.signal }));
+    if (SYSTEM) return await handleSystem(req.params.name, req.params.arguments || {}, { signal: extra && extra.signal });
     await hydrateRepos(REMOTE_TOOLS[req.params.name]);
-    return guardAnswer(await handle(req.params.name, req.params.arguments || {}, {
+    return await handle(req.params.name, req.params.arguments || {}, {
       progressToken: req.params._meta && req.params._meta.progressToken,
       sendNotification: extra && extra.sendNotification,
       /* The SDK aborts this when the client sends notifications/cancelled for
@@ -1784,11 +1781,22 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
        * which kills the child's whole process tree - a cancelled build must
        * not keep transpiling under a request nobody is waiting for. */
       signal: extra && extra.signal,
-    }));
+    });
   } catch (e) {
     return toolError(String((e && e.message) || e));
   }
-});
+}
+
+/* THE one place a tool result leaves this server - and so the one place
+ * guardAnswer (lib/budget.mjs), the last-line backstop, is applied: every
+ * tool fits its own answer, but a composed or unbounded one can still add up
+ * past the client's cap, and an over-cap answer shows the agent nothing. It
+ * wraps the dispatch whole, the error path of a throw included (an Error
+ * whose message carries a build's output is as long as that output).
+ * test/answer-guard.test.mjs fails when a second handler for tools/call
+ * appears or a result reaches the client without passing it. */
+const answerToolCall = async (req, extra) => guardAnswer(await dispatchToolCall(req, extra));
+server.setRequestHandler(CallToolRequestSchema, answerToolCall);
 
 /* A throw nobody caught costs ONE call, not the session.
  *
