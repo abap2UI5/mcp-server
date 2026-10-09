@@ -1045,6 +1045,40 @@ test('a JSON that is not the catalogue answers null, never a throw', () => {
   assert.equal(some.length, 1);
 });
 
+/* catalogue.json is another repository's output: a field of an unexpected
+ * type (a numeric title, an object summary, keywords that are a number)
+ * threw out of .trim() and cost the whole catalogue - in a search over a
+ * fixture, the call. Each field is coerced or dropped instead; an entry
+ * whose class is not a name is skipped. */
+test('a catalogue field of an unexpected type is coerced or dropped, never a throw', () => {
+  const odd = { title: 42, description: { x: 1 }, category: 7, summary: ['a'], keywords: 3, docs: [5, null, 'https://abap2ui5.github.io/docs/cookbook/x.html'], stage: true, file: 99 };
+  const [s] = catalogueEntries({ samples: [{ class: 'z2ui5_cl_odd', ...odd }, { class: 12 }, { class: { a: 1 } }] }, 'samples');
+  assert.equal(s.cls, 'Z2UI5_CL_ODD');
+  assert.equal(s.title, '42');
+  assert.equal(s.sub, '');
+  assert.equal(s.section, '7');
+  assert.equal(s.summary, '');
+  assert.equal(s.keywords, '3');
+  assert.deepEqual(s.docs.map((d) => d.url), ['5', 'https://abap2ui5.github.io/docs/cookbook/x.html']);
+  assert.equal(s.path, '99');
+  const numeric = catalogueEntries({ samples: [{ class: 12 }, { class: { a: 1 } }, { class: '  ' }] }, 'samples');
+  assert.deepEqual(numeric.map((e) => e.cls), ['12'], 'a class that is an object or blank is no sample; a number is coerced like any field');
+  const [c] = catalogueEntries({ ports: [{ class: 'z2ui5_cl_p', entity: 5, title: null, keywords: { k: 1 }, status: 3, deviations: [1, { d: 1 }, 'kept'] }] }, 'samples-controls');
+  assert.equal(c.title, '5');
+  assert.equal(c.label, '5');
+  assert.equal(c.keywords, '');
+  assert.equal(c.status, '3');
+  assert.deepEqual(c.deviations, ['1', 'kept']);
+  const [k] = catalogueEntries({ samples: [{ class: 'z2ui5_cl_s', title: ['x'], technology: 1, needs: ['OData', 2], path: null }] }, 'samples-stack');
+  assert.equal(k.title, '');
+  assert.equal(k.technology, '1');
+  assert.deepEqual(k.needs, ['OData', '2']);
+  assert.equal(k.path, '');
+  // and a search over such a catalogue answers instead of throwing
+  const hits = searchExamples({ query: '42', repo: 'samples', rawCatalogue: { samples: [{ class: 'z2ui5_cl_odd', ...odd }] } });
+  assert.deepEqual(hits.map((e) => e.cls), ['Z2UI5_CL_ODD']);
+});
+
 test('a verified port outranks an unverified one when the relevance ties', () => {
   /* Same keyword hit on every port, statuses deliberately in the wrong order
    * in the file - between two equally relevant ports, the one a human has

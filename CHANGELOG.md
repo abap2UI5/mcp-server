@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **`examples` survives a catalogue field of an unexpected type.** A
+  `catalogue.json` entry with a numeric `title` (or an object `summary`,
+  keywords that are a number) threw out of `.trim()` in `catalogueEntries`,
+  and the repository's whole JSON was lost with it - the search fell back to
+  `SAMPLES.md`, or failed outright over an injected catalogue. Every field
+  is now coerced (a number or boolean as written) or dropped (an object, an
+  array where text belongs); an entry whose class is an object or blank is
+  skipped.
 - **`add_agent_setup` refuses the home directory and the forbidden
   directories on Windows whatever their spelling.** The checks compared
   paths case-sensitively, and on Windows neither the resolved path nor
