@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **`validate_view`'s hint is about the findings that are left.** Any
+  hint made it explain that "an event without a handler is intended when
+  the roundtrip alone is the point" - beside an unused namespace or a
+  spelled-out `get_event_arg( 1 )`, neither of them about events (bench
+  task 13's reference, samples-controls 533) - and it never said that
+  `fix_view` clears the findings marked `fixable`. It names the event
+  case only when an event finding is there, and `fix_view` when a listed
+  finding is fixable.
 - **`app_act` says what to pass for a control id only the browser knows.**
   A row button without an id of its own that opens a popover next to it
   (`${$source>/id}`, the shape of samples 052 and bench task 13) was

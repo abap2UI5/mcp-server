@@ -58,7 +58,7 @@ import { scaffold, readSpec, validClassName, classNameRule, templateFiles, SPEC_
 import { agentTargetProblem, planAgentSetup, writePlan, pinProblems, pinWarning, agentSetupNextSteps } from './lib/agent-setup.mjs';
 import { fixSource } from './lib/fixview.mjs';
 import { lintOptionsFor } from './lib/lintopts.mjs';
-import { withRenderFallback, renderSkippedNote, warmThenCold } from './lib/validate.mjs';
+import { withRenderFallback, renderSkippedNote, warmThenCold, validateHint } from './lib/validate.mjs';
 import { ANSWER_BUDGET, sizeOf, takeWithin, takeSmallestWithin, fitSnapshot, fitUnitResult, fitFindings } from './lib/budget.mjs';
 import { getRenderer, dropRenderer, closeRenderers, rendererLooksDead } from './lib/renderer.mjs';
 import { TOOLS } from './lib/tools.mjs';
@@ -1147,11 +1147,7 @@ async function handle(name, args = {}, ctx = {}) {
         notes: result.notes,
         ...(renderSkipped ? { renderSkipped } : {}),
         config: configFile || undefined,
-        hint: counts.error === 0 && counts.warning > 0
-          ? 'what is left is about the UI5 version you target: fix it, raise min_ui5 if the system is newer, or accept it via allow'
-          : counts.error === 0 && counts.hint > 0
-            ? 'hints are advisory - an event without a handler is intended when the roundtrip alone is the point'
-            : undefined,
+        hint: validateHint(counts, findings),
       });
     }
     case 'fix_view': {

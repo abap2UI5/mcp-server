@@ -1940,6 +1940,24 @@ test('validate_view falls back to the property gate when the render gate cannot 
  * fallback above, which answered the property findings alone with a note
  * that the render gate "could not start". Composed the way validate_view
  * composes them. */
+/* The hint explained an event without a handler whenever any hint was left
+ * - beside an unused namespace or get_event_arg( 1 ), which have nothing to
+ * do with events (seen on bench task 13's reference and samples-controls
+ * 533) - and never pointed at fix_view for the fixable ones. */
+test('the validate_view hint is about the findings that are left', async () => {
+  const { validateHint } = await import('../lib/validate.mjs');
+  const ns = { type: 'unused-namespace-declaration', severity: 'hint', fixable: true };
+  const ev = { type: 'event-without-handler', severity: 'hint' };
+  const old = { type: 'member-too-new', severity: 'warning' };
+  assert.equal(validateHint({ error: 0, warning: 0, hint: 1 }, [ns]), 'hints are advisory, ok stays true; fix_view clears the ones marked fixable: true');
+  assert.equal(validateHint({ error: 0, warning: 0, hint: 1 }, [ev]), 'hints are advisory, ok stays true - an event without a handler is intended when the roundtrip alone is the point');
+  assert.doesNotMatch(validateHint({ error: 0, warning: 0, hint: 1 }, [ns]), /event/, 'no event talk without an event finding');
+  assert.match(validateHint({ error: 0, warning: 1, hint: 1 }, [old, ns]), /^what is left is about the UI5 version you target.*; fix_view clears the ones marked fixable: true$/);
+  assert.doesNotMatch(validateHint({ error: 0, warning: 1, hint: 0 }, [old]), /fix_view/);
+  assert.equal(validateHint({ error: 1, warning: 0, hint: 0 }, []), undefined);
+  assert.equal(validateHint({ error: 0, warning: 0, hint: 0 }, []), undefined);
+});
+
 test('validate_view retries a throwing warm renderer cold before falling back', async () => {
   const { withRenderFallback, warmThenCold } = await import('../lib/validate.mjs');
   const calls = [];
