@@ -10,6 +10,8 @@
 // network-free, this is the one test that proves the recipe against what is
 // actually published. It uses a workspace of its own (a temp dir), so it
 // installs cold every run; npm's own cache makes the second run cheaper.
+// A2UI5_MCP_TEST_RUNTIME_TGZ=<abap2ui5-node-runtime-X.Y.Z.tgz> runs it on a
+// local build of the package instead (test/helpers/local-runtime.mjs).
 // What it cannot see is the page RENDERING in a browser - that needs the UI5
 // CDN (run_app's half); the GET and the POST are the backend's half.
 import test from 'node:test';
@@ -20,6 +22,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { fakeTemplate } from './helpers/npm-fixture.mjs';
+import { installLocalRuntime } from './helpers/local-runtime.mjs';
 
 const PORT = 4441;
 
@@ -82,9 +85,23 @@ ENDCLASS.
 CLASS ltcl_hello DEFINITION FINAL FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
   PRIVATE SECTION.
     METHODS first_call_displays_the_view FOR TESTING RAISING cx_static_check.
+    METHODS catch_cx_root_catches_runtime FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
 CLASS ltcl_hello IMPLEMENTATION.
+  METHOD catch_cx_root_catches_runtime.
+    " the runtime's exception extends the package's CX_ROOT: a second copy
+    " loaded by the dev module would make this CATCH miss it
+    DATA zero TYPE i.
+    DATA caught TYPE abap_bool.
+    TRY.
+        zero = 1 / zero.
+      CATCH cx_root.
+        caught = abap_true.
+    ENDTRY.
+    cl_abap_unit_assert=>assert_true( caught ).
+  ENDMETHOD.
+
   METHOD first_call_displays_the_view.
     DATA(app) = NEW zcl_hello_mcp( ).
     DATA(client) = NEW ltd_client( ).
@@ -115,6 +132,8 @@ test('deploy, build, unit tests, boot and a roundtrip on the published @abap2ui5
   delete process.env.A2UI5_MCP_OFFLINE;
   const rt = await import('../lib/runtime.mjs');
   const npm = await import('../lib/npm-backend.mjs');
+  // A2UI5_MCP_TEST_RUNTIME_TGZ: a local build of the package instead of the registry's
+  Object.assign(process.env, await installLocalRuntime(process.env.A2UI5_MCP_WORKSPACE, { cli: npm.lintCliVersion().version }));
   const timings = {};
   const timed = async (label, fn) => {
     const t0 = Date.now();
@@ -138,10 +157,21 @@ test('deploy, build, unit tests, boot and a roundtrip on the published @abap2ui5
     t.diagnostic(`release ${status.version} (${status.versionSource}), transpiler ${status.transpiler}, express ${status.express}, abaplint ${status.abaplintCli.version}, open-abap-core ${status.openAbapCore.sha} (${status.openAbapCore.source})`);
     const apps = fs.readdirSync(npm.appsDir(status.dir));
     assert.deepEqual(apps.filter((f) => f.endsWith('.mjs')).sort(), ['index.mjs', 'init.mjs', 'zcl_hello_mcp.clas.mjs', 'zcl_hello_mcp.clas.testclasses.mjs']);
+    // every import of a dev module is a dev module beside it or the package's own module -
+    // in the folder of output/ the package has it in - never a second copy of a framework class
+    const exported = path.join(status.dir, 'node_modules', '@abap2ui5', 'node-runtime', 'output');
+    for (const f of apps.filter((x) => /^zcl_.*\.mjs$/.test(x))) {
+      const text = fs.readFileSync(path.join(npm.appsDir(status.dir), f), 'utf8');
+      for (const m of text.matchAll(/^[ \t]*(?:const\s*\{[^}\n]*\}\s*=\s*)?(?:await\s+import\(\s*|import\s+)"([^"]+)"/gm)) {
+        if (m[1].startsWith('./')) assert.ok(apps.includes(m[1].slice(2)), `${f} imports ${m[1]}, which is not in apps/`);
+        else if (m[1].startsWith('@abap2ui5/node-runtime/output/')) assert.ok(fs.existsSync(path.join(exported, decodeURIComponent(m[1].slice('@abap2ui5/node-runtime/output/'.length)))), `${f} imports ${m[1]}, which the package does not have`);
+        else assert.fail(`${f} imports ${m[1]}`);
+      }
+    }
 
     const unit = await timed('run_unit_tests', () => rt.runUnitTests({ className: 'zcl_hello_mcp' }));
     assert.equal(unit.ok, true, `unit: ${JSON.stringify(unit)}`);
-    assert.deepEqual(unit.tests.map((x) => `${x.object} ${x.localClass}->${x.method}`), ['ZCL_HELLO_MCP ltcl_hello->first_call_displays_the_view']);
+    assert.deepEqual(unit.tests.map((x) => `${x.object} ${x.localClass}->${x.method}`).sort(), ['ZCL_HELLO_MCP ltcl_hello->catch_cx_root_catches_runtime', 'ZCL_HELLO_MCP ltcl_hello->first_call_displays_the_view']);
 
     const warm = await timed('build_backend again (warm: transpile only)', () => rt.buildBackend({ mode: 'auto' }));
     assert.equal(warm.ok, true, warm.tail);
@@ -178,13 +208,14 @@ test('deploy, build, unit tests, boot and a roundtrip on the published @abap2ui5
  * INSERTs two rows and SELECTs them back. abap2ui5-unit deploys it on the
  * published package - the table must exist in the runtime's database before
  * the class runs, which only apps/init.mjs's CREATE TABLE makes true. */
-test('a sandbox table: abap2ui5-unit runs a class that INSERTs into and SELECTs from it', { skip: skip || false, timeout: 15 * 60_000 }, () => {
+test('a sandbox table: abap2ui5-unit runs a class that INSERTs into and SELECTs from it', { skip: skip || false, timeout: 15 * 60_000 }, async () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-npm-tabl-'));
   try {
     const project = path.join(base, 'project');
     fs.cpSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'table-app'), project, { recursive: true });
     const env = { ...process.env, A2UI5_MCP_BACKEND: 'npm', A2UI5_MCP_WORKSPACE: path.join(base, 'workspace'), A2UI5_MCP_REMOTE: '0', SAMPLES_CONTROLS_HOME: path.join(base, 'no-corpus') };
     delete env.A2UI5_MCP_RUNTIME_VERSION;
+    Object.assign(env, await installLocalRuntime(env.A2UI5_MCP_WORKSPACE));
     const run = spawnSync(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ci-unit.mjs'), 'src', '--json'], {
       cwd: project, env, encoding: 'utf8', timeout: 14 * 60_000,
     });

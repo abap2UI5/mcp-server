@@ -11,6 +11,8 @@
 // with A2UI5_MCP_SKIP_NETWORK_TESTS=1), exactly like
 // test/npm-integration.test.mjs, whose gate this is. A workspace of its own
 // (a temp dir); with npm's cache warm from that test the install is seconds.
+// A2UI5_MCP_TEST_RUNTIME_TGZ runs it on a local build of the package, as
+// that test does (test/helpers/local-runtime.mjs).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -18,6 +20,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { installLocalRuntime } from './helpers/local-runtime.mjs';
 
 const PORT = 4451;
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -82,6 +85,10 @@ test('app_start / app_act / app_describe operate a real app on @abap2ui5/node-ru
   Object.assign(process.env, env);
   delete process.env.A2UI5_MCP_RUNTIME_VERSION;
   delete process.env.AI_DEMOKIT_HOME;
+  // A2UI5_MCP_TEST_RUNTIME_TGZ: a local build of the package instead of the registry's
+  const { lintCliVersion } = await import('../lib/npm-backend.mjs');
+  Object.assign(env, await installLocalRuntime(env.A2UI5_MCP_WORKSPACE, { cli: lintCliVersion().version }));
+  Object.assign(process.env, env);
   const rt = await import('../lib/runtime.mjs');
   const { createAppClient } = await import('../lib/appclient.mjs');
   const log = [];

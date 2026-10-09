@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+- **The npm backend builds on the transpiler 2.14 layout.** abap2UI5's
+  next release moves to @abaplint/transpiler-cli and @abaplint/runtime
+  2.14.2 (abap2UI5/abap2UI5#2864), which writes no flat output folder any
+  more: the transpile's input goes into `output/project/`, each library
+  into a folder of its own (`output/open-abap-core/`,
+  `output/express-icf-shim/`), and a class imports another origin's
+  module by a relative path into that folder
+  (`await import("../open-abap-core/cx_root.clas.mjs")`). The build's
+  `rewriteImports` only knew `./<file>` and pointed it at
+  `@abap2ui5/node-runtime/output/<file>`, which no longer exists - every
+  dev app would have failed to build. The build now tells the two layouts
+  apart (`outputLayout`): a flat release (1.146.0 and earlier) builds as
+  before; a folder-layout one has its dev apps copied by the package's own
+  `setup/own-apps.mjs`, run as a child, which points every import at
+  `@abap2ui5/node-runtime/output/<folder>/<file>` - the package indexes
+  its own folders, so mcp-server keeps no copy of that logic. `apps/`
+  stays flat (the runner's `./project/` test modules are rewritten beside
+  it), a transpiler whose layout is not the package's fails the build,
+  and the check for a stray import now also catches a `../<folder>/` one,
+  on whatever wrote `apps/`. `app_list` finds class modules one folder
+  down (the package's `output/project/`, a checkout's `node/output/project/`),
+  and the prebuilt download refuses a `backend-<version>.tar.gz` whose
+  layout is not the one the checkout's locked transpiler writes (a
+  checkout past the switch whose version's release predates it) - auto
+  builds the framework itself instead. The integration tests run on a
+  local build of the package with `A2UI5_MCP_TEST_RUNTIME_TGZ`, and pin
+  the property that matters: every import in `apps/` resolves to a dev
+  module or the package's own file, and a `CATCH cx_root` in the app's
+  unit test catches a runtime exception. Proven on the package built from
+  abap2UI5/abap2UI5#2864 (transpiler 2.14.2) and on the published 1.146.0
+  (2.13.93).
 - **The answer guard shrinks in near-linear time.** `guardAnswer` (and
   `fitObject`) halved the largest array or string of an over-budget JSON
   answer in a loop that re-serialised the whole value twice per cut, and a
