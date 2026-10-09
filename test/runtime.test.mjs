@@ -800,3 +800,29 @@ test('createErrorLog lists distinct errors in order and says nothing was cut', (
   assert.equal(empty.length, 0);
   assert.deepEqual(empty.list(), []);
 });
+
+/* scope_of without the OpenUI5 checkout its script reads: every OpenUI5
+ * entity came back "UNRESOLVED (no source .js found - check the entity name
+ * / fork checkout)", sap.m.Wizard included, which reads like a misspelt
+ * name. The answer now says the checkout is missing and where it belongs. */
+test('scope_of names a missing OpenUI5 checkout as the reason for UNRESOLVED', async () => {
+  const { scopeOfNote, openui5Dir } = await import('../lib/runtime.mjs');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-scope-'));
+  const saved = process.env.OPENUI5_SRC;
+  try {
+    const out = 'sap.m.Wizard                       UNRESOLVED (no source .js found — check the entity name / fork checkout)';
+    delete process.env.OPENUI5_SRC;
+    assert.equal(openui5Dir(path.join(root, 'samples-controls')), path.join(root, 'fork-openui5'), 'the script\'s default: beside the corpus');
+    const dir = path.join(root, 'openui5');
+    process.env.OPENUI5_SRC = dir;
+    assert.equal(openui5Dir(path.join(root, 'samples-controls')), dir);
+    assert.match(scopeOfNote(out, dir), /^the OpenUI5 checkout scope_of reads the JSDoc from is not there \(.*openui5[\\/]src is missing\), so every OpenUI5 entity reads UNRESOLVED whatever its name - clone https:\/\/github\.com\/SAP\/openui5 there .*OPENUI5_SRC/);
+    assert.equal(scopeOfNote('sap.m.Wizard   IN SCOPE (since 1.30)', dir), null, 'nothing unresolved: nothing to explain');
+    fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
+    assert.equal(scopeOfNote(out, dir), null, 'with the checkout there, UNRESOLVED is about the name');
+  } finally {
+    if (saved === undefined) delete process.env.OPENUI5_SRC;
+    else process.env.OPENUI5_SRC = saved;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

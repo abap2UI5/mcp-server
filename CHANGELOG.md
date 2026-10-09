@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **`scope_of` says when the OpenUI5 checkout is what is missing.**
+  Without the checkout samples-controls' `scripts/scope-of.mjs` reads
+  the JSDoc from (`OPENUI5_SRC`, else `fork-openui5` beside the corpus),
+  every OpenUI5 entity came back "UNRESOLVED (no source .js found - check
+  the entity name / fork checkout)", `sap.m.Wizard` included - an answer
+  that reads like a misspelt name. It now says the checkout is not there,
+  where it belongs, and that `validate_view` answers the 1.71 question for
+  a view without it.
 - **`run_app` and `interact_app` say when UI5 itself did not load.** The
   UI5 runtime comes from the corpus' `@openui5` packages or the CDN, and a
   failed load of it was in no report: with `sdk.openui5.org` out of reach

@@ -75,6 +75,7 @@ import {
   listDevApps,
   lintApp,
   runScopeOf,
+  scopeOfNote,
   buildBackend,
   buildLog,
   backendBuilt,
@@ -991,7 +992,8 @@ async function handle(name, args = {}, ctx = {}) {
        * spawn as a TypeError nobody can act on. */
       const entities = stringArray(args.entities, { name: 'entities' });
       const { code, out } = await runScopeOf(entities, { signal: ctx.signal });
-      return text(`${out}\n\n(exit ${code}: 0 = all in scope, 1 = at least one out of scope or unresolved)`);
+      const note = scopeOfNote(out);
+      return text(`${out}\n\n(exit ${code}: 0 = all in scope, 1 = at least one out of scope or unresolved)${note ? `\n\n${note}` : ''}`);
     }
     case 'deploy_app': {
       const miss = missingSandbox();
