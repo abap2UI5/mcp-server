@@ -89,7 +89,7 @@ cd bench
 npm ci                 # the gates, at the template's versions
 # the render gate needs a Chromium: Playwright's (npx playwright install chromium,
 # or PLAYWRIGHT_BROWSERS_PATH pointing at one) or CHROMIUM_BIN
-node verify.mjs        # pins resolve, 20 references pass, 7 broken variants fail as intended
+node verify.mjs        # pins resolve, 20 references pass, 8 broken variants fail as intended
 node run.mjs --dry-run --concurrency 4   # the whole pipeline with the references as the "agent": 80 trials, must be 100%
 ```
 

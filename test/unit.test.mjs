@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { stripJsonc, LOCAL_BENIGN, benignRules, deployApp, removeApp } from '../lib/runtime.mjs';
 import { parseCapabilities, searchCapabilities } from '../lib/capabilities.mjs';
-import { parseExamples, searchExamples, catalogueEntries, CATALOGUES, matchRow } from '../lib/examples.mjs';
+import { parseExamples, searchExamples, catalogueEntries, derivedControls, CATALOGUES, matchRow } from '../lib/examples.mjs';
 import { CORPUS_DIRS, resolveLintConfig, viewCheckCandidates, SERVER_ROOT } from '../lib/repos.mjs';
 import { sliceCatalogue } from '../lib/pitfalls.mjs';
 import { sliceGuide, guideChapters } from '../lib/guide.mjs';
@@ -1045,6 +1045,40 @@ test('a JSON that is not the catalogue answers null, never a throw', () => {
   assert.equal(some.length, 1);
 });
 
+/* catalogue.json is another repository's output: a field of an unexpected
+ * type (a numeric title, an object summary, keywords that are a number)
+ * threw out of .trim() and cost the whole catalogue - in a search over a
+ * fixture, the call. Each field is coerced or dropped instead; an entry
+ * whose class is not a name is skipped. */
+test('a catalogue field of an unexpected type is coerced or dropped, never a throw', () => {
+  const odd = { title: 42, description: { x: 1 }, category: 7, summary: ['a'], keywords: 3, docs: [5, null, 'https://abap2ui5.github.io/docs/cookbook/x.html'], stage: true, file: 99 };
+  const [s] = catalogueEntries({ samples: [{ class: 'z2ui5_cl_odd', ...odd }, { class: 12 }, { class: { a: 1 } }] }, 'samples');
+  assert.equal(s.cls, 'Z2UI5_CL_ODD');
+  assert.equal(s.title, '42');
+  assert.equal(s.sub, '');
+  assert.equal(s.section, '7');
+  assert.equal(s.summary, '');
+  assert.equal(s.keywords, '3');
+  assert.deepEqual(s.docs.map((d) => d.url), ['5', 'https://abap2ui5.github.io/docs/cookbook/x.html']);
+  assert.equal(s.path, '99');
+  const numeric = catalogueEntries({ samples: [{ class: 12 }, { class: { a: 1 } }, { class: '  ' }] }, 'samples');
+  assert.deepEqual(numeric.map((e) => e.cls), ['12'], 'a class that is an object or blank is no sample; a number is coerced like any field');
+  const [c] = catalogueEntries({ ports: [{ class: 'z2ui5_cl_p', entity: 5, title: null, keywords: { k: 1 }, status: 3, deviations: [1, { d: 1 }, 'kept'] }] }, 'samples-controls');
+  assert.equal(c.title, '5');
+  assert.equal(c.label, '5');
+  assert.equal(c.keywords, '');
+  assert.equal(c.status, '3');
+  assert.deepEqual(c.deviations, ['1', 'kept']);
+  const [k] = catalogueEntries({ samples: [{ class: 'z2ui5_cl_s', title: ['x'], technology: 1, needs: ['OData', 2], path: null }] }, 'samples-stack');
+  assert.equal(k.title, '');
+  assert.equal(k.technology, '1');
+  assert.deepEqual(k.needs, ['OData', '2']);
+  assert.equal(k.path, '');
+  // and a search over such a catalogue answers instead of throwing
+  const hits = searchExamples({ query: '42', repo: 'samples', rawCatalogue: { samples: [{ class: 'z2ui5_cl_odd', ...odd }] } });
+  assert.deepEqual(hits.map((e) => e.cls), ['Z2UI5_CL_ODD']);
+});
+
 test('a verified port outranks an unverified one when the relevance ties', () => {
   /* Same keyword hit on every port, statuses deliberately in the wrong order
    * in the file - between two equally relevant ports, the one a human has
@@ -1070,6 +1104,70 @@ test('a verified port outranks an unverified one when the relevance ties', () =>
   const named = searchExamples({ query: 'gadget0', repo: 'samples-controls', rawCatalogue: mixed });
   assert.equal(named[0].title, 'sap.m.Gadget0');
   assert.equal(named[0].status, 'generated');
+});
+
+/* catalogue-derived.json (samples-controls, samples) lists every control
+ * type a sample's view BUILDS. The catalogue's own words name what a port is
+ * filed under, so "sap.m.Dialog" found 7 of the 33 ports that build one. A
+ * term found among the built controls matches too, ranks below one found in
+ * the catalogue's words, and the hit names what it was found by. */
+test('examples finds a sample by a control its view builds (catalogue-derived.json)', () => {
+  const cat = {
+    ports: [
+      { class: 'z2ui5_cl_smpc_app_001', file: 'src/01/01/z2ui5_cl_smpc_app_001.clas.abap', library: 'sap.m', entity: 'sap.m.Dialog', title: 'Dialog', summary: 'a dialog', keywords: 'dialog sap.m', status: 'generated' },
+      { class: 'z2ui5_cl_smpc_app_002', file: 'src/01/01/z2ui5_cl_smpc_app_002.clas.abap', library: 'sap.m', entity: 'sap.m.PlanningCalendar', title: 'Planning Calendar', summary: 'appointments', keywords: 'planningcalendar sap.m', status: 'checked' },
+      { class: 'z2ui5_cl_smpc_app_003', file: 'src/01/01/z2ui5_cl_smpc_app_003.clas.abap', library: 'sap.m', entity: 'sap.m.Bar', title: 'Bar', summary: 'a bar', keywords: 'bar sap.m', status: 'checked' },
+    ],
+  };
+  const derived = {
+    controls: ['sap.m.Dialog', 'sap.m.Button', 'sap.m.PlanningCalendar', 'sap.m.Bar'],
+    ports: [
+      { class: 'z2ui5_cl_smpc_app_001', controls: [0, 1] },
+      { class: 'z2ui5_cl_smpc_app_002', controls: [2, 0, 1] },
+      { class: 'z2ui5_cl_smpc_app_003', controls: [3] },
+    ],
+  };
+  const q = (query, rawDerived = derived) => searchExamples({ query, repo: 'samples-controls', rawCatalogue: cat, rawDerived });
+  // without the derived file: only the port whose catalogue words say so
+  assert.deepEqual(q('sap.m.Dialog', null).map((e) => e.cls), ['Z2UI5_CL_SMPC_APP_001']);
+  // with it: the calendar that builds a Dialog too, ranked below the port about one
+  const hits = q('sap.m.Dialog');
+  assert.deepEqual(hits.map((e) => e.cls), ['Z2UI5_CL_SMPC_APP_001', 'Z2UI5_CL_SMPC_APP_002']);
+  assert.deepEqual(hits[1].builds, ['sap.m.Dialog'], 'the hit names the control it was found by');
+  // AND across both halves: a catalogue word and a built control
+  assert.deepEqual(q('appointments button').map((e) => e.cls), ['Z2UI5_CL_SMPC_APP_002']);
+  // the full control list never travels in the answer
+  assert.ok(!JSON.stringify(q('bar')).includes('PlanningCalendar'), 'only the matched controls are named');
+  assert.equal(JSON.stringify(q('appointments')[0]).includes('builds'), false, 'a hit not found by a control names none');
+  // a hit whose catalogue words carry every term names no `builds`, even
+  // when its view builds a match: the field says what a hit was found BY
+  assert.equal(q('sap.m.Dialog')[0].builds, undefined, 'the Dialog port was found by its own words');
+  // the samples shape keys its list `samples`; anything else is no derived file
+  assert.equal(derivedControls({ controls: ['sap.m.Table'], samples: [{ class: 'z2ui5_cl_smp_app_001', controls: [0] }] }).get('Z2UI5_CL_SMP_APP_001')[0], 'sap.m.Table');
+  for (const bad of [null, {}, { controls: 'x' }, { controls: [] }, { controls: [], ports: 'x' }]) assert.equal(derivedControls(bad), null, JSON.stringify(bad));
+});
+
+/* A hit found in the catalogue's own words for EVERY term ranks above one
+ * that needed the built controls for a term - whatever their keyword hits.
+ * The keyword score came first, so a port with "dialog" among its keywords
+ * that merely builds a Select outranked one whose words carry both terms:
+ * "select dialog" moved a match of the catalogue's words off the first
+ * page. The catalogue-word matches keep the order they had without the
+ * derived file, and the rest follow. */
+test('examples ranks every match in the catalogue\'s own words above one that needed the built controls', () => {
+  const cat = {
+    ports: [
+      { class: 'z2ui5_cl_smpc_app_011', file: 'src/a.clas.abap', library: 'sap.m', entity: 'sap.m.Panel', title: 'Panel', summary: 'select a dialog option', keywords: 'panel', status: 'generated' },
+      { class: 'z2ui5_cl_smpc_app_012', file: 'src/b.clas.abap', library: 'sap.m', entity: 'sap.m.Dialog', title: 'Dialog', summary: 'a dialog', keywords: 'dialog popup', status: 'checked' },
+    ],
+  };
+  const derived = { controls: ['sap.m.Select', 'sap.m.Dialog'], ports: [{ class: 'z2ui5_cl_smpc_app_011', controls: [0] }, { class: 'z2ui5_cl_smpc_app_012', controls: [0, 1] }] };
+  const without = searchExamples({ query: 'select dialog', repo: 'samples-controls', rawCatalogue: cat }).map((e) => e.cls);
+  assert.deepEqual(without, ['Z2UI5_CL_SMPC_APP_011']);
+  const hits = searchExamples({ query: 'select dialog', repo: 'samples-controls', rawCatalogue: cat, rawDerived: derived });
+  assert.deepEqual(hits.map((e) => e.cls), ['Z2UI5_CL_SMPC_APP_011', 'Z2UI5_CL_SMPC_APP_012'], 'the catalogue-word match first, as without the derived file');
+  assert.equal(hits[0].builds, undefined);
+  assert.deepEqual(hits[1].builds, ['sap.m.Select'], 'only the control the hit needed - not the Dialog its words already name');
 });
 
 /* Which FILE answers, pinned against a checkout on disk: catalogue.json where
@@ -1902,6 +2000,24 @@ test('validate_view falls back to the property gate when the render gate cannot 
  * fallback above, which answered the property findings alone with a note
  * that the render gate "could not start". Composed the way validate_view
  * composes them. */
+/* The hint explained an event without a handler whenever any hint was left
+ * - beside an unused namespace or get_event_arg( 1 ), which have nothing to
+ * do with events (seen on bench task 13's reference and samples-controls
+ * 533) - and never pointed at fix_view for the fixable ones. */
+test('the validate_view hint is about the findings that are left', async () => {
+  const { validateHint } = await import('../lib/validate.mjs');
+  const ns = { type: 'unused-namespace-declaration', severity: 'hint', fixable: true };
+  const ev = { type: 'event-without-handler', severity: 'hint' };
+  const old = { type: 'member-too-new', severity: 'warning' };
+  assert.equal(validateHint({ error: 0, warning: 0, hint: 1 }, [ns]), 'hints are advisory, ok stays true; fix_view clears the ones marked fixable: true');
+  assert.equal(validateHint({ error: 0, warning: 0, hint: 1 }, [ev]), 'hints are advisory, ok stays true - an event without a handler is intended when the roundtrip alone is the point');
+  assert.doesNotMatch(validateHint({ error: 0, warning: 0, hint: 1 }, [ns]), /event/, 'no event talk without an event finding');
+  assert.match(validateHint({ error: 0, warning: 1, hint: 1 }, [old, ns]), /^what is left is about the UI5 version you target.*; fix_view clears the ones marked fixable: true$/);
+  assert.doesNotMatch(validateHint({ error: 0, warning: 1, hint: 0 }, [old]), /fix_view/);
+  assert.equal(validateHint({ error: 1, warning: 0, hint: 0 }, []), undefined);
+  assert.equal(validateHint({ error: 0, warning: 0, hint: 0 }, []), undefined);
+});
+
 test('validate_view retries a throwing warm renderer cold before falling back', async () => {
   const { withRenderFallback, warmThenCold } = await import('../lib/validate.mjs');
   const calls = [];

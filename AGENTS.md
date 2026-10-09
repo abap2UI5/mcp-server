@@ -68,7 +68,9 @@ no GitHub mirror either), `A2UI5_MCP_CHROMIUM` (browser path; `CHROMIUM_BIN`,
 the linter's variable, is read after it — then Playwright's managed browser,
 then a system binary, `resolveChromium`),
 `A2UI5_MCP_SCREENSHOT_DIR` (where `run_app` and `interact_app` write their
-PNGs; default `<tmp>/abap2ui5-mcp-screenshots`, and deliberately not the
+PNGs - the newest `SHOTS_KEPT` (50) of them, older ones of that name
+pattern are removed after each picture, no other file ever is; default
+`<tmp>/abap2ui5-mcp-screenshots`, and deliberately not the
 install directory — that is inside `node_modules` for an npx/npm install;
 the default is used only while it is a real directory of the user's own,
 created 0700 - otherwise the PNG is returned but not saved, under
@@ -151,7 +153,10 @@ Four rules, each pinned by `test/remote.test.mjs` and
   mirror the stale copy stands in (`stale: true`); without one the tool
   degrades with its usual message plus the reason (`remoteStatus`). A
   half-fetched mirror is never written: every file arrives first, then all of
-  them are written, then the marker.
+  them are written, then the marker. A failure is the answer for
+  `FAILURE_BACKOFF_MS` (3 min) before the download is tried again - every
+  tool call hydrates, and a network that swallows requests cost each call
+  the 20 s fetch timeout once more.
 
 `read_example` is the tool that made the mirror worth having: an `examples`
 hit is a class name and a path, and an agent without the checkout could not
@@ -304,8 +309,27 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
   `test/runtime.test.mjs` fails on a `localhost` in the code of
   `server.mjs`, `lib/` or `scripts/`. It prints a banner (release, dev modules,
   accelerate, compression - `backend status` shows it) and the "Listening
-  on" the start waits for. Start, stop, port and orphan handling are the
-  checkout's, unchanged.
+  on" the start waits for - and over a port another process holds, an
+  error and exit 1 instead: it listens on a plain `http.Server`, never
+  through express' `app.listen()`, whose callback express 5 also calls with
+  the bind error (the host said "Listening on", exited, and the port wait
+  was answered by the other process). `startBackend` fails a child that
+  exits within `LIVENESS_MS` (0.5 s) of its "Listening on", on both
+  backends - the port's owner answers the port wait at once, before the
+  exit is seen, so the wait alone lost that race; a backend that dies
+  later is caught by the next call (its sessions' generation). Start, stop,
+  port and orphan handling are the checkout's, unchanged. The child's
+  environment is an ALLOWLIST (`appChildEnv` - PATH, home, temp, TZ and
+  locale, the Node/TLS/proxy variables, the Windows system ones; the list
+  and why each is there sit beside `CHILD_ENV_ALLOW` in `lib/runtime.mjs`),
+  the same for the unit-test runner: both run the app, and `@KERNEL` reaches
+  `process.env`. Plus `PORT` and `HOST`, and never `ALLOWED_HOSTS`
+  (`backendEnv`): the framework's `express.mjs` reads `*` there as "no
+  DNS-rebinding guard". A variable an app needs is the app's to carry, not
+  a reason to widen the list - widen it only with the reader named. The build,
+  lint, git and npm children keep the full environment: they run no app
+  code, and git and npm need their own configuration (`GIT_*`,
+  `npm_config_*`, credential helpers, the proxy).
 - **Unit tests**: `apps/index.mjs`, filtered like the checkout's runner.
   NEVER the package's `output/index.mjs` - that is the framework's own suite.
 - **Lint**: app-template's `abaplint.jsonc` retargeted
@@ -524,6 +548,13 @@ share a tool name inside one server.
   refusal reads as itself rather than as "the backend did not answer". The
   `401`'s body is replaced by a sentence (the system's logon page is HTML
   noise) - the client shows it as `HTTP 401: ...`.
+- **`system_status` wants the start page, not any 200.** An ICF node
+  with a form logon answers Basic credentials it does not take with its
+  HTML logon page - a 200 - and that read as "accepted the logon".
+  `checkSystem` now requires the component the framework's shell declares
+  (`data-name="z2ui5"`, or the bootstrap's `"z2ui5": "./"` resource root -
+  `z2ui5_cl_ui5_http_handler=>_http_get`, `isStartPage`); the endpoint's
+  path alone is no marker, a logon page's form action carries it.
 - **A misconfiguration starts the server.** `systemConfig` collects
   `problems` instead of throwing, and every tool answers with them: in a
   desktop client the tool answer is the only place a user sees anything.
@@ -685,6 +716,17 @@ changes upstream, this repo must change in the same breath:
   (`lib/examples.mjs` `catalogueEntries`) folds them into the single entry
   shape the row parser produces; a shape change upstream is a change here. A
   JSON that does not parse falls back to the page below, never to an error.
+- samples and samples-controls: **`catalogue-derived.json`** beside it - what
+  the linter knows about each class, keyed by `class`; `examples` reads its
+  `controls` dictionary and each entry's `controls` indices (the list is
+  `ports[]` in samples-controls, `samples[]` in samples - `derivedControls`
+  in `lib/examples.mjs`), so a query matches the control types a view
+  BUILDS, ranked below every match in the catalogue's own words (which
+  keep the order they have without the file), named under `builds` only on
+  a hit that needed them and counted under `foundByBuilds`. Optional on both sides: a checkout or mirror without it searches
+  as before (`REMOTE_OPTIONAL` in `lib/remote.mjs` - a mirror carries it when
+  the repository has it and is never refused for its absence), and a shape
+  change is the search without it, not an error.
 - the same three repos: the `SAMPLES.md` **row shape** —
   `| **title** — sub<br>summary<br><sub>keywords</sub> | [`CLASS`](path) |`.
   All three generate it identically and one parser reads all three
@@ -908,7 +950,9 @@ agent) find these artifacts in a dirty sibling worktree, mcp-server caused them:
   folder `.abapgit.xml` names, never through a symbolic link out of the
   project, and never the file system root, the home directory, this
   server's installation, the template checkout, the mirror cache or the
-  workspace (`agentTargetProblem`).
+  workspace (`agentTargetProblem`; on Windows compared case-insensitively,
+  `pathWithin` - neither the resolved path nor the home directory comes back
+  there in one canonical case).
 - `<tmp>/abap2ui5-mcp-remote/<repo>/` — the read-only GitHub mirrors (not a
   sibling worktree, but the same question "where did this come from": a
   directory that carries `.abap2ui5-mirror.json` is one, and deleting it is
@@ -1056,6 +1100,15 @@ legitimately slower.
   reaching the client as the read request's JSON-RPC error —
   `test/missing-siblings.test.mjs` pins both). The resources hand over the
   same documents the tools slice; nothing may be bundled or paraphrased here.
+  A third rule since the abap-check catalogue passed 100,000 characters:
+  **a read fits the answer budget too** (`fitResourceText`): a document past
+  `ANSWER_BUDGET` is cut at a `## ` heading (else `### `, else a line end)
+  and ends in a note naming the call that pages the same document from the
+  first section left out - the offset counted by that tool's own slicer
+  (`sliceGuide`, `sliceCatalogue`), so `test/paging.test.mjs` can check that
+  offset k - 1 is the last section shown. A JSON resource is shrunk as JSON;
+  the MCP Apps screen is HTML a host renders and is never cut. A new
+  document resource names its `rest`.
 - **The prompt surface: `lib/prompts.mjs`, two prompts, deliberately no
   more** — `build-an-abap2ui5-app` and `port-a-ui5-sample`, one per job this
   server serves (the same split app_guide vs generation_rules draws). A
@@ -1106,10 +1159,66 @@ legitimately slower.
   a tool result over 25,000 tokens and the agent then sees nothing at all.
   `lib/budget.mjs` (`ANSWER_BUDGET`, about 60,000 characters) is what the
   tools that can grow past it page against — `scaffold_app` (`files`),
-  `pitfalls` and `examples` (`offset`) — and each page names the arguments
-  that fetch the rest; `test/paging.test.mjs` walks the pages to the end
-  over fake checkouts. A tool whose answer can grow with upstream content
-  pages the same way, never by dropping content.
+  `pitfalls`, `app_guide`, `examples`, `capabilities` and `api_reference`
+  (`offset`, all but `pitfalls` with `limit`; `app_guide` and `pitfalls`
+  by chapter / section, never cut) — and each page names the arguments that fetch
+  the rest; `read_app` and `read_example` (`from_line`) and `build_log` (`offset`, its `cut`
+  names the call) page by line, a log line past `LOG_LINE_SHOWN` shown
+  cut, and `build_backend`'s 30-line tail shortens each long line;
+  `validate_view` and `fix_view` list the most severe findings that fit
+  (`fitFindings`; the counts stay whole, `findingsCut` / `remainingCut`
+  say what was left - a validator needs no paging, the agent fixes and
+  validates again); `run_unit_tests` counts a long run's tests per object instead;
+  `verify_app`, whose stages are those tools' answers, fits them together
+  once more (`fitVerifyStages`);
+  `docs_search` pages by `offset` (at most 50 pages a call);
+  `test/paging.test.mjs` walks the pages to the end over fake checkouts.
+  **One vocabulary for it, in every tool** - an agent learns it once:
+  `matches` counts every hit and `returned` the page; `offset` (echoed
+  when not 0) and `more`, a sentence naming the exact next call, page the
+  lists; the line-paged reads name their next `from_line` (`read_app`:
+  `lines` + `next`; `read_example`: `page` + `nextPage`, because its
+  `lines` and `next` were taken before it paged) and answer a `from_line`
+  past the end with `pastEnd`; a list that is cut rather than paged says
+  what was left out in a `...Cut` sentence (`findingsCut`, `rulesCut`,
+  `remainingCut`, `fixedCut`, `errorsCut`, `screenshotCut`, `build_log`'s
+  `cut`; the backstop's `__answerGuardCut`). Older names outside it, kept
+  because a client reads them: `scaffold_app`'s `remaining`,
+  `migrate_report`'s `files_left_out` (its fields are snake_case),
+  `run_unit_tests`' `testsPerObject` + `testsNote`, `screenshot_view`'s
+  per-view `notAttached`. A new paging field takes one of these names, and
+  the tool description says it - `test/tool-surface.test.mjs` fails on a
+  `...Cut` field the code answers that this list or the tool's description
+  does not name, and on a paging argument a description does not mention. A
+  tool whose answer can grow with upstream content pages the same way, never
+  by dropping content. **Measure what is sent**: `text()` writes indented
+  JSON, so a size is `sizeOf` (with the `depth` an item sits at in the
+  answer), never `JSON.stringify(x).length` - the compact size let a
+  600-test run through at 68,000 characters.
+- **Every answer leaves through ONE place, and that place is guarded.**
+  `server.mjs` registers a single tools/call handler, `answerToolCall` =
+  `guardAnswer(await dispatchToolCall(...))` (lib/budget.mjs): the system
+  mode, the sandbox tools and the error of a throw all pass the backstop,
+  which also holds the pictures of one answer to `IMAGE_BUDGET`. Do not
+  register a second handler, return from around it, or answer tools through
+  the SDK's high-level `registerTool`: `test/answer-guard.test.mjs` reads
+  the registration and sweeps every tool name over stdio under a loader hook
+  (`test/helpers/guard-probe.mjs`) that marks what guardAnswer returned - an
+  unmarked answer fails it.
+- **A checkout file is read and written through `lib/contain.mjs`.** A
+  checkout is untrusted content, and a repository can ship a symbolic link:
+  `insideRoot` / `readInside` refuse a path that resolves outside its
+  checkout (a DANGLING link counts as outside - a write through it creates
+  its target), `writeNoFollow` / `writeInside` open with `O_NOFOLLOW` so a
+  link in the last component fails the write instead of redirecting it.
+  A new reader of a checkout document, a new writer into the sandbox or a
+  checkout, uses them; `test/security.test.mjs` plants the links.
+- **`migrate_report` refuses open-abap's `@KERNEL` escape.** `WRITE
+  '@KERNEL <js>'.` writes text on SAP and runs `<js>` once transpiled;
+  `transpilerHazards` (lib/migrate.mjs) finds it in the report (comments
+  aside) and in the converter's output, before anything is converted or
+  written. A dynamic `LOOP ... WHERE (cond)` is converted and flagged
+  (`warnings`): @abaplint/runtime eval()s the condition.
 - **Never `npx <tool>` inside a checkout.** Under an MCP client stdin is no
   TTY, so npx answers its own install prompt and runs whatever the registry
   holds under that name when the checkout has no local bin — `abap_transpile`

@@ -309,6 +309,19 @@ All errors are ordinary tool results with `isError: true` and a sentence
 naming what was wrong **and what is allowed**. A refused operation sends
 nothing and changes nothing.
 
+`format: "adaptive-card"` adds the screen as an Adaptive Card after the
+snapshot ([below](#the-screen-in-the-chat-mcp-apps-and-adaptive-cards)).
+
+**Answer size.** A snapshot is answered as compact JSON and fitted to one
+tool answer (about 60,000 characters - `fitSnapshot` in `lib/budget.mjs`;
+a client shows nothing of an answer over its cap): past it, string values
+over 2,000 characters are cut (the field becomes `editable: false` in that
+answer, a column with a cut cell leaves `editableCells`), then rows are
+dropped from the end of the largest table (`truncated: true`, `rowCount`
+still counts them all), and a second text block - `cut to fit one answer:
+...` - names what was cut. Only the answer is cut: the client keeps the
+whole screen, so `app_act` still validates against every row and value.
+
 ### `app_list({ filter? })`
 
 The classes that implement `z2ui5_if_app` **in the build** —
@@ -317,18 +330,18 @@ transpiled output (a module defining `async z2ui5_if_app$main(`), so an app
 deployed after the last build is not listed. ABAP: the implementers of
 `z2ui5_if_app`, filtered by the addon's opt-in rules.
 
-### `app_start({ app, values?, max_rows? })` → snapshot
+### `app_start({ app, values?, max_rows?, format? })` → snapshot
 
 Starts the class (the app-start POST). `values` are applied as pending edits
 afterwards (validated against the first snapshot); the app runs either way,
 so a refusal of them names the session it started. Node starts the local
 backend first, like `run_app`.
 
-### `app_describe({ session, max_rows? })` → snapshot
+### `app_describe({ session, max_rows?, format? })` → snapshot
 
 The current state from the last response kept — no roundtrip.
 
-### `app_act({ session, values?, event?, args?, row?, max_rows? })` → snapshot
+### `app_act({ session, values?, event?, args?, row?, max_rows?, format? })` → snapshot
 
 1. **Validate**, before anything changes:
    - `values` keys resolve to a field by `id`, `path` or `name`
@@ -576,7 +589,11 @@ default:
   once the backend handed them out - the session's `sap-contextid` and the
   `x-csrf-token`). `method: 'HEAD'` is the CSRF token fetch
   (`x-csrf-token: Fetch`, no body). `signal` is the client's timeout
-  (`timeoutMs`, 120 s, one for the roundtrip and its handshake), `draftId`
+  (`timeoutMs`, 120 s, one for the roundtrip and its handshake) - combined
+  with the caller's own `signal` when `start(app, { signal })` or
+  `act(session, { signal })` passed one (the MCP server passes the request's,
+  so a client's cancel aborts the roundtrip; the act is then refused as
+  cancelled and its edits taken back) - `draftId`
   the `S_FRONT.ID` the request continues — `null` for an app start. Its
   answer is `{ status, headers?, body }`; the client reads `sap-contextid`
   and `x-csrf-token` from `headers` (any case, a repeated header joined), a

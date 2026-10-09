@@ -294,3 +294,35 @@ test('the stdio suites derive their name lists instead of keeping copies', () =>
     assert.ok(!/\[\s*'app_guide'/.test(text), `${file} keeps a hand-written tool-name list again`);
   }
 });
+
+/* A tool description is the only documentation the agent reads, and the
+ * paging was added tool by tool - examples, docs_search, pitfalls, read_app
+ * and read_example declared `offset` / `from_line` without their
+ * descriptions saying a word about paging, and four `...Cut` fields the
+ * answers carry were named nowhere an agent looks. The cheap half of
+ * keeping that true: every paging argument a schema declares is named in
+ * its tool's description, and every `...Cut` field the code answers with is
+ * in AGENTS.md's vocabulary and in some tool's description. */
+test('every paging argument a tool declares is named in its description', () => {
+  for (const t of [...TOOLS, ...SYSTEM_TOOLS]) {
+    for (const arg of ['offset', 'from_line', 'files']) {
+      if (!(t.inputSchema.properties || {})[arg]) continue;
+      assert.match(t.description, new RegExp(`\\b${arg}\\b`), `${t.name} declares ${arg} and its description never says it pages`);
+    }
+  }
+});
+
+test('every ...Cut field the answers carry is in the AGENTS.md vocabulary and in a tool description', () => {
+  const code = [path.join(ROOT, 'server.mjs'), ...fs.readdirSync(path.join(ROOT, 'lib')).filter((f) => f.endsWith('.mjs')).map((f) => path.join(ROOT, 'lib', f))]
+    .map((f) => fs.readFileSync(f, 'utf8')).join('\n');
+  const fields = [...new Set([...code.matchAll(/\b([a-z][A-Za-z]*Cut)\b\s*(?=:|\}|,)/g)].map((m) => m[1]))];
+  assert.ok(fields.length >= 5, `found only ${fields.join(', ')} - the pattern no longer sees the answers`);
+  const agents = fs.readFileSync(path.join(ROOT, 'AGENTS.md'), 'utf8');
+  const vocabulary = /One vocabulary for it, in every tool[\s\S]*?A new paging field takes one of these names/.exec(agents);
+  assert.ok(vocabulary, 'AGENTS.md lost its paging vocabulary paragraph');
+  const descriptions = [...TOOLS, ...SYSTEM_TOOLS].map((t) => t.description).join('\n');
+  for (const f of fields) {
+    assert.ok(vocabulary[0].includes(`\`${f}\``), `${f} is answered but missing from AGENTS.md's paging vocabulary`);
+    assert.ok(descriptions.includes(`\`${f}\``), `${f} is answered but no tool description names it`);
+  }
+});

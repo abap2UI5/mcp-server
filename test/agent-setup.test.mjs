@@ -18,6 +18,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import {
   startingFolder, adaptSourceFolder, mergePackageJson, mergeLines, planAgentSetup, checkSetupPaths, packageNameFor,
+  agentTargetProblem, pathWithin,
 } from '../lib/agent-setup.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -410,6 +411,37 @@ test('refusals leave everything as it was', async () => {
     fs.rmSync(broken, { recursive: true, force: true });
     fs.rmSync(bare, { recursive: true, force: true });
   }
+});
+
+/* Windows compares names case-insensitively, and the realpath and homedir
+ * it hands back keep whatever case they were given - the home and
+ * installation checks compared the strings and let `C:\\USERS\\ME` through
+ * as "not the home directory". Judged with path.win32 over a fake Windows
+ * disk, so the Windows semantics are pinned on every machine. */
+test('the home and forbidden-directory checks fold case under Windows path semantics', () => {
+  const win = path.win32;
+  const dirs = new Set(['c:\\', 'c:\\users', 'c:\\users\\me', 'c:\\users\\me\\proj', 'c:\\tools', 'c:\\tools\\mcp', 'c:\\tools\\mcp\\lib']);
+  const has = (p) => dirs.has(win.normalize(p).toLowerCase().replace(/\\$/, '') || 'c:\\') || dirs.has(win.normalize(p).toLowerCase());
+  const host = {
+    path: win,
+    exists: has,
+    isDirectory: has,
+    realpath: (p) => { if (!has(p)) throw new Error(`ENOENT ${p}`); return win.normalize(p); }, // keeps the case it was given, as Node's does
+    homedir: () => 'C:\\Users\\Me',
+    lexists: has,
+  };
+  const forbidden = [{ dir: 'C:\\Tools\\MCP', what: 'inside this MCP server\'s own installation' }];
+  assert.match(agentTargetProblem('c:\\users\\me', { host, forbidden }), /home directory/);
+  assert.match(agentTargetProblem('C:\\USERS\\ME\\', { host, forbidden }), /home directory/);
+  assert.match(agentTargetProblem('c:\\tools\\mcp\\LIB', { host, forbidden }), /own installation/);
+  assert.match(agentTargetProblem('C:\\', { host, forbidden }), /file system root/);
+  assert.equal(agentTargetProblem('c:\\Users\\me\\Proj', { host, forbidden }), null);
+
+  assert.equal(pathWithin('C:\\Tools\\MCP', 'c:\\tools\\mcp\\x', win), true);
+  assert.equal(pathWithin('C:\\Tools\\MCP', 'c:\\tools\\mcpx', win), false, 'a sibling with a longer name is not inside');
+  // POSIX names are case-sensitive: /home/Me is another directory than /home/me
+  assert.equal(pathWithin('/home/Me', '/home/me/proj', path.posix), false);
+  assert.equal(pathWithin('/home/me', '/home/me/proj', path.posix), true);
 });
 
 test('a template that names a path outside the project, or in its source folder, is refused whole', async () => {

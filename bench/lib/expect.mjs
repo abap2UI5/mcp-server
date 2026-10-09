@@ -88,8 +88,15 @@ export function analyze(sources) {
       });
     }
     const code = scrubAbap(src);
+    /* A call on any receiver but `me`: the class's OWN methods are not the
+     * client API, and the canonical template names its helpers exactly like
+     * the client methods they wrap (METHODS popup_display, popover_display,
+     * view_display). `me->popup_display( )` used to satisfy "calls:
+     * popup_display" with no client->popup_display anywhere (verify/broken/
+     * own-method-not-client). `me->client->popup_display( )` still counts -
+     * its receiver is `client`. */
     const calls = new Set();
-    for (const m of code.matchAll(/->\s*([a-z_][a-z0-9_]*)\s*\(/gi)) calls.add(m[1].toLowerCase());
+    for (const m of code.matchAll(/(?<!\bme\s*)->\s*([a-z_][a-z0-9_]*)\s*\(/gi)) calls.add(m[1].toLowerCase());
     const written = new Set();
     for (const m of src.matchAll(/\bn\s*=\s*[`'](\w+)[`']/g)) written.add(m[1]);
     perClass[cls] = { controls, documents, calls, written, error, docs: prepared ? prepared.docs : [] };

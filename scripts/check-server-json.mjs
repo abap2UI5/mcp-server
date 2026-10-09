@@ -45,10 +45,10 @@ export const NOT_LISTED = {
   ABAP2UI5_MCP_HOME: "the VS Code extension's variable for a checkout of this repository; the server resolves nothing with it",
 };
 
-/** In server.json, but read by a child the server spawns rather than by its own code. */
-export const PASSED_THROUGH = {
-  OPENUI5_SRC: "read by samples-controls' scripts/scope-of.mjs, which scope_of runs with the server's environment",
-};
+/** In server.json, but read by a child the server spawns rather than by its own code.
+ *  (OPENUI5_SRC was, until scope_of read it too: it names the checkout
+ *  scope-of.mjs reads when the answer is UNRESOLVED.) */
+export const PASSED_THROUGH = {};
 
 const ENV_PATTERNS = [
   /process\.env\.([A-Z][A-Z0-9_]*)/g,

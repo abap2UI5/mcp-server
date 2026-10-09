@@ -10,7 +10,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import http from 'node:http';
-import { locate, performAction, settle, trackRequests } from '../lib/runtime.mjs';
+import { locate, performAction, settle, trackRequests, watchUi5, ui5LoadReport } from '../lib/runtime.mjs';
 import { parseActions } from '../lib/interact.mjs';
 
 const PAGE = `<!doctype html><html><body>
@@ -152,4 +152,66 @@ test('an action waits for the roundtrip it started before the next one', async (
     await browser.close().catch(() => {});
     srv.close();
   }
+});
+
+/* UI5 that does not load used to be in no report: run_app answered a boot
+ * timeout and a blank picture when the CDN was out of reach (no local
+ * @openui5 packages, a proxy that refuses sdk.openui5.org), and an app that
+ * booted without its theme was ok with an unstyled one. watchUi5 records the
+ * failed /resources/ requests of the page, ui5LoadReport says what they mean. */
+test('a UI5 bootstrap or theme that does not load is named, with what to do', async (t) => {
+  const browser = await browserOrNull();
+  if (!browser) {
+    t.skip('no Chromium for Playwright on this machine');
+    return;
+  }
+  const srv = http.createServer((req, res) => {
+    if (req.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html' }).end('<!doctype html><html><head>'
+        + '<link rel="stylesheet" href="/resources/sap/m/themes/sap_horizon/library.css">'
+        + '<script src="/resources/sap-ui-cachebuster/sap-ui-core.js"></script></head><body>app</body></html>');
+      return;
+    }
+    res.writeHead(404).end('nope');
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const page = await browser.newPage();
+  try {
+    const ui5 = watchUi5(page);
+    await page.goto(`http://127.0.0.1:${srv.address().port}/`);
+    await page.waitForTimeout(200);
+    assert.deepEqual(ui5.failed.map((f) => [new URL(f.url).pathname, f.reason]).sort(), [
+      ['/resources/sap-ui-cachebuster/sap-ui-core.js', 'HTTP 404'],
+      ['/resources/sap/m/themes/sap_horizon/library.css', 'HTTP 404'],
+    ]);
+    const sapLoaded = await page.evaluate(() => Boolean(window.sap && window.sap.ui));
+    const report = ui5LoadReport({ booted: false, sapLoaded, failed: ui5.failed });
+    assert.match(report.error, /^UI5 did not load, so no app could boot: http:\/\/127\.0\.0\.1:\d+\/resources\/sap-ui-cachebuster\/sap-ui-core\.js - HTTP 404 \(and 1 more UI5 request\(s\)\)\./);
+    assert.match(report.error, /npm ci in a samples-controls checkout/);
+    assert.match(report.error, /app_start answers its screen without a browser/);
+    assert.equal(report.note, null);
+  } finally {
+    await page.close().catch(() => {});
+    await browser.close().catch(() => {});
+    srv.close();
+  }
+});
+
+test('ui5LoadReport: nothing failed is nothing to say; a booted app is a note, offline names its switch', () => {
+  assert.deepEqual(ui5LoadReport({ booted: true, sapLoaded: true, failed: [] }), { error: null, note: null });
+  assert.deepEqual(ui5LoadReport({ booted: false, sapLoaded: false, failed: [] }), { error: null, note: null }, 'a boot that failed with UI5 there is the app\'s');
+  const theme = [{ url: 'https://sdk.openui5.org/resources/sap/m/themes/sap_horizon/library.css', reason: 'net::ERR_TUNNEL_CONNECTION_FAILED' }];
+  const booted = ui5LoadReport({ booted: true, sapLoaded: true, failed: theme, localUi5: true });
+  assert.equal(booted.error, null);
+  assert.match(booted.note, /^1 UI5 request\(s\) failed: https:\/\/sdk\.openui5\.org\/resources\/sap\/m\/themes\/sap_horizon\/library\.css - net::ERR_TUNNEL_CONNECTION_FAILED\. The app booted, but the picture may lack its theme/);
+  assert.match(booted.note, /@openui5 packages and takes what they lack from the CDN/);
+  assert.match(booted.note, /themes as \.less sources only/);
+  assert.doesNotMatch(booted.note, /npm ci/, 'the packages are there: installing them is no remedy');
+  // the stylesheet is named before another resource
+  const two = ui5LoadReport({ booted: true, sapLoaded: true, failed: [{ url: 'https://sdk.openui5.org/resources/sap-ui-version.json', reason: 'x' }, ...theme], localUi5: true });
+  assert.match(two.note, /^2 UI5 request\(s\) failed: https:\/\/sdk\.openui5\.org\/resources\/sap\/m\/themes/);
+  const offline = ui5LoadReport({ booted: false, sapLoaded: false, failed: theme, offline: true });
+  assert.match(offline.error, /A2UI5_MCP_OFFLINE is set/);
+  // UI5 there and the app still not booted: the app's own failure, not UI5's
+  assert.equal(ui5LoadReport({ booted: false, sapLoaded: true, failed: theme }).error, null);
 });

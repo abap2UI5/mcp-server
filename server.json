@@ -152,7 +152,7 @@
         },
         {
           "name": "A2UI5_MCP_SCREENSHOT_DIR",
-          "description": "Where run_app and interact_app write their PNGs. Default: <tmp>/abap2ui5-mcp-screenshots.",
+          "description": "Where run_app and interact_app write their PNGs (the newest 50 are kept) and build_backend its log. Default: <tmp>/abap2ui5-mcp-screenshots.",
           "format": "filepath",
           "isRequired": false
         },

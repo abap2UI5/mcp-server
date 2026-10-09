@@ -7,7 +7,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnWithTimeout, buildBackend, killChildren } from '../lib/runtime.mjs';
+import { spawnWithTimeout, buildBackend, killChildren, pruneShots, SHOTS_KEPT, openPage, onPath, createErrorLog, ERRORS_KEPT } from '../lib/runtime.mjs';
+import { sizeOf, ANSWER_BUDGET } from '../lib/budget.mjs';
 import { treeKillCommand } from '../lib/spawn.mjs';
 
 // ------------------------------------------------------- spawnWithTimeout ----
@@ -224,6 +225,65 @@ test('buildBackend joins a same-mode call and fails fast on a conflicting mode',
       const after = await buildBackend({ mode: 'incremental' });
       assert.equal(after.inFlight, undefined);
       assert.match(after.tail, /prior build/);
+    },
+  );
+});
+
+/* A second identical build_backend joined the running build and ignored its
+ * own cancel: the request stayed open to the end of the build. The joiner
+ * stops waiting on its cancel; the build goes on for the call that started it. */
+test('buildBackend: a joined call stops waiting on its own cancel and leaves the build running', async () => {
+  await withFakeRepos(
+    'console.log("slow build"); setTimeout(() => process.exit(0), 1500);',
+    {},
+    async () => {
+      const first = new AbortController();
+      const p1 = buildBackend({ mode: 'full', signal: first.signal });
+      const joiner = new AbortController();
+      const p2 = buildBackend({ mode: 'full', signal: joiner.signal });
+      const t0 = Date.now();
+      setTimeout(() => joiner.abort(), 100);
+      const left = await p2;
+      assert.ok(Date.now() - t0 < 1000, `the joiner answered after ${Date.now() - t0} ms`);
+      assert.equal(left.ok, false);
+      assert.equal(left.aborted, true);
+      assert.equal(left.joined, true);
+      assert.match(left.tail, /stopped waiting for the full build another call started/);
+      const res = await p1;
+      assert.equal(res.ok, true, 'the first caller still gets its build');
+      assert.equal(res.aborted, undefined);
+      // a joiner whose request is already cancelled does not wait at all
+      // (and a joined call hears the build's lines: build_backend's progress)
+      const p3 = buildBackend({ mode: 'full', signal: first.signal });
+      const gone = new AbortController();
+      gone.abort();
+      const p4 = await buildBackend({ mode: 'full', signal: gone.signal });
+      assert.equal(p4.joined, true);
+      await p3;
+    },
+  );
+});
+
+/* build_backend's progress notifications are the build's lines through
+ * onLine: a call that joined the build in flight passed its own onLine and
+ * heard nothing - its progressToken got no notification at all. */
+test('buildBackend: a joined call hears the build\'s lines too, until it leaves', async () => {
+  await withFakeRepos(
+    'console.log("step one"); setTimeout(() => { console.log("step two"); process.exit(0); }, 600);',
+    {},
+    async () => {
+      const first = [];
+      const joined = [];
+      const p1 = buildBackend({ mode: 'full', onLine: (l) => first.push(l) });
+      const p2 = buildBackend({ mode: 'full', onLine: (l) => joined.push(l) });
+      await Promise.all([p1, p2]);
+      assert.ok(first.includes('step two'));
+      assert.ok(joined.includes('step one') && joined.includes('step two'), `the joined call heard: ${JSON.stringify(joined)}`);
+      // the next build is heard by its own caller only
+      const later = [];
+      await buildBackend({ mode: 'full', onLine: (l) => later.push(l) });
+      assert.equal(joined.filter((l) => l === 'step two').length, 1, 'a finished joiner hears no later build');
+      assert.ok(later.includes('step two'));
     },
   );
 });
@@ -617,5 +677,156 @@ test('every client of the backend connects to the address it binds, never to the
       .filter((l) => !/^\s*\/\//.test(l));
     const hit = code.findIndex((l) => /localhost/i.test(l));
     assert.equal(hit, -1, `${rel} names localhost in code: ${code[hit]}`);
+  }
+});
+
+test('pruneShots keeps the newest pictures of this server and never touches another file', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-shots-'));
+  try {
+    const t0 = Date.now() - 1e6;
+    const names = [];
+    for (let i = 0; i < 7; i++) {
+      const name = `zcl_app${i % 2 ? '-interact' : ''}-${(t0 + i * 1000).toString(36)}${i + 1}.png`;
+      fs.writeFileSync(path.join(dir, name), 'png');
+      fs.utimesSync(path.join(dir, name), new Date(t0 + i * 1000), new Date(t0 + i * 1000));
+      names.push(name);
+    }
+    const foreign = ['holiday.png', 'zcl_app.png', 'last-build.json', 'zcl_app-notes.txt'];
+    for (const f of foreign) fs.writeFileSync(path.join(dir, f), 'mine');
+    fs.utimesSync(path.join(dir, 'holiday.png'), new Date(t0 - 1e5), new Date(t0 - 1e5));
+    assert.equal(pruneShots(dir, 3), 4);
+    const left = fs.readdirSync(dir).sort();
+    assert.deepEqual(left, [...foreign, ...names.slice(4)].sort(), 'the three newest pictures and every foreign file');
+    assert.equal(pruneShots(dir, 3), 0, 'nothing more to take');
+    assert.equal(pruneShots(path.join(dir, 'nowhere')), 0, 'a missing directory is no error');
+    assert.ok(SHOTS_KEPT >= 10);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('openPage: a throw of newPage or the setup closes the context and takes the abort listener off', async () => {
+  const fake = (failAt) => {
+    const state = { closed: 0 };
+    const ctx = {
+      close: async () => { state.closed += 1; },
+      newPage: async () => {
+        if (failAt === 'newPage') throw new Error('Target page, context or browser has been closed');
+        return { route: async () => {} };
+      },
+    };
+    return { state, browser: { newContext: async () => ctx } };
+  };
+  for (const failAt of ['newPage', 'setup']) {
+    const { state, browser } = fake(failAt);
+    const ctl = new AbortController();
+    await assert.rejects(openPage(browser, {}, ctl.signal, async () => {
+      if (failAt === 'setup') throw new Error('route failed');
+    }), failAt === 'setup' ? /route failed/ : /has been closed/);
+    assert.equal(state.closed, 1, `${failAt}: the context is closed`);
+    ctl.abort();
+    await new Promise((r) => setImmediate(r));
+    assert.equal(state.closed, 1, `${failAt}: no listener left on the signal`);
+  }
+  // the good path: the context stays open, an abort closes it
+  const { state, browser } = fake(null);
+  const ctl = new AbortController();
+  const opened = await openPage(browser, {}, ctl.signal, async (page) => { await page.route(); });
+  assert.ok(opened.page && opened.ctx && opened.onAbort);
+  assert.equal(state.closed, 0);
+  ctl.abort();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(state.closed, 1);
+});
+
+test('onPath scans PATH in-process: executables only, PATHEXT on Windows, no which needed', () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-path-'));
+  try {
+    const a = path.join(base, 'a');
+    const b = path.join(base, 'b');
+    fs.mkdirSync(a);
+    fs.mkdirSync(b);
+    fs.writeFileSync(path.join(a, 'tool'), '#!/bin/sh\n', { mode: 0o644 }); // not executable
+    fs.writeFileSync(path.join(b, 'tool'), '#!/bin/sh\n', { mode: 0o755 });
+    fs.mkdirSync(path.join(a, 'dir-not-file'));
+    // PATHEXT is upper case on Windows, whose file system ignores case; this
+    // one may not, so the file carries the extension as PATHEXT spells it
+    fs.writeFileSync(path.join(b, 'npm.CMD'), '@echo off\r\n');
+    const posix = { PATH: `${a}:${b}` };
+    if (process.platform !== 'win32') {
+      assert.equal(onPath('tool', { env: { PATH: a }, platform: 'linux' }), false, 'a file without the x bit is no program');
+      assert.equal(onPath('tool', { env: posix, platform: 'linux' }), true, 'the next directory has it');
+    }
+    assert.equal(onPath('dir-not-file', { env: posix, platform: 'linux' }), false);
+    assert.equal(onPath('missing', { env: posix, platform: 'linux' }), false);
+    assert.equal(onPath('tool', { env: {}, platform: 'linux' }), false, 'no PATH, nothing found');
+    // Windows: the Path key in any case, PATHEXT, a quoted entry
+    assert.equal(onPath('npm', { env: { Path: `"${a}";${b}`, PATHEXT: '.COM;.EXE;.BAT;.CMD' }, platform: 'win32' }), true);
+    assert.equal(onPath('npm.CMD', { env: { Path: b }, platform: 'win32' }), true, 'a name with its extension');
+    assert.equal(onPath('npm', { env: { Path: b, PATHEXT: '.EXE' }, platform: 'win32' }), false, 'only the PATHEXT extensions');
+    // a PATH whose `which` is gone still answers (the old spawn read every program as missing)
+    assert.equal(onPath('tool', { env: { PATH: b }, platform: 'linux' }), process.platform !== 'win32');
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// ------------------------------------------------------------ error log ----
+
+test('createErrorLog counts a repeated page error once and caps the distinct ones', () => {
+  const log = createErrorLog();
+  // a timer that throws every 100 ms over a 60 s boot, and a poll answered 500
+  // with a fresh query string each time
+  const thrown = 'pageerror: ' + 'Cannot read properties of undefined (reading "getModel") '.repeat(5).slice(0, 289);
+  for (let i = 0; i < 600; i += 1) log.push(thrown);
+  for (let i = 0; i < 400; i += 1) log.push(`backend HTTP 500 for /sap/bc/z2ui5?sap-client=001&t=${1700000000000 + i}`);
+  assert.equal(log.length, 1000, 'length counts every error - ok asks it');
+  const list = log.list();
+  assert.equal(list.length, ERRORS_KEPT);
+  assert.equal(list[0], `${thrown} (600 times)`);
+  assert.match(log.cut(), /^381 more errors past the first 20 distinct messages not listed \(1000 in all\)$/);
+  assert.ok(sizeOf({ errors: list, errorsCut: log.cut() }, 1) < ANSWER_BUDGET / 4, 'the report stays small');
+});
+
+test('createErrorLog lists distinct errors in order and says nothing was cut', () => {
+  const log = createErrorLog(3);
+  log.push('a');
+  log.push('b');
+  log.push('a');
+  assert.deepEqual(log.list(), ['a (2 times)', 'b']);
+  assert.equal(log.cut(), null);
+  assert.equal(log.length, 3);
+  const empty = createErrorLog();
+  assert.equal(empty.length, 0);
+  assert.deepEqual(empty.list(), []);
+});
+
+/* scope_of without the OpenUI5 checkout its script reads: every OpenUI5
+ * entity came back "UNRESOLVED (no source .js found - check the entity name
+ * / fork checkout)", sap.m.Wizard included, which reads like a misspelt
+ * name. The answer now says the checkout is missing and where it belongs. */
+test('scope_of names a missing OpenUI5 checkout as the reason for UNRESOLVED', async () => {
+  const { scopeOfNote, openui5Dir } = await import('../lib/runtime.mjs');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-scope-'));
+  const saved = process.env.OPENUI5_SRC;
+  try {
+    const out = 'sap.m.Wizard                       UNRESOLVED (no source .js found — check the entity name / fork checkout)';
+    delete process.env.OPENUI5_SRC;
+    assert.equal(openui5Dir(path.join(root, 'samples-controls')), path.join(root, 'fork-openui5'), 'the script\'s default: beside the corpus');
+    const dir = path.join(root, 'openui5');
+    process.env.OPENUI5_SRC = dir;
+    assert.equal(openui5Dir(path.join(root, 'samples-controls')), dir);
+    // a relative one as the script reads it: it runs in the corpus, not where the server was started
+    process.env.OPENUI5_SRC = path.join('..', 'my-openui5');
+    assert.equal(openui5Dir(path.join(root, 'samples-controls')), path.join(root, 'my-openui5'));
+    process.env.OPENUI5_SRC = dir;
+    assert.match(scopeOfNote(out, dir), /^the OpenUI5 checkout scope_of reads the JSDoc from is not there \(.*openui5[\\/]src is missing\), so every OpenUI5 entity reads UNRESOLVED whatever its name - clone https:\/\/github\.com\/SAP\/openui5 there .*OPENUI5_SRC/);
+    assert.equal(scopeOfNote('sap.m.Wizard   IN SCOPE (since 1.30)', dir), null, 'nothing unresolved: nothing to explain');
+    fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
+    assert.equal(scopeOfNote(out, dir), null, 'with the checkout there, UNRESOLVED is about the name');
+  } finally {
+    if (saved === undefined) delete process.env.OPENUI5_SRC;
+    else process.env.OPENUI5_SRC = saved;
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });

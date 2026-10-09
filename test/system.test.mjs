@@ -9,11 +9,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  systemEndpoint, systemLocation, systemConfig, describeConfig, systemClassName, cookieJar, createSystemHttp,
-  parseAdtClassRefs, adtSearchUrl, networkProblem, runPasswordCommand, checkSystem, PROBE_CLASS,
+  systemEndpoint, maskedUrl, systemLocation, systemConfig, describeConfig, systemClassName, cookieJar, createSystemHttp,
+  parseAdtClassRefs, adtSearchUrl, networkProblem, runPasswordCommand, checkSystem, isStartPage, PROBE_CLASS,
 } from '../lib/system.mjs';
 import { SYSTEM_TOOLS, SYSTEM_TOOL_NAMES } from '../lib/system-tools.mjs';
 import { AgentError } from '../lib/appclient.mjs';
@@ -41,6 +42,21 @@ test('a URL that does not parse never echoes its credentials; a malformed % sequ
   assert.doesNotMatch(broken, /secret/);
   assert.match(broken, /https:\/\/\*\*\*@h:44x/);
   assert.deepEqual(systemEndpoint('https://h/sap/bc/%zz?sap-client=1'), { endpoint: 'https://h/sap/bc/%zz?sap-client=1' });
+});
+
+test('a password with an @ of its own is masked whole, wherever the URL is shown', () => {
+  const broken = systemEndpoint('https://alice:pa@ss@host:44x/sap/bc/z2ui5').problem;
+  assert.match(broken, /is not a URL/);
+  assert.doesNotMatch(broken, /pa|ss@/, broken);
+  assert.match(broken, /'https:\/\/\*\*\*@host:44x\/sap\/bc\/z2ui5'/);
+  assert.equal(maskedUrl('https://alice:pa@ss@host:44300/sap?x=1'), 'https://***@host:44300/sap?x=1');
+  assert.equal(maskedUrl('https:/alice:pw@host/sap'), 'https:/***@host/sap');
+  assert.equal(maskedUrl('alice:pw@host:44300/sap'), 'alice:***@host:44300/sap', 'no // - masked from the scheme-like prefix on');
+  assert.equal(maskedUrl('https://host/sap/bc/z2ui5?sap-client=100'), 'https://host/sap/bc/z2ui5?sap-client=100');
+  assert.equal(maskedUrl(undefined), '');
+  // parses as host alice, port 12, path /ss@host: an endpoint that would be shown
+  assert.match(systemEndpoint('https://alice:12/ss@host/sap/bc/z2ui5').problem, /carries credentials/);
+  assert.deepEqual(systemEndpoint('https://h/sap/bc/z2ui5?mail=a@b'), { endpoint: 'https://h/sap/bc/z2ui5?mail=a@b' }, 'an @ in the query is no credential');
 });
 
 test('the start location is the launch URL: origin, path, query plus app_start', () => {
@@ -248,13 +264,42 @@ test('the ADT quick search: the URL, and only classes from the answer', () => {
   assert.deepEqual(refs, [{ name: 'ZCL_A', description: 'A & B', packageName: 'ZP' }]);
 });
 
+/* What z2ui5_cl_ui5_http_handler=>_http_get answers (abbreviated - the
+ * inline preload script left out), and what an ICF node with a form logon
+ * answers to Basic credentials it does not take: a 200 as well. */
+const START_PAGE = '<!DOCTYPE html>\n<html lang="en">\n<head>\n<title>abap2UI5</title>\n'
+  + '<script id="sap-ui-bootstrap" data-sap-ui-resourceroots=\'{ "z2ui5": "./" }\' data-sap-ui-oninit="onInitComponent" '
+  + 'src="https://ui5.sap.com/resources/sap-ui-core.js" ></script></head>\n<body class="sapUiBody sapUiSizeCompact" id="content">\n'
+  + '    <div data-sap-ui-component data-name="z2ui5" data-id="container" data-settings=\'{"id" : "z2ui5"}\' data-handle-validation="true"></div>\n </body></html>';
+const LOGON_PAGE = '<html><head><title>Logon</title></head><body><form id="LOGIN_FORM" method="post" action="/sap/bc/z2ui5?sap-client=100">'
+  + '<input name="sap-user"><input name="sap-password" type="password"></form></body></html>';
+
+/* A 200 used to be "accepted the logon" whatever it carried - a form logon
+ * page included, which is exactly a logon that did NOT happen. */
+test('system_status: a 200 is accepted only with the abap2UI5 start page in it', async () => {
+  const at = (body) => checkSystem(cfg(), createSystemHttp(cfg(), { request: async () => ({ status: 200, headers: {}, body }) }));
+  const logon = await at(LOGON_PAGE);
+  assert.equal(logon.ok, false);
+  assert.match(logon.problem, /HTTP 200, but with a logon page.*Basic/);
+  assert.equal(logon.status, 200);
+  const other = await at('<html><body>Welcome to the gateway</body></html>');
+  assert.equal(other.ok, false);
+  assert.match(other.problem, /not the abap2UI5 start page.*ICF/);
+  assert.equal((await at('')).ok, false, 'an empty 200 is no start page either');
+  // the standalone index (z2ui5_cl_ui5f_index_html) declares the same component
+  assert.equal((await at('<div data-sap-ui-component data-name=\'z2ui5\' data-id="container"></div>')).ok, true);
+  assert.equal(isStartPage(START_PAGE), true);
+  assert.equal(isStartPage(LOGON_PAGE), false, 'the endpoint path in a form action is no marker');
+});
+
 test('system_status: misconfigured, accepted, rejected', async () => {
   const bad = await checkSystem(cfg({ problems: ['p1'] }), createSystemHttp(cfg()));
   assert.equal(bad.ok, false);
   assert.deepEqual(bad.problems, ['p1']);
-  const ok = await checkSystem(cfg(), createSystemHttp(cfg(), { request: async () => ({ status: 200, headers: {}, body: '' }) }));
+  const ok = await checkSystem(cfg(), createSystemHttp(cfg(), { request: async () => ({ status: 200, headers: {}, body: START_PAGE }) }));
   assert.equal(ok.ok, true);
   assert.equal(ok.user, 'DEV');
+  assert.match(ok.verdict, /abap2UI5 start page and accepted the logon of DEV/);
   const no = await checkSystem(cfg(), createSystemHttp(cfg(), { request: async () => ({ status: 401, headers: {}, body: '' }) }));
   assert.equal(no.ok, false);
   assert.match(no.problem, /rejected the logon/);
@@ -263,7 +308,7 @@ test('system_status: misconfigured, accepted, rejected', async () => {
   const moved = await checkSystem(cfg(), createSystemHttp(cfg(), { request: async () => ({ status: 302, headers: { location: 'https://idp/saml' }, body: '' }) }));
   assert.match(moved.problem, /HTTP 302 to https:\/\/idp\/saml.*Basic/);
   let signal;
-  await checkSystem(cfg(), createSystemHttp(cfg(), { request: async (url, init) => { signal = init.signal; return { status: 200, headers: {}, body: '' }; } }));
+  await checkSystem(cfg(), createSystemHttp(cfg(), { request: async (url, init) => { signal = init.signal; return { status: 200, headers: {}, body: START_PAGE }; } }));
   assert.ok(signal instanceof AbortSignal, 'the check is bounded');
 });
 
@@ -310,7 +355,7 @@ function startServer(env) {
     assert.ok(!msg.error, JSON.stringify(msg.error));
     return { isError: !!msg.result.isError, text: msg.result.content[0].text, content: msg.result.content };
   };
-  return { p, rpc, call, stop: () => p.kill() };
+  return { p, rpc, call, output: () => buf, stop: () => p.kill() };
 }
 
 test('system mode over stdio: list, status, ADT search, start, act and describe against the fake system', async () => {
@@ -360,6 +405,46 @@ test('system mode over stdio: list, status, ADT search, start, act and describe 
   }
 });
 
+test('system mode over stdio: a client\'s cancel of app_start aborts the roundtrip to the system', async () => {
+  // a system that takes every POST and never answers it: only an abort of
+  // the request (the socket closed by the client) ends it before the 120 s
+  const seen = { posts: 0, closed: 0 };
+  const hung = http.createServer((req, res) => {
+    if (req.method !== 'POST') {
+      res.writeHead(200);
+      res.end();
+      return;
+    }
+    seen.posts += 1;
+    res.on('close', () => { seen.closed += 1; });
+    req.resume();
+  });
+  await new Promise((r) => hung.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${hung.address().port}/sap/bc/z2ui5?app_start={class}`;
+  const s = startServer({ A2UI5_MCP_SYSTEM_URL: url, A2UI5_MCP_SYSTEM_USER: USER, A2UI5_MCP_SYSTEM_PASSWORD: PASSWORD });
+  const waitFor = async (pred, ms = 10000) => {
+    const t0 = Date.now();
+    while (!pred()) {
+      if (Date.now() - t0 > ms) throw new Error(`timeout: ${JSON.stringify(seen)}`);
+      await new Promise((r) => setTimeout(r, 20));
+    }
+  };
+  try {
+    await s.rpc('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'system', version: '0' } });
+    s.p.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 900, method: 'tools/call', params: { name: 'app_start', arguments: { app: 'z2ui5_cl_smp_app_381' } } })}\n`);
+    await waitFor(() => seen.posts === 1);
+    s.p.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 900, reason: 'test' } })}\n`);
+    await waitFor(() => seen.closed === 1);
+    // the server is still there for the next call
+    const status = await s.rpc('tools/list', {});
+    assert.ok(status.result.tools.length);
+  } finally {
+    s.stop();
+    hung.closeAllConnections();
+    await new Promise((r) => hung.close(r));
+  }
+});
+
 test('system mode over stdio: a wrong password is sent once, then every tool refuses without a request', async () => {
   const sys = await fakeSystem();
   const s = startServer({ A2UI5_MCP_SYSTEM_URL: sys.launchUrl, A2UI5_MCP_SYSTEM_USER: USER, A2UI5_MCP_SYSTEM_PASSWORD: 'wrong' });
@@ -376,6 +461,22 @@ test('system mode over stdio: a wrong password is sent once, then every tool ref
   } finally {
     s.stop();
     await sys.close();
+  }
+});
+
+test('system mode over stdio: the ready notification never carries the password of a refused URL', async () => {
+  for (const url of ['https://alice:s3cr@t@host:44300/sap/bc/z2ui5?app_start={class}', 'https://alice:s3cr@t@host:44x/sap/bc/z2ui5']) {
+    const s = startServer({ A2UI5_MCP_SYSTEM_URL: url, A2UI5_MCP_SYSTEM_USER: USER, A2UI5_MCP_SYSTEM_PASSWORD: PASSWORD });
+    try {
+      await s.rpc('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'system', version: '0' } });
+      const status = await s.call('system_status');
+      assert.doesNotMatch(status.text, /s3cr|t@host/);
+      const out = s.output();
+      assert.match(out, /SYSTEM MODE \(https:\/\/\*\*\*@host:44/, 'the notification shows the masked URL');
+      assert.doesNotMatch(out, /s3cr|alice/, 'neither the password nor its tail after an @ of its own');
+    } finally {
+      s.stop();
+    }
   }
 });
 

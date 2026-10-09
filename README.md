@@ -275,6 +275,19 @@ that fails refuses the whole call before anything is written. A symbolic
 link, or a folder that leads out of the project through one, is never
 written through: that file is skipped, and the answer says why.
 
+**Every answer fits the client.** A client shows the agent nothing of a
+tool result over its cap (Claude Code: 25,000 tokens), so no answer is
+larger than about 60,000 characters. The tools whose answers grow with
+upstream content page instead of cutting: `matches` counts every hit,
+`returned` the page, and `more` names the exact call for the rest
+(`offset` - `examples`, `capabilities`, `api_reference`, `app_guide`,
+`pitfalls`, `docs_search`; `files` - `scaffold_app`; `from_line` -
+`read_app`, `read_example`; `build_log` names its next `offset` under
+`cut`). A list that is shortened rather than paged says so in a `...Cut`
+field (`findingsCut`, `rulesCut`, `errorsCut`, ...), and a last-line backstop trims anything that still
+passes the cap and marks it (`__answerGuardCut`). The resources follow the
+same budget (below).
+
 `examples` degrades per catalogue instead of failing: it searches the
 checkouts it finds and names the ones it could not, so a thinner answer never
 reads as "nobody has built this". It reads each repository's committed
@@ -282,7 +295,10 @@ reads as "nobody has built this". It reads each repository's committed
 port's verification status (checked over reviewed over generated, used to
 break ranking ties), the learning-path stage, and what a stack sample needs
 from the system — and falls back to parsing `SAMPLES.md` on a checkout from
-before that file existed. `screenshot_view` and `run_app` answer the
+before that file existed. Where samples and samples-controls commit
+`catalogue-derived.json` beside it, a query also matches the control types
+each sample's view builds, so `sap.m.Dialog` finds every sample that builds
+one, not only those filed under it. `screenshot_view` and `run_app` answer the
 same question at three orders of magnitude apart: the first photographs the
 reconstructed **view** with no backend, the second the **running app** after a
 build. Most iterations should end at the first.
@@ -369,8 +385,12 @@ that keeps its programming model — `selection_screen( )`,
 the migration report (the TODOs, the tables and APIs not released on ABAP
 Cloud with their successors, what the list does not carry over) and the
 statements it refused with `file:row:col` (dynpros, batch input, `SUBMIT`,
-native SQL). The converter is the addon's own `report2cloud`, run from a
-checkout of the addon — it is not on npm:
+native SQL). A report that carries open-abap's `@KERNEL` escape (`WRITE
+'@KERNEL ...'.`, JavaScript once transpiled) is refused before anything is
+converted, and a dynamic `WHERE (cond)` is converted but flagged under
+`warnings` - the runtime evaluates it with `eval()` (SECURITY.md). The
+converter is the addon's own `report2cloud`, run from a checkout of the
+addon — it is not on npm:
 
 ```sh
 git clone https://github.com/abap2UI5-addons/abap-cloud-gui   # ABAP_CLOUD_GUI_HOME
@@ -400,7 +420,7 @@ without the variable, to have both.
 
 | Tool | What it does |
 |---|---|
-| `system_status` | The endpoint and user (never the password) and ONE request that shows whether the host answers, the certificate is accepted and the logon works — call it first |
+| `system_status` | The endpoint and user (never the password) and ONE request that shows whether the host answers, the certificate is accepted and the logon works — `ok` only when the abap2UI5 start page answers, not a form logon page that also answers 200 — call it first |
 | `app_list` | Class names on the system, from the ADT quick search (`filter`: start of the name, `*` as wildcard; at most 50) |
 | `app_start` | Start an app on the system and get its agent snapshot — the same snapshot, arguments and refusals as the sandbox's `app_start` |
 | `app_describe` | The current snapshot of a session, from memory — nothing is sent |
@@ -525,7 +545,11 @@ clients that surface them (context pickers, attach-a-document UIs) and for
 agents that want a document whole instead of sliced. Same live reads from the
 same sibling checkouts: listing is free (no checkout needed), reading a
 resource whose checkout is missing answers with the same actionable error the
-tool gives.
+tool gives. A document longer than a client shows of one read (about
+60,000 characters - today the abap-check catalogue and the capability map)
+is cut at a section heading, and its last line names the tool call that
+reads on from the first section left out (`pitfalls { area, offset }`,
+`app_guide { offset }`, `capabilities { status }`).
 The one resource that is not a document is `ui://abap2ui5/app-screen`, the
 MCP Apps screen of the app tools (see "The screen in the chat" above); it is
 part of this server and needs no checkout.
@@ -584,18 +608,22 @@ duplicates none of their content:
   refused (when it declares its size) or cut at the cap, and the tool says
   so by URL; a cached mirror or the previous build stays in place.
 - **UI5 sources** are served from the samples-controls checkout's `@openui5`
-  packages, so booting needs no network. The built theme CSS is not in those
-  packages — with network access it loads from the CDN (styled screenshots);
-  without, apps render unstyled but structurally complete. `A2UI5_MCP_OFFLINE=1`
-  forces the hermetic behaviour.
+  packages when that checkout is there, so booting needs no network; without
+  it `run_app` and `interact_app` load UI5 from the CDN (and say so when it
+  cannot be reached). The built theme CSS is not in those packages — with
+  network access it loads from the CDN (styled screenshots); without, apps
+  render unstyled but structurally complete. `A2UI5_MCP_OFFLINE=1` forces the
+  hermetic behaviour.
 - **Chromium:** `A2UI5_MCP_CHROMIUM` (or `CHROMIUM_BIN`, which the linter
   reads too) names the executable; otherwise the Playwright-managed browser
   (`npx playwright install chromium`); otherwise a system chromium.
   `setup_status` says which one it found and where it came from.
-- **Screenshots:** `run_app` writes its PNG to
-  `<tmp>/abap2ui5-mcp-screenshots/<class>.png` and returns the path beside the
+- **Screenshots:** `run_app` and `interact_app` write their PNG to
+  `<tmp>/abap2ui5-mcp-screenshots/<class>-<stamp>.png` (the newest 50 are
+  kept, older ones of that pattern removed) and return the path beside the
   image — deliberately not into the install directory, which is inside
-  `node_modules` when you install from npm. That directory is created 0700 and
+  `node_modules` when you install from npm. The last build's log, which
+  `build_log` reads after a restart, lives there too. That directory is created 0700 and
   used only while it is your own (`/tmp` is shared on Linux); otherwise the
   image is returned but not saved, and `screenshotNotSaved` says why.
   `A2UI5_MCP_SCREENSHOT_DIR` puts them somewhere you keep.

@@ -379,6 +379,16 @@ test('the default transport hands fetch the same request as before: POST to base
   assert.deepEqual(JSON.parse(seen.body), { value: { S_FRONT: { ORIGIN: 'http://127.0.0.1:4471', PATHNAME: '/', SEARCH: '?app_start=z_x' } } });
 });
 
+test('a T_SYSTEM or T_CUSTOM that is no list is refused with a sentence, not a TypeError', async () => {
+  for (const [list, value] of [['T_SYSTEM', { VIEW_SLOTS: 1 }], ['T_CUSTOM', 5]]) {
+    const client = createAppClient({
+      baseUrl: BASE,
+      fetchImpl: async () => new Response(JSON.stringify({ S_FRONT: { ID: 'd1', APP: 'Z_X', S_ACTION: { [list]: value } } }), { status: 200 }),
+    });
+    await rejects(client.start('z_x'), new RegExp(`answered an S_ACTION\\.${list} that is no list`));
+  }
+});
+
 // ------------------------------------------- selection dialogs: the pick ----
 
 test('a selection dialog\'s confirm: `row` is needed to pick one, it must exist, a search value comes from args', async () => {
@@ -507,6 +517,25 @@ const DIALOG = (multi, confirmArgs) => page(
   + '<columns><Column><header><Text text="A"/></header></Column><Column><header><Text text="B"/></header></Column></columns></TableSelectDialog>',
 );
 const ROWS = () => ({ T: [{ A: 'a0', B: 'b0', N: 0, SEL: false }, { A: 'a1', B: 'b1', N: 10, SEL: true }, { A: 'a2', B: 'b2', N: 20, SEL: false }] });
+
+/* A row button without an id of its own, pressed to open a popover next to
+ * it (bench task 13, samples 052): ${$source>/id} is the clone id UI5
+ * generates, which nothing but the browser knows. The refusal says what to
+ * pass instead of leaving the agent to guess; a given id is sent as is. */
+test('$source:id of a control without an id: the refusal says what to pass, and a given id is sent', async () => {
+  const xml = page('<Table items="{/T}"><columns><Column/></columns><items><ColumnListItem><cells>'
+    + '<Button text="Details" press=".eB([\'DETAILS\'], ${$source>/id}, ${A})"/>'
+    + '<Button id="fixed" text="Edit" press=".eB([\'EDIT\'], ${$source>/id})"/>'
+    + '</cells></ColumnListItem></items></Table>');
+  const { client, bodies } = fakeApp(xml, ROWS());
+  let s = await client.start('z_t');
+  await rejects(client.act(s.session, { event: 'DETAILS', row: 1 }),
+    /^argument 0 of DETAILS \(\$source:id\) is the id UI5 generates for the pressed control - the view sets none, so only a browser knows it\. Pass any id in args\[0\] \(e\.g\. "a1"\): a backend that only anchors a popover to it \(popover_display by_id\) answers the same/);
+  assert.equal(bodies.length, 1, 'a refused act sends nothing');
+  s = await client.act(s.session, { event: 'DETAILS', row: 1, args: ['a1', null] });
+  s = await client.act(s.session, { event: 'EDIT', row: 0 });
+  assert.deepEqual(bodies.slice(1).map((b) => b.S_FRONT.T_EVENT_ARG), [['a1', 'a1'], ['fixed']], 'an id the view sets is read from it');
+});
 
 test('the pick, single select: the picked row selected, the previous selection cleared, both sent; item arguments from the row', async () => {
   const args = ", ${$parameters>/selectedContexts/0/sPath}, ${$parameters>/selectedItem}.getCells()[1].getTitle(), ${$parameters>/selectedItem}.getCells()[1].getText()"
@@ -1055,4 +1084,38 @@ test('the default transport: the token fetch is a HEAD to baseUrl without a body
   assert.deepEqual(seen[1].headers, { 'x-csrf-token': 'Fetch' });
   await client.act(s.session, { event: 'CHECK' });
   assert.deepEqual(seen[3].headers, { 'content-type': 'application/json', 'sap-contextid-accept': 'header', 'sap-contextid': 'SID:1', 'x-csrf-token': 'abc' });
+});
+
+test('signal: a caller\'s cancel aborts the roundtrip in flight, refuses the act as cancelled and takes its edits back', async () => {
+  // a transport that answers the start and then hangs until its signal aborts
+  let n = 0;
+  const signals = [];
+  const transport = (req) => {
+    n += 1;
+    signals.push(req.signal);
+    if (n === 1) return Promise.resolve({ status: 200, body: JSON.stringify(startAnswer()) });
+    return new Promise((resolve, reject) => {
+      req.signal.addEventListener('abort', () => reject(req.signal.reason), { once: true });
+    });
+  };
+  const c = createAppClient({ transport, location: (app) => ({ origin: 'x', pathname: '/', search: `?app_start=${app}` }) });
+  const s = await c.start('z_t');
+  assert.ok(!signals[0].aborted, 'no signal given: the timeout alone');
+  const ctl = new AbortController();
+  const t0 = Date.now();
+  const acting = c.act(s.session, { values: { '/NAME': 'Ann' }, event: 'CHECK', signal: ctl.signal });
+  setTimeout(() => ctl.abort(), 30);
+  await rejects(acting, /^cancelled by the caller - nothing of this roundtrip was adopted$/);
+  assert.ok(Date.now() - t0 < 5000, 'not the 120 s timeout');
+  assert.ok(signals[1].aborted, 'the transport\'s signal aborted with the caller\'s');
+  const after = c.describe(s.session);
+  assert.equal(after.session, 'D1');
+  assert.deepEqual(after.pending || [], [], 'the act\'s edits are taken back');
+  // an already-cancelled signal sends nothing
+  const sent = n;
+  const gone = new AbortController();
+  gone.abort();
+  await rejects(c.act(s.session, { event: 'CHECK', signal: gone.signal }), /^cancelled by the caller/);
+  await rejects(c.start('z_t', { signal: gone.signal }), /^cancelled by the caller/);
+  assert.equal(n, sent, 'nothing reached the transport');
 });

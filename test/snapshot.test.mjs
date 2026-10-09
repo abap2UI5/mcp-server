@@ -117,6 +117,17 @@ test('nameOfPath derives the ABAP-ish name, without the old /XX/ two-way prefix'
 
 // --------------------------------------------------------- applyResponse ----
 
+test('applyResponse: an action list that is no array folds as empty instead of throwing', () => {
+  const display = ['VIEW_SLOTS', 'display', 'MAIN', '<mvc:View xmlns:mvc="sap.ui.core.mvc"/>'];
+  const st = applyResponse(null, { S_FRONT: { ID: 'a', APP: 'Z_A', S_ACTION: { T_SYSTEM: [display] } }, MODEL: {} });
+  for (const bad of [{}, 5, true]) {
+    const next = applyResponse(st, { S_FRONT: { ID: 'b', APP: 'Z_A', S_ACTION: { T_SYSTEM: bad, T_CUSTOM: bad } } });
+    assert.equal(next.id, 'b');
+    assert.ok(next.slots.MAIN, 'the open view stays');
+    assert.deepEqual(next.custom, []);
+  }
+});
+
 test('applyResponse: a popup app\'s model never overwrites the caller\'s view behind it', () => {
   // samples 012 -> BUTTON_POPUP_06 opens z2ui5_cl_smp_app_020 as a sub-app popup
   const st = stateOf('popup-012');

@@ -1,0 +1,7 @@
+{
+  "task": "14-value-help",
+  "mustFail": [
+    "expect"
+  ],
+  "why": "lint- and render-clean, but the dialog goes out through popover_display: the only popup_display left is the class's own helper, called as me->popup_display( ) - which is no client call"
+}

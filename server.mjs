@@ -58,16 +58,17 @@ import { scaffold, readSpec, validClassName, classNameRule, templateFiles, SPEC_
 import { agentTargetProblem, planAgentSetup, writePlan, pinProblems, pinWarning, agentSetupNextSteps } from './lib/agent-setup.mjs';
 import { fixSource } from './lib/fixview.mjs';
 import { lintOptionsFor } from './lib/lintopts.mjs';
-import { withRenderFallback, renderSkippedNote, warmThenCold } from './lib/validate.mjs';
-import { ANSWER_BUDGET, takeWithin, takeSmallestWithin, fitSnapshot } from './lib/budget.mjs';
+import { withRenderFallback, renderSkippedNote, warmThenCold, validateHint, bySeverity } from './lib/validate.mjs';
+import { ANSWER_BUDGET, sizeOf, takeWithin, takeSmallestWithin, fitSnapshot, fitUnitResult, fitFindings, fitRules, fitObject, fitVerifyStages, guardAnswer, IMAGE_BUDGET } from './lib/budget.mjs';
 import { getRenderer, dropRenderer, closeRenderers, rendererLooksDead } from './lib/renderer.mjs';
 import { TOOLS } from './lib/tools.mjs';
 import { RESOURCES, RESOURCE_TEMPLATES, GUIDE_CHAPTER_TEMPLATE, readResource } from './lib/resources.mjs';
 import { PROMPTS, getPrompt } from './lib/prompts.mjs';
 import { missingSiblingMessage, missingLocalSiblingMessage } from './lib/siblings.mjs';
-import { hydrate, REMOTE_TOOLS, resourceRepos, fetchRemoteFile, isRemoteCheckout, remoteBase } from './lib/remote.mjs';
+import { hydrate, REMOTE_TOOLS, resourceRepos, fetchRemoteFile, isRemoteCheckout, remoteBase, resolvedInside } from './lib/remote.mjs';
+import { readInside } from './lib/contain.mjs';
 import { resolveKey, RESOLVERS } from './lib/repos.mjs';
-import { oneOf, boundedInt, stringArray, checkStringArgs } from './lib/args.mjs';
+import { oneOf, boundedInt, stringArray, optionalName, checkStringArgs } from './lib/args.mjs';
 import {
   deployApp,
   removeApp,
@@ -75,6 +76,7 @@ import {
   listDevApps,
   lintApp,
   runScopeOf,
+  scopeOfNote,
   buildBackend,
   buildLog,
   backendBuilt,
@@ -98,9 +100,9 @@ import {
 import { createAppClient, AgentError } from './lib/appclient.mjs';
 import { toolsWithUi, uiEnabled } from './lib/mcp-app.mjs';
 import { appCard, cardContent, defaultAppFormat, APP_FORMATS } from './lib/adaptive-card.mjs';
-import { migrateReport, deployFiles, resolvePopups, validTargetClass, SetupError } from './lib/migrate.mjs';
+import { migrateReport, deployFiles, resolvePopups, validTargetClass, SetupError, KernelEscapeError } from './lib/migrate.mjs';
 import { explicitEnv } from './lib/repos.mjs';
-import { systemConfig, createSystemHttp, createSystemClient, systemClassName, searchClasses, checkSystem } from './lib/system.mjs';
+import { systemConfig, createSystemHttp, createSystemClient, systemClassName, searchClasses, checkSystem, maskedUrl } from './lib/system.mjs';
 import { SYSTEM_TOOLS } from './lib/system-tools.mjs';
 
 function text(s) {
@@ -292,7 +294,6 @@ async function agentClient() {
 /* An image block's limits: the Claude API takes no side over 8000 px, and
  * the base64 of every picture in one answer stays under IMAGE_BUDGET. */
 const MAX_IMAGE_EDGE = 8000;
-const IMAGE_BUDGET = 8_000_000;
 
 /** A PNG's width and height from its IHDR chunk, or null. */
 function pngSize(png) {
@@ -356,7 +357,7 @@ async function systemSide() {
 /* The system mode's tools. The app tools answer through snapshotAnswer like
  * the sandbox's (the same snapshot, the same Adaptive Card); a refusal of
  * the configuration or of the breaker comes back before anything is sent. */
-async function handleSystem(name, args = {}) {
+async function handleSystem(name, args = {}, { signal } = {}) {
   const { sys, client } = await systemSide();
   switch (name) {
     case 'system_status':
@@ -386,7 +387,7 @@ async function handleSystem(name, args = {}) {
       const maxRows = boundedInt(args.max_rows, { name: 'max_rows', dflt: 20, min: 0, max: 200 });
       return snapshotAnswer(async () => {
         await sys.ready();
-        return client.start(cls, { values: args.values, maxRows });
+        return client.start(cls, { values: args.values, maxRows, signal });
       }, { format, client });
     }
     case 'app_describe': {
@@ -401,7 +402,7 @@ async function handleSystem(name, args = {}) {
         /* a pending-only act sends nothing, so it needs no logon either */
         if (args.event !== undefined && args.event !== null && args.event !== '') await sys.ready();
         // `row` as given: the client checks it (as the sandbox's app_act does)
-        return client.act(args.session, { values: args.values, event: args.event, args: args.args, row: args.row, maxRows });
+        return client.act(args.session, { values: args.values, event: args.event, args: args.args, row: args.row, maxRows, signal });
       }, { format, client });
     }
     default:
@@ -428,7 +429,11 @@ async function deployMigrated(res, ctx) {
     stages[label] = { ok: !r.isError, ...(parsed && typeof parsed === 'object' ? parsed : { text: parsed }) };
     return !r.isError;
   };
-  const stop = (at) => ({ ok: !at, ...(at ? { stoppedAt: at } : {}), stages });
+  /* the composed stages are each a tool's own (fitted) answer, but together
+   * they can pass the budget - the build stage's tail, the app_start
+   * snapshot, a deploy note - so the composed object is fitted once more
+   * (lib/budget.mjs fitObject) */
+  const stop = (at) => fitObject({ ok: !at, ...(at ? { stoppedAt: at } : {}), stages });
   const box = missingSandbox();
   if (box) return (stage('deploy', box), stop('deploy'));
   const popups = resolvePopups(res.converter);
@@ -455,6 +460,56 @@ async function deployMigrated(res, ctx) {
   return stop(null);
 }
 
+/* The whole lines from `fromLine` (1-based) that fit one answer: `{ from,
+ * to, page }`. Each line is measured as the answer writes it - JSON-escaped,
+ * its line break a `\n` - not raw: a class of JSON string templates went
+ * out ~35% over. At least one line, however long. */
+function linePage(all, fromLine) {
+  const asked = boundedInt(fromLine, { name: 'from_line', dflt: 1, min: 1 });
+  const from = Math.min(asked, Math.max(1, all.length));
+  const page = [];
+  let used = 0;
+  for (let i = from - 1; i < all.length; i += 1) {
+    // the escaped line between its quotes, plus the two characters of `\n`
+    const n = JSON.stringify(all[i]).length;
+    if (page.length && used + n > ANSWER_BUDGET - 5000) break;
+    page.push(all[i]);
+    used += n;
+  }
+  /* a from_line past the end used to be clamped without a word: the last
+   * line came back - usually the empty one after the final newline - and
+   * read as an empty file */
+  return {
+    from,
+    to: from + page.length - 1,
+    page,
+    ...(asked > all.length ? { pastEnd: `from_line ${asked} is past the end - the file has ${all.length} lines; its last line is shown` } : {}),
+  };
+}
+
+/* One page of `items` for a tool that pages by `offset` and `limit` (no
+ * limit: every match that fits), cut at the answer budget like examples and
+ * pitfalls. `taken` is the page; `notes` the answer's paging fields - where
+ * it starts, how many it carries, and the exact arguments that fetch the
+ * rest (`more`, absent when nothing is left; `same` names the arguments to
+ * repeat). */
+function pageWithin(items, args, same) {
+  const offset = boundedInt(args.offset, { name: 'offset', dflt: 0, min: 0 });
+  const limit = boundedInt(args.limit, { name: 'limit', dflt: 'every match that fits one answer', min: 1 });
+  const slice = items.slice(offset, typeof limit === 'number' ? offset + limit : undefined);
+  // entries sit two levels deep: { entries: [ ... ] }, { methods: [ ... ] }
+  const { taken } = takeWithin(slice, ANSWER_BUDGET - 5000, { depth: 2 });
+  const next = offset + taken.length;
+  return {
+    taken,
+    notes: {
+      ...(offset ? { offset } : {}),
+      returned: taken.length,
+      ...(next < items.length ? { more: `${items.length - next} more - call again with offset: ${next} ${same}` } : {}),
+    },
+  };
+}
+
 async function handle(name, args = {}, ctx = {}) {
   switch (name) {
     case 'capabilities': {
@@ -475,7 +530,10 @@ async function handle(name, args = {}, ctx = {}) {
         allowed: ['direct', 'workaround', 'needs-live-test', 'not-expressible'],
       });
       const hits = searchCapabilities({ query: args.query, status });
-      return text({ matches: hits.length, entries: hits });
+      /* Paged against the answer budget (lib/budget.mjs): a one-letter query
+       * matched most of the map, ~61,000 characters. */
+      const { taken, notes } = pageWithin(hits, args, '(same query and status)');
+      return text({ matches: hits.length, ...notes, entries: taken });
     }
     case 'examples': {
       /* Not `missingSibling`: one catalogue out of three being absent is not a
@@ -512,13 +570,19 @@ async function handle(name, args = {}, ctx = {}) {
       const all = searchExamples({ query: args.query, area, repo, limit: Number.MAX_SAFE_INTEGER });
       /* Paged against the answer budget too (lib/budget.mjs): 200 entries
        * were ~135 KB, over what a client accepts as one answer. */
-      const page = takeWithin(all.slice(offset, offset + limit), ANSWER_BUDGET - 5000);
+      const page = takeWithin(all.slice(offset, offset + limit), ANSWER_BUDGET - 5000, { depth: 2 });
       const nextOffset = offset + page.taken.length;
+      /* A generic word matches most of a catalogue through the controls the
+       * views build ("button": 424 matches, 135 of them only because the
+       * view has a Button) - said, so `matches` is not read as that many
+       * samples ABOUT the word. They are ranked after the others. */
+      const byBuilds = all.filter((e) => e.builds).length;
       return text({
         matches: all.length,
         ...(offset ? { offset } : {}),
         returned: page.taken.length,
         ...(nextOffset < all.length ? { more: `${all.length - nextOffset} more - call again with offset: ${nextOffset}` } : {}),
+        ...(byBuilds ? { foundByBuilds: `${byBuilds} of the ${all.length} matches needed a control their view builds to match (named under \`builds\`) - they come after the ${all.length - byBuilds} that match in the catalogues' own words; a sample that only builds a control is seldom about it` } : {}),
         searched,
         ...(notSearched.length ? { notSearched } : {}),
         repositories: Object.fromEntries(found.map((c) => [c.repo, c.url])),
@@ -551,6 +615,15 @@ async function handle(name, args = {}, ctx = {}) {
       let at;
       let from;
       if (root && !isRemoteCheckout(root) && fs.existsSync(path.join(root, file))) {
+        /* The path passed safeRelPath's string checks, but a checkout is
+         * untrusted content - a sample repo can ship src/.../x.clas.abap as a
+         * symbolic link to /etc/passwd or out of the tree, and reading through
+         * it would hand the client a file the repository does not contain.
+         * Refuse when the resolved path leaves the checkout (lib/remote.mjs). */
+        if (!resolvedInside(root, path.join(root, file))) {
+          return toolError(`refusing ${repo}/${file} — it resolves, through a symbolic link, outside the checkout at ${root}; `
+            + 'read_example reads files a repository actually contains');
+        }
         at = path.join(root, file);
         from = root;
       } else {
@@ -562,13 +635,21 @@ async function handle(name, args = {}, ctx = {}) {
             + (root ? `; the checkout at ${root} does not have it either (git pull?)` : ''));
         }
       }
-      const source = fs.readFileSync(at, 'utf8');
+      /* Paged by whole lines, like read_app: samples-controls' largest
+       * ports answered 84,000 characters, past what a client accepts as
+       * one answer - and the agent then read none of it. */
+      const all = fs.readFileSync(at, 'utf8').split('\n');
+      const page = linePage(all, args.from_line);
+      const paged = page.from > 1 || page.to < all.length;
+      const pastEnd = page.pastEnd ? { pastEnd: page.pastEnd } : {};
       return text({
         repo,
         path: file,
         from,
-        lines: source.split('\n').length,
-        source,
+        lines: all.length,
+        ...(paged ? { page: { from_line: page.from, to_line: page.to }, ...(page.to < all.length ? { nextPage: { from_line: page.to + 1 } } : {}) } : {}),
+        ...pastEnd,
+        source: page.page.join('\n'),
         next: 'take the pattern, not the file: an app of your own keeps its own class name, package and events (app_guide chapter 2)',
       });
     }
@@ -592,12 +673,19 @@ async function handle(name, args = {}, ctx = {}) {
             + ' — the chapters are listed above, or call it without arguments to read the whole guide',
         });
       }
+      /* Paged by CHAPTER, like pitfalls (lib/budget.mjs): the whole guide was
+       * 48,000 characters as written and grows with every chapter upstream -
+       * a few more and the default call, the one the description tells an
+       * agent to make first, would answer past the client's cap and show
+       * nothing. A chapter is never cut. */
+      const { taken, notes } = pageWithin(sections, args, '(same section and query)');
       return text({
         source: 'abap2UI5/' + GUIDE_PATH.join('/'),
         about: 'building an app WITH abap2UI5 (for porting a demo-kit sample, call generation_rules)',
         chapters,
         matches: sections.length,
-        sections,
+        ...notes,
+        sections: taken,
         next: 'write the class, then validate_view + screenshot_view — both answer in seconds, before any build',
       });
     }
@@ -623,7 +711,7 @@ async function handle(name, args = {}, ctx = {}) {
           + 'so a name outside this rule produces a repository that fails its own gate.');
       }
 
-      const { files, missing, spec, noSpec } = scaffold(root, {
+      const { files, missing, refused, spec, noSpec } = scaffold(root, {
         cls,
         packageText: args.package,
         repo: args.repo,
@@ -675,6 +763,7 @@ async function handle(name, args = {}, ctx = {}) {
          * repository, and a project quietly missing its CI workflow is not
          * noticed until somebody wonders why nothing is checked. */
         ...(missing.length ? { missing, warning: 'the template no longer has these — the project is incomplete without them' } : {}),
+        ...(refused.length ? { refused, refusedWhy: 'template.json lists these, and each is not a plain path inside the template or resolves, through a symbolic link, outside it - never served' } : {}),
         next: 'write these files, then `npm install` and `npm run check` (abaplint + the abap2UI5-linter). '
           + 'The app class is a working starting point: read app_guide before changing it.',
       });
@@ -716,7 +805,10 @@ async function handle(name, args = {}, ctx = {}) {
           throw new Error(`the app-template ${mirror ? 'mirror' : 'checkout'} at ${root} has no ${rel}, which its ${SPEC_FILE} lists — `
             + 'update it (git pull), or point APP_TEMPLATE_HOME at a complete checkout');
         }
-        return fs.readFileSync(at);
+        /* what is read here is written into the user's project: a template
+         * file that is a link out of the checkout (~/.ssh/id_rsa as CLAUDE.md)
+         * would be copied into it - refused (lib/contain.mjs) */
+        return readInside(root, rel, undefined, 'the app-template checkout');
       };
       let plan;
       try {
@@ -783,7 +875,11 @@ async function handle(name, args = {}, ctx = {}) {
         return toolError(`the abap2UI5 checkout has no ${API_PATH.join('/')} (looked in ${apiFile()}) — `
           + 'update it (git pull); the client API lives there');
       }
-      const kind = oneOf(args.kind, {
+      /* the singular names the same filter - `kind: "method"` is what an
+       * agent asking for one method types, and a refusal of it was a
+       * roundtrip for nothing. Anything else stays strict (lib/args.mjs). */
+      const SINGULAR = { method: 'methods', constant: 'constants', type: 'types' };
+      const kind = oneOf(Object.hasOwn(SINGULAR, args.kind ?? '') ? SINGULAR[args.kind] : args.kind, {
         name: 'kind', allowed: ['methods', 'constants', 'types', 'all'], dflt: 'all',
       });
       const parsed = api.parsed;
@@ -794,11 +890,24 @@ async function handle(name, args = {}, ctx = {}) {
         ...(kind !== 'methods' && kind !== 'types' && r.constants.length ? { constants: r.constants } : {}),
         ...(kind !== 'methods' && kind !== 'constants' && r.types.length ? { types: r.types } : {}),
       });
+      /* Both lists page the same way, by ENTRY - a method, a constant group,
+       * a type, in that order. The compact list ignored offset and limit and
+       * answered the whole surface to a call that asked for its second page. */
+      const paged = (found, same) => {
+        const flat = ['methods', 'constants', 'types'].flatMap((group) => (found[group] || []).map((entry) => ({ group, entry })));
+        const { taken, notes } = pageWithin(flat, args, same);
+        const groups = {};
+        for (const { group, entry } of taken) (groups[group] ||= []).push(entry);
+        return { total: flat.length, notes, groups };
+      };
       if (!args.query) {
+        const { total, notes, groups } = paged(pick(apiSummary(parsed)), '(same kind, no query)');
         return text({
           source: 'abap2UI5/' + API_PATH.join('/'),
           about: 'z2ui5_if_client — the complete API an app may call on `client`',
-          ...pick(apiSummary(parsed)),
+          entries: total,
+          ...notes,
+          ...groups,
           hint: 'pass `query` (keywords) for the matching methods/constants/types in full — signature, defaults, documentation',
         });
       }
@@ -810,7 +919,12 @@ async function handle(name, args = {}, ctx = {}) {
           hint: `nothing in z2ui5_if_client matches "${args.query}" — call without arguments for the compact list of every method and constant group`,
         });
       }
-      return text({ matches: total, source: 'abap2UI5/' + API_PATH.join('/'), ...found });
+      /* Paged by ENTRY - a method, a constant group, a type, in that order -
+       * against the answer budget: "e" matched almost the whole interface,
+       * ~75,000 characters. An entry is never cut (a signature belongs with
+       * its documentation). */
+      const { notes, groups } = paged(found, '(same query and kind)');
+      return text({ matches: total, ...notes, source: 'abap2UI5/' + API_PATH.join('/'), ...groups });
     }
     case 'generation_rules': {
       const miss = missingSibling('samples-controls');
@@ -824,7 +938,7 @@ async function handle(name, args = {}, ctx = {}) {
         return toolError(`the samples-controls checkout has no scripts/generation-prompt.txt (looked in ${p}) — `
           + 'update it (git pull); the rulebook lives there');
       }
-      const rules = fs.readFileSync(p, 'utf8');
+      const rules = readInside(resolveSamplesControls(), ['scripts', 'generation-prompt.txt'], 'utf8', 'the samples-controls checkout');
       return text(
         rules +
           '\n\n---\nThis is the PORTING brief. Building an app of your own instead? Call `app_guide`.\n' +
@@ -836,25 +950,32 @@ async function handle(name, args = {}, ctx = {}) {
       const miss = missingSibling('docs');
       if (miss) return miss;
       if (!args.query) return toolError('pass `query` — keywords to search the documentation for, e.g. "value help" or "launchpad"');
-      const entries = searchDocs({
-        query: args.query,
-        limit: boundedInt(args.limit, { name: 'limit', dflt: 10, min: 1, max: 50 }),
-      });
+      const limit = boundedInt(args.limit, { name: 'limit', dflt: 10, min: 1, max: 50 });
+      const offset = boundedInt(args.offset, { name: 'offset', dflt: 0, min: 0 });
+      /* Every hit, then the page: `matches` said how many were RETURNED - 10
+       * for a query 37 pages answer - so a narrow answer read as the whole
+       * site's, and nothing said where the rest was. */
+      const all = searchDocs({ query: args.query, limit: Number.MAX_SAFE_INTEGER });
       // the checkout can be there and the tree not: a half-finished pull, a
       // layout change upstream. Name the directory, the way app_guide does.
-      if (entries === null || !fs.existsSync(docsRoot())) {
+      if (all === null || !fs.existsSync(docsRoot())) {
         return toolError(`the docs checkout has no docs/ page tree (looked in ${docsRoot()}) — `
           + 'update it (git pull); the site sources live there');
       }
-      if (!entries.length) {
+      if (!all.length) {
         return text({
           matches: 0,
           hint: `no documentation page carries every term of "${args.query}" — fewer or broader terms widen the net; `
             + 'app_guide covers building an app, api_reference the client API',
         });
       }
+      const entries = all.slice(offset, offset + limit);
+      const next = offset + entries.length;
       return text({
-        matches: entries.length,
+        matches: all.length,
+        ...(offset ? { offset } : {}),
+        returned: entries.length,
+        ...(next < all.length ? { more: `${all.length - next} more - call again with offset: ${next} (same query), or add terms` } : {}),
         entries,
         next: 'fetch the `markdown` URL of the best hit for the whole page — or read docs/<path>.md in the checkout',
       });
@@ -883,7 +1004,8 @@ async function handle(name, args = {}, ctx = {}) {
        * `offset` counts sections across the catalogues, in order. */
       const offset = boundedInt(args.offset, { name: 'offset', dflt: 0, min: 0 });
       const flat = found.flatMap((c) => c.sections.map((sec) => ({ area: c.area, sec })));
-      const page = takeWithin(flat.slice(offset), ANSWER_BUDGET - 5000);
+      // a section sits four levels deep: { catalogues: [ { sections: [ ... ] } ] }
+      const page = takeWithin(flat.slice(offset), ANSWER_BUDGET - 5000, { depth: 4 });
       const nextOffset = offset + page.taken.length;
       const catalogues = found
         .map((c) => ({ ...c, sections: page.taken.filter((x) => x.area === c.area).map((x) => x.sec) }))
@@ -908,7 +1030,8 @@ async function handle(name, args = {}, ctx = {}) {
        * spawn as a TypeError nobody can act on. */
       const entities = stringArray(args.entities, { name: 'entities' });
       const { code, out } = await runScopeOf(entities, { signal: ctx.signal });
-      return text(`${out}\n\n(exit ${code}: 0 = all in scope, 1 = at least one out of scope or unresolved)`);
+      const note = scopeOfNote(out);
+      return text(`${out}\n\n(exit ${code}: 0 = all in scope, 1 = at least one out of scope or unresolved)${note ? `\n\n${note}` : ''}`);
     }
     case 'deploy_app': {
       const miss = missingSandbox();
@@ -958,22 +1081,17 @@ async function handle(name, args = {}, ctx = {}) {
           + 'remove_app without arguments lists the deployed ones');
       }
       /* Paged by whole lines: a class of 1,500 lines (migrate_report
-       * deploys them) answered 107,304 characters. */
+       * deploys them) answered 107,304 characters. Each line is measured
+       * as the answer writes it - JSON-escaped, its line break a `\n` - not
+       * raw: a class of JSON string templates went out ~35% over. */
       const all = res.source.split('\n');
-      const from = boundedInt(args.from_line, { name: 'from_line', dflt: 1, min: 1, max: Math.max(1, all.length) });
-      const page = [];
-      let used = 0;
-      for (let i = from - 1; i < all.length; i += 1) {
-        if (page.length && used + all[i].length + 1 > ANSWER_BUDGET - 5000) break;
-        page.push(all[i]);
-        used += all[i].length + 1;
-      }
-      const to = from + page.length - 1;
+      const { from, to, page, pastEnd } = linePage(all, args.from_line);
       const paged = from > 1 || to < all.length;
       return text({
         ...res,
         source: page.join('\n'),
         ...(paged ? { lines: { from, to, total: all.length }, ...(to < all.length ? { next: { from_line: to + 1 } } : {}) } : {}),
+        ...(pastEnd ? { pastEnd } : {}),
         ...(res.staleInBackend
           ? { hint: 'deployed after the last build — run_app still boots the older code; run build_backend' }
           : {}),
@@ -1051,26 +1169,39 @@ async function handle(name, args = {}, ctx = {}) {
       counts[result.renderSeverity || 'error'] += result.renderErrors.length;
       const failOn = opt.failOn || 'warning';
       const ok = failOn === 'never' || SEVERITIES.slice(severityRank(failOn)).every((s) => counts[s] === 0);
-      const rules = await explainRules(result.findings, args.explain === true);
+      const explained = await explainRules(result.findings, args.explain === true);
       // additive: fixable: true per finding fix_view can clear (older linter
       // without ./fix: no flag, findings untouched)
-      const findings = await flagFixable(result.findings);
+      /* the counts stay whole; the findings are listed most severe first,
+       * in source order within a severity (bySeverity), as many as fit one
+       * answer (lib/budget.mjs fitFindings) - a cut list is the head of it */
+      const rank = (f) => severityRank(severityOf(f));
+      /* explain: true is a paragraph per rule (~1,000 characters each), and a
+       * view that trips a dozen distinct rules carried them ALL - `rules`
+       * alone could pass the budget. Capped to half of it, the rules the most
+       * severe findings are about kept first (lib/budget.mjs fitRules); the
+       * findings then get what is left. */
+      const ruleOrder = [...new Set(bySeverity(result.findings, rank).map((f) => f.type).filter(Boolean))];
+      const { rules, cut: rulesCut } = explained
+        ? fitRules(explained, { budget: Math.floor((ANSWER_BUDGET - 10_000) / 2), order: ruleOrder })
+        : { rules: null, cut: 0 };
+      const room = Math.max(10_000, ANSWER_BUDGET - 10_000 - sizeOf(rules || {}, 1));
+      const fitted = fitFindings(bySeverity(await flagFixable(result.findings), rank), { budget: room, rankOf: rank });
+      const findings = fitted.findings;
       return text({
         ok,
         counts,
         findings,
+        ...(fitted.cut ? { findingsCut: `${fitted.cut} more finding(s) did not fit one answer - the most severe are listed, counts has them all: fix these and validate again` } : {}),
         ...(rules ? { rules } : {}),
+        ...(rulesCut ? { rulesCut: `${rulesCut} more rule explanation(s) left out to fit one answer - the kept ones are for the most severe findings; the rest are on the linter's rules page` } : {}),
         renderErrors: result.renderErrors,
         reconstructedDocs: result.docs.length,
         skippedRender: result.skippedRender ? `view parts in helper methods (${result.helperTokens} calls) — not statically reconstructable` : undefined,
         notes: result.notes,
         ...(renderSkipped ? { renderSkipped } : {}),
         config: configFile || undefined,
-        hint: counts.error === 0 && counts.warning > 0
-          ? 'what is left is about the UI5 version you target: fix it, raise min_ui5 if the system is newer, or accept it via allow'
-          : counts.error === 0 && counts.hint > 0
-            ? 'hints are advisory - an event without a handler is intended when the roundtrip alone is the point'
-            : undefined,
+        hint: validateHint(counts, findings),
       });
     }
     case 'fix_view': {
@@ -1099,11 +1230,20 @@ async function handle(name, args = {}, ctx = {}) {
         xml: args.xml,
         opt,
       });
-      const remaining = await flagFixable(res.remaining);
+      /* the corrected source is the answer's point and goes whole; the
+       * findings around it get what room is left (lib/budget.mjs) */
+      const room = Math.max(10_000, ANSWER_BUDGET - 10_000 - sizeOf(res.source || ''));
+      const fixedFit = fitFindings(res.fixed, { budget: Math.floor(room / 3) });
+      const { severityOf: sevOf, severityRank: sevRank } = await importViewCheck('./findings');
+      const rank = (f) => sevRank(sevOf(f));
+      const remainingFit = fitFindings(bySeverity(await flagFixable(res.remaining), rank), { budget: room - Math.floor(room / 3), rankOf: rank });
+      const remaining = remainingFit.findings;
       return text({
         applied: res.applied,
-        fixed: res.fixed,
+        fixed: fixedFit.findings,
+        ...(fixedFit.cut ? { fixedCut: `${fixedFit.cut} more fix(es) applied - all of them are in \`source\`` } : {}),
         remaining,
+        ...(remainingFit.cut ? { remainingCut: `${remainingFit.cut} more remaining finding(s) did not fit one answer - validate_view the corrected source for them` } : {}),
         config: configFile || undefined,
         source: res.source,
         note: res.applied
@@ -1251,13 +1391,19 @@ async function handle(name, args = {}, ctx = {}) {
       /* the running backend is stopped once the build really starts: a call
        * the in-flight build of another mode refuses leaves it running */
       const res = await buildBackend({ mode, onLine: progressReporter(ctx), signal: ctx.signal, beforeBuild: stopBackend });
+      if (res.joined) return toolError(`build_backend cancelled by the client: ${res.tail}`);
       if (res.aborted) return toolError(`build cancelled by the client (mode ${res.mode || mode}):\n${res.tail}`);
       if (!res.ok) return toolError(`build failed (exit ${res.code}, mode ${res.mode || mode}):\n${res.tail}`);
       return text({
         built: true,
         mode: res.mode,
         ...(res.runtime ? { runtime: `@abap2ui5/node-runtime ${res.runtime}` } : {}),
-        next: 'run_app { class_name } to boot and screenshot the app',
+        /* an explicit prebuilt/transpile builds the framework alone; auto
+         * goes on into the dev apps' incremental build by itself */
+        ...(res.devAppsNotBuilt ? { devAppsNotBuilt: res.devAppsNotBuilt } : {}),
+        next: res.devAppsNotBuilt
+          ? `the deployed dev app(s) ${res.devAppsNotBuilt.join(', ')} are not in this ${res.mode} build - build_backend (mode auto or incremental) transpiles them into it; then run_app { class_name }`
+          : 'run_app { class_name } to boot and screenshot the app',
         tail: res.tail.split('\n').slice(-5).join('\n'),
       });
     }
@@ -1281,8 +1427,10 @@ async function handle(name, args = {}, ctx = {}) {
       /* A stage that failed makes the CALL an error: the report used to come
        * back with isError false and `ok: false` inside, so a client (or an
        * agent) that goes by the protocol's flag saw a green verify_app. */
+      /* each stage is fitted alone; together they are fitted again
+       * (lib/budget.mjs fitVerifyStages) */
       const done = (stoppedAt, extra) => ({
-        ...text({ ok: !stoppedAt, ...(stoppedAt ? { stoppedAt } : {}), stages, ...(extra || {}) }),
+        ...text({ ok: !stoppedAt, ...(stoppedAt ? { stoppedAt } : {}), stages: fitVerifyStages(stages), ...(extra || {}) }),
         ...(stoppedAt ? { isError: true } : {}),
       });
       // 1. validate - skipped, not failed, without a linter checkout
@@ -1354,6 +1502,9 @@ async function handle(name, args = {}, ctx = {}) {
         booted: res.booted,
         ok: res.ok,
         errors: res.errors,
+        ...(res.errorsCut ? { errorsCut: res.errorsCut } : {}),
+        // UI5 resources that did not load while the app booted (a theme, a library)
+        ...(res.ui5 ? { ui5: res.ui5 } : {}),
         screenshot: res.screenshotPath,
         ...(res.screenshotNotSaved ? { screenshotNotSaved: res.screenshotNotSaved } : {}),
         ...(res.screenshotCut ? { screenshotCut: res.screenshotCut } : {}),
@@ -1384,6 +1535,9 @@ async function handle(name, args = {}, ctx = {}) {
         actions: res.actions,
         ...(res.notPerformed ? { notPerformed: res.notPerformed } : {}),
         errors: res.errors,
+        ...(res.errorsCut ? { errorsCut: res.errorsCut } : {}),
+        // UI5 resources that did not load while the app booted (a theme, a library)
+        ...(res.ui5 ? { ui5: res.ui5 } : {}),
         screenshot: res.screenshotPath,
         ...(res.screenshotNotSaved ? { screenshotNotSaved: res.screenshotNotSaved } : {}),
         ...(res.screenshotCut ? { screenshotCut: res.screenshotCut } : {}),
@@ -1415,7 +1569,7 @@ async function handle(name, args = {}, ctx = {}) {
       const maxRows = boundedInt(args.max_rows, { name: 'max_rows', dflt: 20, min: 0, max: 200 });
       await startBackend();
       const client = await agentClient();
-      return snapshotAnswer(() => client.start(cls, { values: args.values, maxRows }), { format, client });
+      return snapshotAnswer(() => client.start(cls, { values: args.values, maxRows, signal: ctx.signal }), { format, client });
     }
     case 'app_describe': {
       const maxRows = boundedInt(args.max_rows, { name: 'max_rows', dflt: undefined, min: 0, max: 200 });
@@ -1430,32 +1584,30 @@ async function handle(name, args = {}, ctx = {}) {
       // "", false and [] row 0 and true row 1
       const client = await agentClient();
       return snapshotAnswer(() => client.act(args.session, {
-        values: args.values, event: args.event, args: args.args, row: args.row, maxRows,
+        values: args.values, event: args.event, args: args.args, row: args.row, maxRows, signal: ctx.signal,
       }), { format, client });
     }
     case 'run_unit_tests': {
       const miss = missingBackend();
       if (miss) return miss;
       const report = progressReporter(ctx);
-      const classNames = args.class_names === undefined ? undefined : stringArray(args.class_names, { name: 'class_names', example: '["zcl_my_app", "zcl_my_other_app"]' });
-      const res = await runUnitTests({ className: args.class_name, classNames, signal: ctx.signal, onLine: report });
-      if (res.aborted || res.timedOut) return toolError(res.error);
-      /* Every test of a checkout's full run was 1,522 entries, 194,772
-       * characters: past the budget, the tests are counted per object and
-       * only the skipped ones are listed (the failure is `failed`). */
-      if (JSON.stringify(res).length > ANSWER_BUDGET - 5000) {
-        const perObject = {};
-        for (const t of res.tests) perObject[t.object] = (perObject[t.object] || 0) + 1;
-        const skippedTests = res.tests.filter((t) => t.skipped);
-        res.tests = undefined;
-        res.testsPerObject = perObject;
-        res.skippedTests = skippedTests.slice(0, 50);
-        res.testsNote = 'too many tests to list in one answer - counted per object; class_name or class_names lists a class\'s tests';
-      }
+      /* null is absent, as for every argument here (an empty list is refused
+       * by stringArray); a blank class_name is refused rather than read as
+       * "every test" - on a framework checkout that is minutes */
+      const everything = 'to run every deployed app\'s tests (on a framework checkout: the whole transpiled tree, which takes minutes)';
+      const className = optionalName(args.class_name, { name: 'class_name', absent: everything });
+      const classNames = args.class_names === undefined || args.class_names === null ? undefined : stringArray(args.class_names, { name: 'class_names', example: '["zcl_my_app", "zcl_my_other_app"]' });
+      const ran = await runUnitTests({ className, classNames, signal: ctx.signal, onLine: report });
+      if (ran.aborted || ran.timedOut) return toolError(ran.error);
+      /* Past the budget the tests are counted per object (lib/budget.mjs) -
+       * measured as text() writes the answer, indented: the compact size it
+       * was measured by let a 600-test class through at 68,000 characters. */
+      const res = fitUnitResult(ran);
       /* No test line at all is "no test class" only for a run that passed: a
        * class_setup that threw prints none either, and that hint sent an
-       * agent to redeploy tests that were there all along. */
-      if (res.class && res.ok && res.tests.length === 0) {
+       * agent to redeploy tests that were there all along. A run counted
+       * per object has tests - and no `tests` array to read (it threw). */
+      if (res.class && res.ok && Array.isArray(res.tests) && res.tests.length === 0) {
         return text({
           ...res,
           hint: `no test class of ${res.class} in the built backend — deploy_app with \`testclasses\`, then build_backend (a deploy after the last build is not in it yet: read_app says so)`,
@@ -1506,7 +1658,7 @@ async function handle(name, args = {}, ctx = {}) {
       try {
         res = await migrateReport({ source: args.source, textsXml: args.texts_xml, className: args.class_name || undefined, partial: args.partial === true });
       } catch (e) {
-        if (e instanceof SetupError) return toolError(e.message);
+        if (e instanceof SetupError || e instanceof KernelEscapeError) return toolError(e.message);
         throw e;
       }
       const reply = {
@@ -1516,6 +1668,7 @@ async function handle(name, args = {}, ctx = {}) {
         files: res.ok ? res.files : (res.draft || {}),
         ...(res.ok ? {} : { files_are: res.draft ? 'the draft (partial): refused statements are marked, it does not compile as it is' : 'none - the report was refused; pass partial: true for the draft' }),
         refusals: res.refusals,
+        ...(res.warnings.length ? { warnings: res.warnings } : {}),
         todos: res.todos.length,
         release: res.release.map((x) => `${x.kind} ${x.name}${x.successor ? ` (successor: ${x.successor})` : ''}`),
         migration_report: res.report,
@@ -1524,14 +1677,15 @@ async function handle(name, args = {}, ctx = {}) {
           : 'every refusal is a place the report does something a browser app does not do - rewrite those statements in the report (or decide on a design) and convert again',
       };
       // a big report is a big class: the mapped table goes first, never the class
-      if (JSON.stringify(reply).length > ANSWER_BUDGET) {
+      // (measured as text() writes it - indented, the size the client sees)
+      if (sizeOf(reply) > ANSWER_BUDGET) {
         const cut = reply.migration_report.indexOf('\n## Mapped');
         if (cut > 0) reply.migration_report = `${reply.migration_report.slice(0, cut)}\n\n## Mapped\n\n(left out - the answer would pass the client's size limit; convert with the report2cloud CLI for the full table)\n`;
       }
       if (args.deploy === true) reply.deploy = await deployMigrated(res, ctx);
       /* then the files: a report of 2,000 lines converted to 212,028
        * characters of them - named with their size, never cut mid-file */
-      if (JSON.stringify(reply).length > ANSWER_BUDGET && reply.files && typeof reply.files === 'object') {
+      if (sizeOf(reply) > ANSWER_BUDGET && reply.files && typeof reply.files === 'object') {
         reply.files = Object.fromEntries(Object.entries(reply.files).map(([k, v]) => [k, `(${String(v).length} characters - left out)`]));
         reply.files_left_out = 'the files would pass the client\'s size limit - deploy: true writes them to the dev sandbox, read_app reads them back page by page';
       }
@@ -1585,7 +1739,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
 /* The knowledge documents, as resources (lib/resources.mjs): listing is free
  * (names and URIs, no file touched), reading resolves the sibling live and
  * throws the same missing-checkout message the tools return — the client sees
- * it as the read request's JSON-RPC error. */
+ * it as the read request's JSON-RPC error. A read is fitted to the answer
+ * budget inside readResource (fitResourceText), the resources' counterpart
+ * of guardAnswer. */
 server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: RESOURCES }));
 server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({ resourceTemplates: RESOURCE_TEMPLATES }));
 server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
@@ -1621,10 +1777,13 @@ server.setRequestHandler(CompleteRequestSchema, async (req) => {
     .slice(0, 100); // the protocol's ceiling per answer
   return { completion: { values, total: values.length, hasMore: false } };
 });
-server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
+/* Every tool call, answered: the arguments checked, the call dispatched to
+ * the system mode's handlers or the sandbox's, and a throw turned into the
+ * tool error it is. Never registered on its own - answerToolCall below is. */
+async function dispatchToolCall(req, extra) {
   try {
     checkStringArgs(ACTIVE_TOOLS.find((t) => t.name === req.params.name), req.params.arguments || {});
-    if (SYSTEM) return await handleSystem(req.params.name, req.params.arguments || {});
+    if (SYSTEM) return await handleSystem(req.params.name, req.params.arguments || {}, { signal: extra && extra.signal });
     await hydrateRepos(REMOTE_TOOLS[req.params.name]);
     return await handle(req.params.name, req.params.arguments || {}, {
       progressToken: req.params._meta && req.params._meta.progressToken,
@@ -1638,7 +1797,18 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
   } catch (e) {
     return toolError(String((e && e.message) || e));
   }
-});
+}
+
+/* THE one place a tool result leaves this server - and so the one place
+ * guardAnswer (lib/budget.mjs), the last-line backstop, is applied: every
+ * tool fits its own answer, but a composed or unbounded one can still add up
+ * past the client's cap, and an over-cap answer shows the agent nothing. It
+ * wraps the dispatch whole, the error path of a throw included (an Error
+ * whose message carries a build's output is as long as that output).
+ * test/answer-guard.test.mjs fails when a second handler for tools/call
+ * appears or a result reaches the client without passing it. */
+const answerToolCall = async (req, extra) => guardAnswer(await dispatchToolCall(req, extra));
+server.setRequestHandler(CallToolRequestSchema, answerToolCall);
 
 /* A throw nobody caught costs ONE call, not the session.
  *
@@ -1701,7 +1871,7 @@ process.stdout.on('error', () => shutdown('stdout closed'));
 const transport = new StdioServerTransport();
 await server.connect(transport);
 if (SYSTEM) {
-  diagnostic(SYSTEM.problems.length ? 'warning' : 'info', `abap2ui5 MCP server ready in SYSTEM MODE (${SYSTEM.endpoint || SYSTEM.url}, user ${SYSTEM.user || '-'})`
+  diagnostic(SYSTEM.problems.length ? 'warning' : 'info', `abap2ui5 MCP server ready in SYSTEM MODE (${SYSTEM.endpoint || maskedUrl(SYSTEM.url)}, user ${SYSTEM.user || '-'})`
     + (SYSTEM.problems.length ? ` - misconfigured: ${SYSTEM.problems.join('; ')}` : ''));
 } else diagnostic('info', `abap2ui5 MCP server ready (samples-controls: ${resolveSamplesControls({ local: true })}, backend built: ${backendBuilt()}, `
   + `GitHub mirror for missing checkouts: ${Object.keys(RESOLVERS).some((k) => !resolveKey(k, { local: true })) ? 'on demand' : 'not needed'})`);

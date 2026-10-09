@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   hydrate, fetchRemoteFile, safeRelPath, isRemoteCheckout, readMarker, remoteRoot, remoteEnabled,
-  mirrorFresh, remoteStatus, lastHydrate, resetRemote, REMOTE_FILES, REMOTE_TOOLS, resourceRepos, MARKER, TEXT_MAX_BYTES,
+  mirrorFresh, remoteStatus, lastHydrate, resetRemote, FAILURE_BACKOFF_MS, REMOTE_FILES, REMOTE_OPTIONAL, REMOTE_TOOLS, resourceRepos, MARKER, TEXT_MAX_BYTES,
 } from '../lib/remote.mjs';
 import { resolveKey, REPO_DIRS } from '../lib/repos.mjs';
 import { privateDirProblem } from '../lib/private-dir.mjs';
@@ -78,6 +78,10 @@ test('the tool and resource tables name real tools, resources and repo keys', ()
   // verify_app runs deploy_app's handler inside one request: the hydrate step
   // is keyed on the tool the client called, so it has to name the same reads
   for (const k of REMOTE_TOOLS.deploy_app) assert.ok(REMOTE_TOOLS.verify_app.includes(k), `verify_app must hydrate '${k}' like deploy_app`);
+  // so do the tools that compose build_backend: verify_app, and migrate_report { deploy: true }
+  for (const composer of ['verify_app', 'migrate_report']) {
+    for (const k of REMOTE_TOOLS.build_backend) assert.ok((REMOTE_TOOLS[composer] || []).includes(k), `${composer} must hydrate '${k}' like build_backend`);
+  }
   assert.deepEqual(resourceRepos('abap2ui5://guide/5'), ['a2ui5']);
   assert.deepEqual(resourceRepos('abap2ui5://nothing'), []);
 });
@@ -93,7 +97,8 @@ test('hydrate fetches the fixed file list into a mirror the resolver then hands 
   assert.equal(res.fetched, true);
   assert.equal(res.root, remoteRoot('corpus'));
   assert.equal(path.dirname(res.root), dir);
-  assert.equal(fetchImpl.calls.length, REMOTE_FILES.corpus.length);
+  // the fixed list, and the optional files the fake does not have (404: left out)
+  assert.equal(fetchImpl.calls.length, REMOTE_FILES.corpus.length + REMOTE_OPTIONAL.corpus.length);
   assert.ok(fetchImpl.calls.every((u) => u.startsWith('https://raw.githubusercontent.com/abap2UI5/samples-controls/main/')));
   for (const f of REMOTE_FILES.corpus) assert.equal(fs.readFileSync(path.join(res.root, f), 'utf8'), `content of ${f}`);
   assert.ok(isRemoteCheckout(res.root));
@@ -108,7 +113,7 @@ test('hydrate fetches the fixed file list into a mirror the resolver then hands 
   // fresh: a second hydrate costs nothing
   const again = await hydrate('corpus', { local: null, fetchImpl });
   assert.equal(again.fromCache, true);
-  assert.equal(fetchImpl.calls.length, REMOTE_FILES.corpus.length, 'a fresh mirror is not fetched again');
+  assert.equal(fetchImpl.calls.length, REMOTE_FILES.corpus.length + REMOTE_OPTIONAL.corpus.length, 'a fresh mirror is not fetched again');
   assert.ok(mirrorFresh('corpus'));
 }));
 
@@ -147,7 +152,8 @@ test('a failed download leaves no half mirror, keeps a stale one, and the reason
   assert.match(remoteStatus('corpus'), /could not be fetched either: HTTP 404/);
   // a complete mirror, then the network goes away: the stale copy is kept
   const full = fakeFetch(Object.fromEntries(REMOTE_FILES.corpus.map((f) => [`/${f}`, `v1 ${f}`])));
-  assert.equal((await hydrate('corpus', { local: null, fetchImpl: full })).fetched, true);
+  // the failure is the answer for a while (FAILURE_BACKOFF_MS) - force tries regardless
+  assert.equal((await hydrate('corpus', { local: null, fetchImpl: full, force: true })).fetched, true);
   process.env.A2UI5_MCP_REMOTE_TTL_MS = '1';
   await new Promise((r) => setTimeout(r, 5));
   assert.equal(mirrorFresh('corpus'), false);
@@ -157,6 +163,41 @@ test('a failed download leaves no half mirror, keeps a stale one, and the reason
   assert.equal(stale.root, remoteRoot('corpus'));
   assert.equal(fs.readFileSync(path.join(stale.root, 'CAPABILITIES.md'), 'utf8'), 'v1 CAPABILITIES.md');
   assert.equal(remoteStatus('corpus'), '', 'a stale mirror still stands in, so the missing-checkout message says nothing');
+}));
+
+test('a failed download is not tried again for FAILURE_BACKOFF_MS - with or without a stale copy', withEnv(async () => {
+  assert.ok(FAILURE_BACKOFF_MS >= 60_000 && FAILURE_BACKOFF_MS <= 10 * 60_000, 'a few minutes');
+  const dead = fakeFetch({});
+  const first = await hydrate('corpus', { local: null, fetchImpl: dead });
+  assert.equal(first.root, null);
+  const calls = dead.calls.length;
+  assert.ok(calls > 0);
+  const again = await hydrate('corpus', { local: null, fetchImpl: dead });
+  assert.equal(dead.calls.length, calls, 'no second download while the failure is fresh');
+  assert.equal(again.root, null);
+  assert.equal(again.error, first.error);
+  assert.match(again.backoff, /^not retried for \d+ s$/);
+  assert.match(remoteStatus('corpus'), /could not be fetched either: HTTP 404/, 'the reason stays in the message');
+  /* and says when it is tried again: a user who fixed the network (a
+   * proxy, a token) read the same error for three minutes without a word
+   * that nothing had been tried */
+  assert.match(remoteStatus('corpus'), /HTTP 404.* \(tried \d+ s ago - not tried again for another \d+ s\)$/);
+  // a stale mirror stands in for the failure the same way
+  const full = fakeFetch(Object.fromEntries(REMOTE_FILES.corpus.map((f) => [`/${f}`, `v1 ${f}`])));
+  assert.equal((await hydrate('corpus', { local: null, fetchImpl: full, force: true })).fetched, true);
+  process.env.A2UI5_MCP_REMOTE_TTL_MS = '1';
+  await new Promise((r) => setTimeout(r, 5));
+  const staleFirst = await hydrate('corpus', { local: null, fetchImpl: dead });
+  assert.equal(staleFirst.stale, true);
+  const n = dead.calls.length;
+  const staleAgain = await hydrate('corpus', { local: null, fetchImpl: dead });
+  assert.equal(dead.calls.length, n, 'the stale copy, without waiting out another fetch');
+  assert.equal(staleAgain.stale, true);
+  assert.equal(staleAgain.root, remoteRoot('corpus'));
+  // once the backoff is over it is tried again
+  lastHydrate('corpus').failedAt -= FAILURE_BACKOFF_MS;
+  await hydrate('corpus', { local: null, fetchImpl: dead });
+  assert.ok(dead.calls.length > n);
 }));
 
 test('the template mirror follows template.json, the docs mirror the repository tree', withEnv(async () => {
@@ -217,6 +258,24 @@ test('a refresh takes out the files the repository no longer lists, and keeps th
   assert.ok(!fs.existsSync(path.join(again.root, 'docs/old.md')), 'a page gone upstream is gone from the mirror');
   assert.ok(fs.existsSync(path.join(again.root, 'docs/index.md')));
   assert.ok(fs.existsSync(onDemand), 'a file the marker never listed is not the refresh\'s to remove');
+}));
+
+/* catalogue-derived.json makes `examples` find a sample by a control its
+ * view builds - an improvement, never a precondition: a mirror carries it
+ * when the repository has it, goes without when it does not, and a refresh
+ * that no longer finds it takes the old copy away. */
+test('an optional mirror file is carried when it is there and never costs the mirror', withEnv(async () => {
+  assert.deepEqual(REMOTE_OPTIONAL.corpus, ['catalogue-derived.json']);
+  assert.deepEqual(REMOTE_OPTIONAL.samples, ['catalogue-derived.json']);
+  const files = Object.fromEntries(REMOTE_FILES.samples.map((f) => [`/${f}`, `content of ${f}`]));
+  const withDerived = await hydrate('samples', { local: null, force: true, fetchImpl: fakeFetch({ ...files, '/catalogue-derived.json': '{"controls":[]}' }) });
+  assert.equal(withDerived.fetched, true);
+  assert.equal(fs.readFileSync(path.join(withDerived.root, 'catalogue-derived.json'), 'utf8'), '{"controls":[]}');
+  assert.deepEqual(readMarker(withDerived.root).files, [...REMOTE_FILES.samples, 'catalogue-derived.json']);
+  const without = await hydrate('samples', { local: null, force: true, fetchImpl: fakeFetch(files) });
+  assert.equal(without.fetched, true, 'a 404 of an optional file is no failed mirror');
+  assert.ok(!fs.existsSync(path.join(without.root, 'catalogue-derived.json')), 'the copy of the last refresh is gone with it');
+  assert.deepEqual(readMarker(without.root).files, REMOTE_FILES.samples);
 }));
 
 test('fetchRemoteFile reads one file on demand, from the cache while fresh', withEnv(async () => {

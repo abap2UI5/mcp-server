@@ -14,7 +14,7 @@ import path from 'node:path';
 import {
   decideBackend, backendKind, sandbox, deployApp, removeApp, readAppSource, listDevApps, lintApp, buildBackend,
   backendBuilt, runUnitTests, setupStatus, backendStatus, frameworkLintConfig, npmLintTarget, npmModeProblem, planBuild,
-  npmPreferenceProblem, startBackend,
+  npmPreferenceProblem, startBackend, buildLog,
 } from '../lib/runtime.mjs';
 import { resetNpmBackend, appsDir, downportDir } from '../lib/npm-backend.mjs';
 import { fakeRelease, fakeTemplate, APP, TESTS, VERSION, CORE_SHA } from './helpers/npm-fixture.mjs';
@@ -203,6 +203,28 @@ test('without the runtime installed the lint says what is missing instead of gue
     process.env.PATH = saved;
     fs.rmSync(bin, { recursive: true, force: true });
   }
+}));
+
+/* buildNpm "never rejects", and build_backend records every build for
+ * build_log through that: a workspace whose open-abap-core/ or sandbox the
+ * build could not write threw out of it instead - the build was answered
+ * with a bare ENOTDIR / EEXIST and build_log kept the previous build. */
+test('a workspace the build cannot write into fails the build with a reason, recorded for build_log', withNpm(async (t, { workspace }) => {
+  // open-abap-core/ is a file: the fetch's temporary directory cannot be made
+  fs.rmSync(path.join(workspace, 'open-abap-core'), { recursive: true, force: true });
+  fs.writeFileSync(path.join(workspace, 'open-abap-core'), 'a file where the directory belongs');
+  const core = await buildBackend({ mode: 'npm' });
+  assert.equal(core.ok, false);
+  assert.match(core.tail, /open-abap-core: .*cannot be written: ENOTDIR/);
+  assert.equal(buildLog({ tail: 5 }).ok, false, 'the failed build is the one build_log answers for');
+  // the sandbox is a file: the transpile's input cannot be prepared
+  fs.rmSync(path.join(workspace, 'open-abap-core'));
+  fakeRelease(workspace);
+  fs.rmSync(path.join(workspace, 'sandbox'), { recursive: true, force: true });
+  fs.writeFileSync(path.join(workspace, 'sandbox'), 'a file where the sandbox belongs');
+  const box = await buildBackend({ mode: 'npm' });
+  assert.equal(box.ok, false);
+  assert.match(box.tail, /the build could not write its files: EEXIST/);
 }));
 
 test('build_backend on the package: the sandbox transpiled, the dev tests run alone, a removed app pruned', withNpm(async (t, { workspace, dir }) => {

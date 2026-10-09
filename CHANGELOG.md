@@ -2,6 +2,401 @@
 
 ## Unreleased
 
+- **The answer guard shrinks in near-linear time.** `guardAnswer` (and
+  `fitObject`) halved the largest array or string of an over-budget JSON
+  answer in a loop that re-serialised the whole value twice per cut, and a
+  string already trimmed as far as it goes was picked again on every step
+  until the 10,000-step guard: 2.5 s of CPU for a 474 KB answer of 480 rule
+  explanations, and ~230 s for the property test in `test/paging.test.mjs`,
+  which made it most of CI's test job. Every node is now sized once, the
+  sizes are updated by the difference a cut makes, a heap names the largest,
+  and a cut that changes nothing ends the loop: the same 474 KB answer takes
+  4 ms, the property test (still its 400 seeded cases, and now asserting that
+  a shrunk JSON block parses) 3.5 s. The cuts are exactly the ones made
+  before - same order, same notes, never over the budget - which a new test
+  pins against the literal rule over seeded values at every budget a cut
+  passes through.
+- **The texts an agent reads say what the answers do.** A drift sweep of
+  the tool and schema descriptions, the prompts, the resources, the README,
+  docs/agent-snapshot.md, SECURITY.md and server.json against the code:
+  `examples`, `docs_search`, `pitfalls`, `read_app` and `read_example`
+  declared their paging arguments (`offset`, `from_line`) without their
+  descriptions saying they page, or naming `pastEnd`; `validate_view` and
+  `fix_view` never named `rulesCut`, `fixedCut` or `remainingCut`, nor
+  `run_app` `errorsCut`, `screenshotCut` (at 4096 px) or
+  `screenshotNotSaved`, `screenshot_view` `notAttached`, `interact_app`
+  `notPerformed`, `run_unit_tests` its per-object count; `build_backend`
+  documented neither mode `npm` nor that a client's cancel stops it nor
+  `devAppsNotBuilt`; `migrate_report` said nothing of the `@KERNEL`
+  refusal, the dynamic-WHERE warning or the files it leaves out of a large
+  answer; `add_agent_setup` nothing of the directories it refuses or the
+  links it skips; `scaffold_app` nothing of its pages; the app tools
+  nothing of how a large snapshot is fitted (and its note promised that
+  `max_rows` pages a cut table - it does not; `rowCount` and `app_act` reach
+  every row); the build prompt told the agent to read `app_guide` and
+  `pitfalls` whole in one call, which pages; `capabilities` answers
+  entries for a `status` alone too; the README named the screenshot file
+  `<class>.png` and said booting needs no network without the corpus;
+  SECURITY.md described the child environment by category and left out
+  `NODE_ENV`, `DEBUG`, `NODE_ICU_DATA`, `NODE_USE_ENV_PROXY` and
+  `LD_LIBRARY_PATH`; the boot timeouts' bounds were nowhere. Three tests
+  keep it so: every paging argument a schema declares is named in its
+  description, every `...Cut` field the code answers is in AGENTS.md's
+  vocabulary and in a description, and SECURITY.md names exactly the
+  allowlisted variables.
+- **A resource read fits the client too.** `resources/read` handed the
+  documents over whole with no guard, and two of them are past what a
+  client shows of one read - `abap2ui5://pitfalls/abap` (105,000
+  characters) and `abap2ui5://capabilities` (62,000) - so a client that
+  caps resources showed nothing. A document past the answer budget is now
+  cut at a section heading and ends in a note naming the call that reads on
+  from the first section left out (`pitfalls { area: "abap", offset: 4 }`,
+  counted by the tool's own slicer); a JSON resource is shrunk as JSON; the
+  MCP Apps screen, HTML a host renders, is never cut. The descriptions of
+  the document resources say so.
+- **`run_unit_tests { class_name: "" }` is refused instead of running
+  everything.** A blank name was read as no name, and on a framework
+  checkout that runs the whole transpiled tree - minutes - for what was a
+  name gone missing; it is refused now, naming what leaving the argument
+  out does (`optionalName` in `lib/args.mjs`). And `class_names: null` is
+  absent, as null is for every other argument, where it was refused as "not
+  an array" (an empty list stays refused).
+- **`examples` survives a catalogue field of an unexpected type.** A
+  `catalogue.json` entry with a numeric `title` (or an object `summary`,
+  keywords that are a number) threw out of `.trim()` in `catalogueEntries`,
+  and the repository's whole JSON was lost with it - the search fell back to
+  `SAMPLES.md`, or failed outright over an injected catalogue. Every field
+  is now coerced (a number or boolean as written) or dropped (an object, an
+  array where text belongs); an entry whose class is an object or blank is
+  skipped.
+- **`add_agent_setup` refuses the home directory and the forbidden
+  directories on Windows whatever their spelling.** The checks compared
+  paths case-sensitively, and on Windows neither the resolved path nor
+  `os.homedir()` comes back in one canonical case - `C:\USERS\ME` was "not
+  the home directory", a differently cased path into this server's
+  installation not inside it. Under the win32 path semantics both sides are
+  folded now (`pathWithin`), the same for the writes' own containment
+  checks; POSIX stays case-sensitive. Tested with `path.win32` over a fake
+  Windows disk, so it is pinned on every machine.
+- **`system_status` no longer reads a logon page as a working logon.** Any
+  `200` was "accepted the logon" - and an ICF node with a form or SSO logon
+  answers Basic credentials it does not take with its HTML logon page, a
+  `200`. The answer is `ok` now only when the abap2UI5 start page answers
+  (the `z2ui5` component the framework's `_http_get` shell declares); a
+  logon page is a problem that says the endpoint must accept Basic
+  authentication, any other page one that asks whether the URL is the ICF
+  service's path.
+- **No tool answer can pass the client's size limit any more - a backstop at
+  the one place answers are serialised.** Every tool already fits its own
+  answer (the paging vocabulary), but a composed or unbounded one could still
+  add up past the cap, and a client handed more than its cap shows the agent
+  NOTHING. `guardAnswer` (`lib/budget.mjs`) now wraps every tool result at the
+  single dispatch point: an over-budget answer has its largest array fields
+  and longest strings trimmed the documented way (a JSON block stays JSON; a
+  `__answerGuardCut` note says it happened and how to page the rest), so no
+  answer leaves over the budget whatever a per-tool fitter missed. Per-tool
+  fitting stays the primary mechanism; this is the last line. A seeded
+  property test drives 400 oversized results through it. Two spots that could
+  reach the edge are also fixed at the source: `validate_view` (and so
+  `verify_app`) caps `explain: true`'s rule explanations (`fitRules`) - a
+  view tripping a dozen distinct rules carried them all, and `rules` alone
+  could pass the budget while only the findings beside it were ever shrunk
+  (`rulesCut` now names what was left out, the most severe findings' rules
+  kept first) - and `migrate_report { deploy: true }` fits its composed
+  deploy/build/start stages together (`fitObject`). The guard wraps the
+  WHOLE dispatch - `server.mjs` registers one tools/call handler,
+  `guardAnswer(await dispatchToolCall(...))`, so the error answer of a
+  throw (whose message can carry a build's output) passes it too - and it
+  holds an answer's pictures to `IMAGE_BUDGET` as well (8 MB of base64,
+  formerly `screenshot_view`'s alone). `test/answer-guard.test.mjs` makes
+  the guarantee fail-able: it checks the single registration in the source,
+  and sweeps every tool name (sandbox and system mode, an unknown name, a
+  bad argument) over stdio under a test-only loader hook that marks what
+  guardAnswer returned - an answer that bypassed it carries no mark, and
+  every content block is measured against its budget.
+- **Security: a hostile checkout can no longer steer a read or a write
+  outside it through a symbolic link.** The path checks (`safeRelPath`, the
+  sandbox name gate) stopped a `..` or an absolute path in a STRING; they did
+  not stop a symbolic link in the checkout itself, and a checkout is
+  untrusted content (a sample cloned from GitHub, an app under deploy).
+  `read_example` reading a "sample" that is a link to a file outside the
+  repository, `docs_search` walking a page directory symlinked out of the
+  docs tree (or into a cycle), and `deploy_app` / `migrate_report`'s deploy /
+  `read_app` writing or reading through a link planted in the dev sandbox all
+  now refuse when the path - every symlink on it resolved - leaves the
+  intended root (`resolvedInside`, now in `lib/contain.mjs`). A sweep of
+  every file read and write found the rest, and they go through the same
+  check now: the guide (`app_guide` and its resources), the interface
+  (`api_reference`), both pitfall catalogues, the capability map, the
+  porting brief (`generation_rules`), the sample catalogues `examples`
+  searches, the docs tree's root itself (a `docs -> ~` link walked the home
+  directory), every template file `scaffold_app` serves (template.json may
+  also no longer list `../` paths - both are answered as `refused`) and
+  `add_agent_setup` copies into a project (and the `check-pin.mjs` it
+  imports), the support classes `migrate_report { deploy: true }` copies,
+  the sandbox the npm build hands the transpiler, the corpus copies the
+  incremental build makes and the lint config it writes into a checkout.
+  A DANGLING link counted as inside (its parent resolved inside) and a
+  write through it creates its target wherever it points - it is outside
+  now; and the sandbox and project writes open with `O_NOFOLLOW`
+  (`writeNoFollow`), so a link that appears after the check fails the
+  write instead of redirecting it. `test/security.test.mjs` pins each.
+- **Security hardening: what transpiled ABAP can reach.** open-abap's
+  `@KERNEL` escape (`WRITE '@KERNEL <js>'.`) turns a literal into JavaScript
+  once transpiled, and that code runs in the backend and unit-test children
+  with `process.env` in reach. Running the app is trusted code (SECURITY.md);
+  this is defence in depth, not a substitute for not deploying untrusted
+  ABAP. Two changes:
+  - The children no longer inherit this server's environment: they get an
+    ALLOWLIST (`appChildEnv` in `lib/runtime.mjs`) - `PATH`, the home and
+    temp directories, `TZ` and the locale, `NODE_OPTIONS`, the CA/TLS and
+    proxy variables, `NODE_ENV`/`DEBUG`, the Windows system variables -
+    plus `PORT` and the loopback `HOST`, never `ALLOWED_HOSTS`. A denylist
+    of the secrets this server knows (the GitHub token, the system-mode
+    credentials) would still hand over everything else a shell exports -
+    cloud keys, registry tokens. Enumerated from what the children read
+    (the npm host, the framework's `express.mjs`, the runtime and express -
+    `NODE_ENV` and `DEBUG` are all of it - and Node itself; the Windows
+    names from Node's documentation), and measured: `deploy_app`, `build_backend`, `app_start`
+    and `run_unit_tests` ran end to end on the npm backend from a parent
+    environment of decoys (`GITHUB_TOKEN`, `AWS_SECRET_ACCESS_KEY`,
+    `NPM_TOKEN`, `DATABASE_URL`, the SAP password, `ALLOWED_HOSTS=*`) with
+    an app and a test class that print `Object.keys(process.env)` through
+    `@KERNEL` - both children saw only allowlisted names - and the
+    framework checkout's backend booted and served an app the same way.
+    The build, lint, git and npm children run no app code and keep the
+    full environment. `test/backend.test.mjs` pins it, the spawned child
+    included.
+  - `migrate_report` refuses a report that contains the escape (comments
+    aside), and any converter output that does, before anything is
+    converted or written - with the place and the remedy. On an SAP system
+    the statement writes a line of text, so no classic report has a reason
+    to carry it, and report2cloud copies a refused statement into the
+    `partial` draft as it is (a local class's `WRITE`), where a later
+    deploy would run it; flagging it instead would leave the live escape
+    in the files of the answer. open-abap has no other source-level escape
+    (`CALL '<kernel>'` dispatches to a fixed list, `GENERATE SUBROUTINE
+    POOL` and `INSERT REPORT` throw) - but `@abaplint/runtime` evaluates a
+    dynamic `LOOP AT ... WHERE (<condition>)` with `eval()`, so a condition
+    built from a selection-screen field is code injection on the backend.
+    That is ordinary ABAP: converted, and flagged in a new `warnings` list.
+    `test/migrate.test.mjs` pins both.
+
+- **`scope_of` says when the OpenUI5 checkout is what is missing.**
+  Without the checkout samples-controls' `scripts/scope-of.mjs` reads
+  the JSDoc from (`OPENUI5_SRC`, else `fork-openui5` beside the corpus),
+  every OpenUI5 entity came back "UNRESOLVED (no source .js found - check
+  the entity name / fork checkout)", `sap.m.Wizard` included - an answer
+  that reads like a misspelt name. It now says the checkout is not there,
+  where it belongs, and that `validate_view` answers the 1.71 question for
+  a view without it.
+- **`run_app` and `interact_app` say when UI5 itself did not load.** The
+  UI5 runtime comes from the corpus' `@openui5` packages or the CDN, and a
+  failed load of it was in no report: with `sdk.openui5.org` out of reach
+  and no local packages, the answer was "boot: page.waitForFunction:
+  Timeout 60000ms exceeded" and a blank picture - nothing an agent could
+  tell from a broken app - and an app that booted without its theme was
+  `ok` with an unstyled screenshot. A UI5 bootstrap that did not load is
+  now an error naming the URL, the reason and the remedy (and that
+  `app_start` needs no browser); a booted app whose theme or a library
+  did not load carries a `ui5` note.
+- **`validate_view`'s hint is about the findings that are left.** Any
+  hint made it explain that "an event without a handler is intended when
+  the roundtrip alone is the point" - beside an unused namespace or a
+  spelled-out `get_event_arg( 1 )`, neither of them about events (bench
+  task 13's reference, samples-controls 533) - and it never said that
+  `fix_view` clears the findings marked `fixable`. It names the event
+  case only when an event finding is there, and `fix_view` when a listed
+  finding is fixable.
+- **`app_act` says what to pass for a control id only the browser knows.**
+  A row button without an id of its own that opens a popover next to it
+  (`${$source>/id}`, the shape of samples 052 and bench task 13) was
+  refused with "cannot be read here - pass it in args[0]", and nothing
+  said what value that could be: the id is a clone id UI5 generates. The
+  refusal now says so and that any id will do for a backend that only
+  anchors a popover to it - this client places no popover. In the vendored
+  `lib/appclient.mjs`: the VS Code extension and abap2UI5/protocol pick it
+  up with their next re-vendor.
+- **`examples` finds a sample by the controls its view builds.** The
+  search read only the catalogue's own words - what a sample is filed
+  under and the keywords somebody chose - so `sap.m.Dialog` found 7 of the
+  33 samples-controls ports that build one, `sap.m.SelectDialog` 2 of 8,
+  `sap.m.Table` 23 of 62. samples and samples-controls commit
+  `catalogue-derived.json` beside the catalogue: every control type each
+  view builds. A query now matches those too, ranked below every match in
+  the catalogue's words (whose order is the one without the file), and a
+  hit that needed them names the controls it was found by under `builds`;
+  `foundByBuilds` counts those hits - a generic word like `button` matches
+  135 more samples that merely build one. The GitHub mirror carries the file when the repository has it
+  and is never refused for its absence; without it the search is the old one.
+- **abap2UI5-bench no longer counts the app's own method as a client call**
+  (`bench/`, not part of the package). The `expect` check's `calls`
+  matched any `->name(`, and the canonical template names its helpers
+  like the client methods they wrap - so `me->popup_display( )` passed
+  "calls: popup_display" for a solution that never called
+  `client->popup_display` (a dialog sent through `popover_display`
+  graded PASS). A call on `me` no longer counts; the new broken variant
+  `own-method-not-client` pins it, and every reference still passes.
+- **A first `build_backend` on a checkout builds the deployed apps too.**
+  With an abap2UI5 checkout and no prior build, mode `auto` downloaded
+  the prebuilt backend - the framework alone - and answered `built` with
+  `next: run_app`; the app deployed before it was in none of it, so
+  `app_start` answered HTTP 500 "does not exist", `app_list` was empty
+  and `verify_app` failed its boot stage on every first run. `auto` now
+  goes on into the incremental build of the deployed apps in the same call
+  (`mode: prebuilt+incremental`); an explicit `prebuilt` or `transpile`
+  still builds the framework alone and names the apps it left out
+  (`devAppsNotBuilt`, and a `next` that says how to add them).
+- **`docs_search` counts every matching page.** `matches` was the number
+  of pages it returned - 10 for a query 37 pages answer - so a cut answer
+  read as the whole site's, and nothing said where the rest was. `matches`
+  counts every hit now, `returned` the page, and `more` names the new
+  `offset` that continues it.
+- **`read_example` pages a long sample by lines.** It answered the file
+  whole, and samples-controls' largest ports are 84,000 characters - past
+  what a client accepts, so the agent read none of it. A long sample comes
+  in pages of whole lines now (`page`, `nextPage`, `from_line`), measured
+  as the answer is written, like `read_app`. A `from_line` past the end -
+  in either tool - was clamped to the last line without a word, usually
+  the empty line after the final newline, and read as an empty file; the
+  last line still comes back, with `pastEnd` naming the line count.
+- **An npm build that cannot write its files fails with a reason.** A
+  workspace whose `open-abap-core/` or sandbox the build could not write
+  (a file where the directory belongs, a read-only or full disk) threw out
+  of the build: `build_backend` answered a bare `ENOTDIR` and `build_log`
+  kept the previous build's record. The fetch and the transpile answer a
+  sentence now, and the failed build is the one `build_log` shows.
+- **An action list that is no list is refused with a sentence.** A
+  response whose `S_ACTION.T_SYSTEM` or `T_CUSTOM` was an object or a
+  number made `app_start` / `app_act` answer "object is not iterable" -
+  `applyResponse` threw a TypeError. The client now refuses such a
+  response naming the list, and `applyResponse` folds it as an empty list.
+  Both are in the vendored modules (`lib/appclient.mjs`,
+  `lib/snapshot.mjs`): the VS Code extension and abap2UI5/protocol pick
+  the change up with their next re-vendor.
+- **A `build_backend` that joined the running build can be cancelled, and
+  reports progress.** A second call of the same mode joins the build in
+  flight, and its own cancel was ignored: the request stayed open until
+  the build ended (tens of minutes for a full one). It stops waiting now
+  and answers as cancelled; the build goes on for the call that started
+  it. And a joined call with a `progressToken` heard no progress
+  notification until the build ended - it follows the build's lines now,
+  until the build ends or the call is cancelled.
+- **`app_guide` pages by chapter.** The default call - the one its
+  description tells an agent to make first - answered the whole guide,
+  48,000 characters of the 60,000 an answer may carry, and the guide grows
+  upstream. Chapters that fit come back, `more` names the `offset` to
+  continue at, and `limit` caps the chapters, like `capabilities` and
+  `api_reference`; a chapter is never cut.
+- **`run_app` and `interact_app` list a repeated error once.** A page that
+  throws from a timer, or a poll the backend answers 500, pushed the same
+  line into `errors` for every occurrence - a 100 ms interval over a 60 s
+  boot is 600 lines, 180,000 characters, and the client showed the agent
+  nothing. A repeated message is listed once with its count (`(600
+  times)`), at most 20 distinct ones are listed and `errorsCut` counts the
+  rest; `ok` still counts every error.
+- **`validate_view` and `fix_view` fit a view with hundreds of findings.**
+  600 broken buttons answered 538,000 and 584,000 characters, and the
+  client showed the agent none of them. The findings are listed most
+  severe first, in source order within a severity (they came in the order
+  the gates produced them - a warning on line 140, a hint on 108, a
+  warning on 26), and the ones that fit are the head of that list;
+  `counts` stays whole and `findingsCut` / `remainingCut` say how many
+  were left out; `fix_view`'s corrected source and `validate_view`'s rule
+  explanations (`explain: true`, about 1,000 characters a rule) always go
+  whole, and the findings get the room that is left. `verify_app`, which
+  composes the tools' answers, fits its stages together too: a passed
+  validate stage gives up findings first, then the unit stage counts its
+  tests per object (a few hundred hints and tests were ~100,000
+  characters).
+- **`build_log`, `build_backend` and `read_app` answers fit.** `build_log`
+  answered `tail` lines whatever their length (2,000 transpiler lines:
+  464,000 characters) - the last lines that fit come back now, a line past
+  4,000 characters shortened, and `cut` names the call that reads the
+  rest. A failed `build_backend` put its 30-line tail into the answer
+  unshortened (1.5 million characters for a build that prints a bundle per
+  line). `read_app` paged by raw characters while the answer escapes every
+  quote: a class of JSON templates went out at 73,000 characters.
+- **`interact_app` refuses a step it would perform otherwise than asked.**
+  The tool's arguments are type-checked, its steps were not: `{ comit:
+  false }` and `{ commit: "false" }` committed the fill anyway and
+  `{ ms: true }` waited 1 ms, each reported as performed. A step's unknown
+  field, a `commit` that is no boolean and an `ms` that is no number are
+  refused naming the step.
+- **`setup_status` finds git, tar, npm and npx without `which`.** It
+  spawned `which` (`where` on Windows) once per program, with no timeout,
+  and on an image without `which` reported every program missing. The PATH
+  is scanned in-process now, with PATHEXT on Windows.
+- **`migrate_report { deploy: true }` installs the template's abaplint.**
+  It runs `build_backend`, whose npm install reads app-template's
+  `@abaplint/cli` pin, but the mirror is hydrated per tool the client
+  called - on a machine without the template checkout the build fell back
+  to `ABAPLINT_CLI_FALLBACK`. `migrate_report` hydrates the template like
+  `build_backend` and `verify_app` do.
+- **`run_app` and `interact_app` keep the 50 newest pictures**, not every
+  one: each call wrote a full-page PNG of its own name and nothing removed
+  them. Only files of the server's own name pattern are removed, so a
+  directory `A2UI5_MCP_SCREENSHOT_DIR` names keeps the user's files.
+- **A failed boot setup no longer leaks a browser context.** A throw of
+  `newPage`, of the benign-rules import or of `page.route` in `run_app` /
+  `interact_app` left the context open for the life of the server and a
+  listener on the request's signal; both are released now.
+- **A failed mirror download is not retried on every call.** Without a
+  checkout and with GitHub unreachable, every call of a mirrored tool waited
+  out the 20 s fetch timeout again (`examples`, three mirrors, a minute).
+  A failure is now the answer for three minutes - the stale copy when there
+  is one, the reason in the missing-checkout message otherwise, with how
+  long ago it was tried and when it is tried again.
+- **A client's cancel reaches the app tools' roundtrip.** `app_start` and
+  `app_act` (sandbox and system mode) waited out the client's 120 s
+  timeout after `notifications/cancelled`, holding the session's queue the
+  whole time. The request's signal is combined with the timeout now
+  (`start`/`act` take a `signal` option, so the vendored client keeps its
+  defaults): the roundtrip is aborted, the act refused as cancelled and its
+  edits taken back.
+- **A port another process holds fails the backend start instead of
+  handing the app tools to that process.** Under express 5 the npm host's
+  `app.listen()` called back with the bind error too: the host printed
+  "Listening on", exited 0 a moment later, and `startBackend`'s port wait
+  was answered by whoever held the port - `app_start` and `run_app` then
+  talked to a foreign server. The host listens on a plain `http.Server`
+  now and exits 1 with "port N on 127.0.0.1 is in use by another process"
+  (also over a release whose own `serve()` has the bug). And on both
+  backends a child that exits right after "Listening on" fails the start:
+  the port's owner answered the port wait before the exit was seen, and
+  two starts in three still reported the backend running - the child now
+  has to stay up half a second past its "Listening on" (the start ends
+  early when it exits).
+- **System mode never logs the password of a refused URL.** With
+  credentials in `A2UI5_MCP_SYSTEM_URL` (refused) or a URL that does not
+  parse, the "ready in SYSTEM MODE" notification showed the raw URL, user
+  and password included. It shows a masked URL now, masked up to the LAST
+  `@` - `https://alice:pa@ss@host` used to keep `ss` - and an `@` before
+  the query is refused as credentials (`https://alice:12/ss@host` parsed
+  as a host `alice` and was shown as the endpoint).
+- **`run_unit_tests` no longer throws on a long passing run of one class,
+  and its answer fits.** Past the budget it dropped `tests` and then read
+  `tests.length` (a TypeError); and it measured compact JSON while the
+  answer is indented, so 600 tests went out at 68,000 characters. Measured
+  as written now (`sizeOf`); `migrate_report`'s cuts the same way.
+- **`capabilities` and `api_reference` are paged** like `examples`:
+  `offset` and `limit`, `returned`, a `more` that names the next offset,
+  every entry whole. A broad query answered ~61,000 and ~75,000
+  characters. `api_reference` pages its compact list (no `query`) the same
+  way, by entry, counting `entries`, and takes `kind` in the singular
+  (`method`, `constant`, `type`), which it refused. Pages are measured at
+  the depth their entries sit in the answer, `examples` and `pitfalls`
+  too: a full `examples` page came out ~2% over the budget.
+- **`ALLOWED_HOSTS` from the user's shell no longer reaches the backend.**
+  The framework's `express.mjs` reads `ALLOWED_HOSTS=*` as "answer any Host
+  and any Origin", which switched its DNS-rebinding guard off for the dev
+  backend.
+- The checkout backend, the corpus' e2e build, `scope_of` and the checkout's
+  unit-test runner run on this server's own node (`process.execPath`), as
+  the npm backend already did, not on whichever `node` the PATH finds first.
+- The npm host no longer mounts the release's compression twice
+  (`createApp({ compression: false })` behind its own `compress`); the
+  responses are byte for byte the same.
 - **Evicting an app session leaves a newer one with the same draft id
   reachable.** Sessions started from one screen share its id (the
   playground's Pilot starts one per change of the reader's typing), and the

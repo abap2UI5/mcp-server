@@ -18,7 +18,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { programNameOf, validTargetClass, resolvePopups, loadReport2cloud, migrateReport, deployFiles, POPUP_FILES } from '../lib/migrate.mjs';
+import { programNameOf, validTargetClass, resolvePopups, loadReport2cloud, migrateReport, deployFiles, POPUP_FILES, transpilerHazards, codeOfLine, KernelEscapeError } from '../lib/migrate.mjs';
 import { resolveCloudGui } from '../lib/repos.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -133,6 +133,78 @@ test('migrateReport: a refused report - file:row:col and the reason, no class un
   assert.match(partial.draft['zcl_mcp_r2c_refused.clas.abap'], /report2cloud refused \(line 4\)/);
 });
 
+/* open-abap's @KERNEL escape: on SAP `WRITE '@KERNEL x'.` writes text, the
+ * transpiler copies x into the module as JavaScript. Comments are no code. */
+test('transpilerHazards: @KERNEL literals outside comments, any case and blank; dynamic LOOP WHERE', () => {
+  assert.equal(codeOfLine(`  WRITE 'a"b'. " '@KERNEL x'`), `  WRITE 'a"b'. `);
+  assert.equal(codeOfLine(`* WRITE '@KERNEL x'.`), '');
+  assert.equal(codeOfLine('  x = |say "hi" { a }|. " c'), '  x = |say "hi" { a }|. ');
+  const h = transpilerHazards([
+    'REPORT z.',
+    "* WRITE '@KERNEL commented'.",
+    "  WRITE 'x'. \" WRITE '@KERNEL trailing comment'",
+    '  WRITE:',
+    "   '@kernel\tprocess.exit(1);'.",
+    "  WRITE '@KERNELISH'.",
+    '  LOOP AT lt INTO ls',
+    '    WHERE (lv_cond).',
+    '  ENDLOOP.',
+    '  LOOP AT lt INTO ls WHERE a = b.',
+    '  ENDLOOP.',
+  ].join('\n'));
+  assert.deepEqual(h.kernel.map((k) => [k.row, k.col]), [[5, 4]], 'the live one only - not a comment, not @KERNELISH');
+  assert.deepEqual(h.dynamicWhere.map((k) => k.row), [7], 'the dynamic WHERE, not the static one');
+});
+
+test('migrateReport refuses a report with the @KERNEL escape - before report2cloud runs, nothing converted', async () => {
+  const src = "REPORT zk.\nSTART-OF-SELECTION.\n  WRITE '@KERNEL require(\"child_process\").execSync(\"id\");'.\n";
+  // no checkout needed: the refusal comes first (dir points nowhere)
+  await assert.rejects(migrateReport({ source: src, dir: path.join(ROOT, 'test', 'does-not-exist') }), (e) => {
+    assert.ok(e instanceof KernelEscapeError, e.message);
+    assert.match(e.message, /zk\.prog\.abap:3:9/);
+    assert.match(e.message, /JavaScript/);
+    assert.match(e.message, /Nothing was converted or written/);
+    return true;
+  });
+});
+
+/* The output side: whatever a converter assembles, no escape leaves the tool.
+ * A stand-in report2cloud that writes one into its draft. */
+test('migrateReport refuses converter output that carries the escape', async () => {
+  const fake = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-fake-r2c-'));
+  try {
+    const lib = path.join(fake, 'tools', 'report2cloud', 'lib');
+    fs.mkdirSync(lib, { recursive: true });
+    fs.writeFileSync(path.join(lib, 'convert.mjs'), `export function convert() {
+  return { ok: false, className: 'zcl_k', programName: 'zk', files: {}, refusals: [], todos: [], release: [], notes: [],
+    draft: { 'zcl_k.clas.locals_imp.abap': "CLASS lcl IMPLEMENTATION.\\n  METHOD m.\\n    WRITE '@KERNEL x();'.\\n  ENDMETHOD.\\nENDCLASS.\\n" } };
+}`);
+    fs.writeFileSync(path.join(lib, 'textpool.mjs'), 'export function parseTextpool() { return {}; }');
+    fs.writeFileSync(path.join(lib, 'report.mjs'), "export function migrationReport() { return ''; }");
+    await assert.rejects(migrateReport({ source: 'REPORT zk.\n', partial: true, dir: fake }),
+      /report2cloud's output contains open-abap's @KERNEL escape - zcl_k\.clas\.locals_imp\.abap:3:11/);
+  } finally {
+    fs.rmSync(fake, { recursive: true, force: true });
+  }
+});
+
+test('migrateReport: a dynamic LOOP WHERE is converted and flagged as code injection', { skip: noConverter }, async () => {
+  const src = 'REPORT zk.\nDATA lt TYPE string_table.\nDATA lv TYPE string.\nPARAMETERS p TYPE string.\nSTART-OF-SELECTION.\n  LOOP AT lt INTO lv WHERE (p).\n  ENDLOOP.\n';
+  const r = await migrateReport({ source: src });
+  assert.equal(r.ok, true);
+  assert.equal(r.warnings.length, 1);
+  assert.match(r.warnings[0].at, /zk\.prog\.abap:6:3/);
+  assert.match(r.warnings[0].message, /evaluated as JavaScript/);
+});
+
+/* report2cloud copies a refused statement into the partial draft as it is:
+ * the one path where the escape survived conversion verbatim. */
+test('migrateReport partial: a refused local-class WRITE with the escape never reaches the draft', { skip: noConverter }, async () => {
+  const src = "REPORT zk.\nCLASS lcl DEFINITION.\n  PUBLIC SECTION.\n    CLASS-METHODS m.\nENDCLASS.\nCLASS lcl IMPLEMENTATION.\n  METHOD m.\n"
+    + "    WRITE '@KERNEL console.log(3);'.\n  ENDMETHOD.\nENDCLASS.\nSTART-OF-SELECTION.\n  lcl=>m( ).\n";
+  await assert.rejects(migrateReport({ source: src, partial: true }), KernelEscapeError);
+});
+
 /** A minimal MCP client over the server's stdio. */
 function stdioServer(env) {
   const p = spawn(process.execPath, [path.join(ROOT, 'server.mjs')], { stdio: ['pipe', 'pipe', 'ignore'], env });
@@ -190,6 +262,11 @@ test('the migrate_report tool over stdio: the class, the migration report, the r
     assert.match(bad.content[0].text, /no ABAP class name/);
     const empty = await srv.call('migrate_report', { source: '  ' });
     assert.equal(empty.isError, true);
+
+    // open-abap's code escape: refused with the place and the reason, deploy or not
+    const kernel = await srv.call('migrate_report', { source: "REPORT zk.\nSTART-OF-SELECTION.\n  WRITE '@KERNEL x();'.\n", deploy: true });
+    assert.equal(kernel.isError, true);
+    assert.match(kernel.content[0].text, /^refusing to convert: the report contains open-abap's @KERNEL escape - zk\.prog\.abap:3:9/);
   } finally {
     srv.close();
   }
