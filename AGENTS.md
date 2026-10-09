@@ -1100,6 +1100,15 @@ legitimately slower.
   reaching the client as the read request's JSON-RPC error —
   `test/missing-siblings.test.mjs` pins both). The resources hand over the
   same documents the tools slice; nothing may be bundled or paraphrased here.
+  A third rule since the abap-check catalogue passed 100,000 characters:
+  **a read fits the answer budget too** (`fitResourceText`): a document past
+  `ANSWER_BUDGET` is cut at a `## ` heading (else `### `, else a line end)
+  and ends in a note naming the call that pages the same document from the
+  first section left out - the offset counted by that tool's own slicer
+  (`sliceGuide`, `sliceCatalogue`), so `test/paging.test.mjs` can check that
+  offset k - 1 is the last section shown. A JSON resource is shrunk as JSON;
+  the MCP Apps screen is HTML a host renders and is never cut. A new
+  document resource names its `rest`.
 - **The prompt surface: `lib/prompts.mjs`, two prompts, deliberately no
   more** — `build-an-abap2ui5-app` and `port-a-ui5-sample`, one per job this
   server serves (the same split app_guide vs generation_rules draws). A

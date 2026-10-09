@@ -1739,7 +1739,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
 /* The knowledge documents, as resources (lib/resources.mjs): listing is free
  * (names and URIs, no file touched), reading resolves the sibling live and
  * throws the same missing-checkout message the tools return — the client sees
- * it as the read request's JSON-RPC error. */
+ * it as the read request's JSON-RPC error. A read is fitted to the answer
+ * budget inside readResource (fitResourceText), the resources' counterpart
+ * of guardAnswer. */
 server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: RESOURCES }));
 server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({ resourceTemplates: RESOURCE_TEMPLATES }));
 server.setRequestHandler(ReadResourceRequestSchema, async (req) => {

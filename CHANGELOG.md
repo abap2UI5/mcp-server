@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **A resource read fits the client too.** `resources/read` handed the
+  documents over whole with no guard, and two of them are past what a
+  client shows of one read - `abap2ui5://pitfalls/abap` (105,000
+  characters) and `abap2ui5://capabilities` (62,000) - so a client that
+  caps resources showed nothing. A document past the answer budget is now
+  cut at a section heading and ends in a note naming the call that reads on
+  from the first section left out (`pitfalls { area: "abap", offset: 4 }`,
+  counted by the tool's own slicer); a JSON resource is shrunk as JSON; the
+  MCP Apps screen, HTML a host renders, is never cut. The descriptions of
+  the document resources say so.
 - **`run_unit_tests { class_name: "" }` is refused instead of running
   everything.** A blank name was read as no name, and on a framework
   checkout that runs the whole transpiled tree - minutes - for what was a

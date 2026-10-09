@@ -16,6 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { fitResourceText } from '../lib/resources.mjs';
 import { ANSWER_BUDGET, sizeOf, takeWithin, takeSmallestWithin, fitSnapshot, fitUnitResult, fitFindings, fitRules, fitObject, fitVerifyStages, guardAnswer } from '../lib/budget.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -111,7 +112,7 @@ function fakes() {
   return base;
 }
 
-async function withServer(fn) {
+async function withServer(fn, { raw = null } = {}) {
   const base = fakes();
   const nowhere = path.join(base, 'nowhere');
   const transport = new StdioClientTransport({
@@ -134,6 +135,7 @@ async function withServer(fn) {
   });
   const client = new Client({ name: 'paging', version: '0' }, { capabilities: {} });
   await client.connect(transport);
+  if (raw) raw(client);
   try {
     await fn(async (name, args, { budget = LIMIT, error = false } = {}) => {
       const r = await client.callTool({ name, arguments: args });
@@ -503,6 +505,46 @@ test('run_unit_tests refuses a blank class_name and reads a null class_names as 
     assert.equal(all.ran, 2100, 'null for both is the whole run, as leaving both out is');
     assert.match(await call('run_unit_tests', { class_names: [] }, { error: true }), /class_names is empty/);
   });
+});
+
+/* resources/read had no guard: the abap-check catalogue is 105,000
+ * characters whole, the capability map 62,000 - over what a client shows of
+ * one read. A document is now cut on a heading its paging tool knows, and
+ * the note names the call that reads on - from exactly the first section
+ * not shown. */
+test('resources/read fits a document into one answer and names the call that continues it', async () => {
+  let client;
+  await withServer(async (call) => {
+    const read = async (uri) => (await client.readResource({ uri })).contents[0].text;
+    for (const [uri, tool, args, list, heading] of [
+      ['abap2ui5://pitfalls/abap', 'pitfalls', { area: 'abap' }, (r) => r.catalogues[0].sections, /^## (.*)$/gm],
+      ['abap2ui5://guide', 'app_guide', {}, (r) => r.sections, /^## (.*)$/gm],
+    ]) {
+      const t = await read(uri);
+      assert.ok(t.length <= ANSWER_BUDGET, `${uri}: ${t.length} characters`);
+      const note = /\[resource cut to fit the client size limit: (\d+) of (\d+) characters left out - (\w+) \{ (?:area: "abap", )?offset: (\d+) \}/.exec(t);
+      assert.ok(note, `${uri} says nothing about the cut: ${t.slice(-300)}`);
+      assert.equal(note[3], tool);
+      const shown = [...t.matchAll(heading)].map((m) => m[1]);
+      const k = Number(note[4]);
+      // offset k is the first section left out, offset k - 1 the last one shown
+      const next = list(await call(tool, { ...args, offset: k }));
+      assert.ok(!shown.includes(next[0].heading), `${uri}: offset ${k} repeats ${next[0].heading}`);
+      const last = list(await call(tool, { ...args, offset: k - 1 }));
+      assert.equal(last[0].heading, shown[shown.length - 1], `${uri}: offset ${k} is not the first section left out`);
+    }
+    const caps = await read('abap2ui5://capabilities');
+    assert.ok(caps.length <= ANSWER_BUDGET);
+    assert.match(caps, /\n\[resource cut to fit the client size limit: \d+ of \d+ characters left out - the capabilities tool/);
+    assert.match(caps.split('\n[resource cut')[0], /\|\n*$/, 'the map is cut at a line end, never inside a row');
+    // a document that fits is served as it is
+    assert.doesNotMatch(await read('abap2ui5://pitfalls/view'), /resource cut/);
+    // a JSON resource is shrunk as JSON: it still parses
+    const big = JSON.stringify({ methods: Array.from({ length: 3000 }, (_, i) => ({ name: `m${i}`, doc: 'x'.repeat(60) })) }, null, 2);
+    const json = fitResourceText(big, { mimeType: 'application/json', rest: () => 'api_reference' });
+    assert.ok(json.length <= ANSWER_BUDGET, `${json.length}`);
+    assert.ok(JSON.parse(json).__answerGuardCut, 'the shrunk JSON says it was cut');
+  }, { raw: (c) => { client = c; } });
 });
 
 test('fitUnitResult: a result that fits is the same object; past the budget tests are counted per object', () => {

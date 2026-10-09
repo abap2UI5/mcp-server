@@ -528,7 +528,11 @@ clients that surface them (context pickers, attach-a-document UIs) and for
 agents that want a document whole instead of sliced. Same live reads from the
 same sibling checkouts: listing is free (no checkout needed), reading a
 resource whose checkout is missing answers with the same actionable error the
-tool gives.
+tool gives. A document longer than a client shows of one read (about
+60,000 characters - today the abap-check catalogue and the capability map)
+is cut at a section heading, and its last line names the tool call that
+reads on from the first section left out (`pitfalls { area, offset }`,
+`app_guide { offset }`, `capabilities { status }`).
 The one resource that is not a document is `ui://abap2ui5/app-screen`, the
 MCP Apps screen of the app tools (see "The screen in the chat" above); it is
 part of this server and needs no checkout.
