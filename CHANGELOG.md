@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **The answer guard shrinks in near-linear time.** `guardAnswer` (and
+  `fitObject`) halved the largest array or string of an over-budget JSON
+  answer in a loop that re-serialised the whole value twice per cut, and a
+  string already trimmed as far as it goes was picked again on every step
+  until the 10,000-step guard: 2.5 s of CPU for a 474 KB answer of 480 rule
+  explanations, and ~230 s for the property test in `test/paging.test.mjs`,
+  which made it most of CI's test job. Every node is now sized once, the
+  sizes are updated by the difference a cut makes, a heap names the largest,
+  and a cut that changes nothing ends the loop: the same 474 KB answer takes
+  4 ms, the property test (still its 400 seeded cases, and now asserting that
+  a shrunk JSON block parses) 3.5 s. The cuts are exactly the ones made
+  before - same order, same notes, never over the budget - which a new test
+  pins against the literal rule over seeded values at every budget a cut
+  passes through.
 - **The texts an agent reads say what the answers do.** A drift sweep of
   the tool and schema descriptions, the prompts, the resources, the README,
   docs/agent-snapshot.md, SECURITY.md and server.json against the code:

@@ -695,7 +695,11 @@ test('fitObject bounds a composed object and leaves a note', () => {
 
 /* guardAnswer: the one last-line backstop. A seeded run of oversized results
  * - JSON and prose, one to three content blocks - proves NO answer leaves it
- * over the budget, whatever a per-tool fitter missed. */
+ * over the budget, whatever a per-tool fitter missed. (It took ~230 s while
+ * the shrink re-serialised the whole value on every cut - the 'wide' case
+ * re-picked a string trimmed as far as it goes until the 10,000-step guard;
+ * the cuts are now sized incrementally, the next test pins that they are the
+ * same cuts.) */
 test('guardAnswer: no result ever leaves over the budget, and JSON stays JSON when it can', () => {
   // a result within budget is returned untouched
   const ok = { content: [{ type: 'text', text: JSON.stringify({ a: 1 }) }] };
@@ -726,19 +730,102 @@ test('guardAnswer: no result ever leaves over the budget, and JSON stays JSON wh
     }
     // an image block sometimes, which must not count against the text budget
     if (rnd() < 0.3) blocks.push({ type: 'image', data: 'i'.repeat(100000), mimeType: 'image/png' });
-    const before = blocks.map((bl) => (bl.text ? JSON.parse(JSON.stringify(bl)) : null));
+    const wasJson = blocks.map((bl) => {
+      const t = typeof bl.text === 'string' ? bl.text : bl.resource?.text;
+      try { return typeof t === 'string' && typeof JSON.parse(t) === 'object'; } catch { return false; }
+    });
     const guarded = guardAnswer({ content: blocks });
     const total = guarded.content.reduce((s, bl) => s + (typeof bl.text === 'string' ? bl.text.length : (bl.resource && typeof bl.resource.text === 'string' ? bl.resource.text.length : 0)), 0);
     assert.ok(total <= ANSWER_BUDGET, `run ${i}: ${total} characters over ${ANSWER_BUDGET}`);
-    // a block that was already within its share is untouched; a shrunk JSON
-    // block parses (unless it had to be hard-truncated as the last resort)
-    for (const bl of guarded.content) {
+    // a shrunk JSON block parses (unless it had to be hard-truncated as the
+    // last resort, which says so)
+    guarded.content.forEach((bl, k) => {
       const ref = typeof bl.text === 'string' ? bl : (bl.resource && typeof bl.resource.text === 'string' ? bl.resource : null);
-      if (!ref) continue;
-      if (!/truncated to fit/.test(ref.text)) {
-        try { JSON.parse(ref.text); } catch { /* prose block: not JSON to begin with */ }
-      }
+      if (!ref || !wasJson[k] || /truncated to fit/.test(ref.text)) return;
+      assert.doesNotThrow(() => JSON.parse(ref.text), `run ${i}, block ${k}: a shrunk JSON block is JSON`);
+    });
+  }
+});
+
+/* The shrink behind guardAnswer and fitObject sizes every node once and keeps
+ * the sizes current; what it cuts must stay exactly what the literal rule
+ * cuts - halve the largest array (compact JSON length) or string (length)
+ * until the indented JSON fits. The literal rule is here as the oracle,
+ * re-serialising on every step (fine at this size), over seeded values with
+ * escapes, astral characters, nesting, empty containers, a root array and a
+ * GUARD_MARK already present - including the strings a cut cannot shorten
+ * any further, where the literal loop would only spin to its guard. */
+test('the shrink makes exactly the cuts of the literal halve-the-largest rule', () => {
+  const MARK = '__answerGuardCut';
+  const literal = (value, budget) => {
+    const largest = (root) => {
+      let best = null;
+      const consider = (size, shrink) => { if (size > (best ? best.size : 200)) best = { size, shrink }; };
+      const visit = (v, set) => {
+        if (Array.isArray(v)) {
+          if (v.length > 1) consider(JSON.stringify(v).length, () => set(v.slice(0, Math.max(1, Math.floor(v.length / 2)))));
+          v.forEach((c, i) => visit(c, (nv) => { v[i] = nv; }));
+        } else if (v && typeof v === 'object') {
+          for (const k of Object.keys(v)) if (k !== MARK) visit(v[k], (nv) => { v[k] = nv; });
+        } else if (typeof v === 'string' && v.length > 200) {
+          consider(v.length, () => set(`${v.slice(0, Math.max(200, Math.floor(v.length / 2)))}...[cut to fit the answer]`));
+        }
+      };
+      visit(root, () => {});
+      return best;
+    };
+    let cut = false;
+    for (let guard = 0; guard < 10_000 && sizeOf(value) > budget; guard += 1) {
+      const node = largest(value);
+      if (!node) break;
+      const before = JSON.stringify(value);
+      node.shrink();
+      cut = true;
+      if (JSON.stringify(value) === before) break; // the same node, forever
+    }
+    if (cut && !Array.isArray(value)) value[MARK] = 'set';
+    return value;
+  };
+  let seed = 4242;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  const pick = (a) => a[Math.floor(rnd() * a.length)];
+  const chars = ['a', 'b', '"', '\\', '\n', '\u00e9', '\ud83d\ude00', '\u0001', ' ', 'x'];
+  const str = (max) => Array.from({ length: Math.floor(rnd() * max) }, () => pick(chars)).join('');
+  const val = (d) => {
+    const r = rnd();
+    if (d > 2 || r < 0.35) {
+      const q = rnd();
+      if (q < 0.5) return str(rnd() < 0.3 ? 900 : 120);
+      if (q < 0.7) return Math.floor(rnd() * 1e6) / (rnd() < 0.5 ? 1 : 7);
+      return q < 0.8 ? null : rnd() < 0.5;
+    }
+    if (r < 0.7) return Array.from({ length: Math.floor(rnd() * 8) }, () => val(d + 1));
+    return Object.fromEntries(Array.from({ length: Math.floor(rnd() * 8) }, (_, i) => [rnd() < 0.05 ? MARK : `k${str(6)}${i}`, val(d + 1)]));
+  };
+  const copy = (v) => JSON.parse(JSON.stringify(v));
+  let compared = 0;
+  for (let i = 0; i < 500; i += 1) {
+    let v = val(0);
+    if (rnd() < 0.5) v = { root: v, other: val(1) };
+    else if (rnd() < 0.2) v = [v, val(1), str(500)];
+    // ties: the same subtree twice, where the first in document order is cut
+    if (rnd() < 0.3 && v && typeof v === 'object' && !Array.isArray(v)) v.twins = [copy(v), copy(v)];
+    if (!v || typeof v !== 'object') continue;
+    // every size the literal rule passes through on its way down, and one
+    // character under each: a budget exactly at a step stops there, one
+    // under needs the next cut - an off-by-one in any size shows
+    const sizes = [];
+    literal(copy(v), 0, sizes);
+    const budgets = new Set([sizeOf(v), sizeOf(v) - 1, Math.floor(rnd() * 3000)]);
+    for (const n of sizes) { budgets.add(n); budgets.add(n - 1); }
+    for (const budget of budgets) {
+      const got = fitObject(v, budget);
+      const want = sizeOf(v) <= budget ? v : literal(copy(v), budget);
+      if (!Array.isArray(want) && want[MARK] === 'set') want[MARK] = got[MARK];
+      assert.equal(JSON.stringify(got), JSON.stringify(want), `case ${i} (budget ${budget})`);
+      compared += 1;
     }
   }
+  assert.ok(compared > 1000, `${compared} budgets compared`);
 });
 
