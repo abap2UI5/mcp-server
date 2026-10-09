@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+- **The texts an agent reads say what the answers do.** A drift sweep of
+  the tool and schema descriptions, the prompts, the resources, the README,
+  docs/agent-snapshot.md, SECURITY.md and server.json against the code:
+  `examples`, `docs_search`, `pitfalls`, `read_app` and `read_example`
+  declared their paging arguments (`offset`, `from_line`) without their
+  descriptions saying they page, or naming `pastEnd`; `validate_view` and
+  `fix_view` never named `rulesCut`, `fixedCut` or `remainingCut`, nor
+  `run_app` `errorsCut`, `screenshotCut` (at 4096 px) or
+  `screenshotNotSaved`, `screenshot_view` `notAttached`, `interact_app`
+  `notPerformed`, `run_unit_tests` its per-object count; `build_backend`
+  documented neither mode `npm` nor that a client's cancel stops it nor
+  `devAppsNotBuilt`; `migrate_report` said nothing of the `@KERNEL`
+  refusal, the dynamic-WHERE warning or the files it leaves out of a large
+  answer; `add_agent_setup` nothing of the directories it refuses or the
+  links it skips; `scaffold_app` nothing of its pages; the app tools
+  nothing of how a large snapshot is fitted (and its note promised that
+  `max_rows` pages a cut table - it does not; `rowCount` and `app_act` reach
+  every row); the build prompt told the agent to read `app_guide` and
+  `pitfalls` whole in one call, which pages; `capabilities` answers
+  entries for a `status` alone too; the README named the screenshot file
+  `<class>.png` and said booting needs no network without the corpus;
+  SECURITY.md described the child environment by category and left out
+  `NODE_ENV`, `DEBUG`, `NODE_ICU_DATA`, `NODE_USE_ENV_PROXY` and
+  `LD_LIBRARY_PATH`; the boot timeouts' bounds were nowhere. Three tests
+  keep it so: every paging argument a schema declares is named in its
+  description, every `...Cut` field the code answers is in AGENTS.md's
+  vocabulary and in a description, and SECURITY.md names exactly the
+  allowlisted variables.
 - **A resource read fits the client too.** `resources/read` handed the
   documents over whole with no guard, and two of them are past what a
   client shows of one read - `abap2ui5://pitfalls/abap` (105,000

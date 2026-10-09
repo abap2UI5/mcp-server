@@ -264,3 +264,21 @@ test('deployFiles skips a support file that is a link out of its checkout', () =
     fs.rmSync(base, { recursive: true, force: true });
   }
 });
+
+/* SECURITY.md is where a reader learns what transpiled ABAP can read from
+ * the environment, and it described the allowlist by category - NODE_ENV,
+ * DEBUG, NODE_ICU_DATA, NODE_USE_ENV_PROXY and LD_LIBRARY_PATH were passed
+ * and named nowhere. Both directions: every allowed name is in the
+ * paragraph, and every variable the paragraph names is allowed. */
+test('SECURITY.md names exactly the environment the app children are given', async () => {
+  const { CHILD_ENV_NAMES } = await import('../lib/runtime.mjs');
+  const doc = fs.readFileSync(path.join(ROOT, 'SECURITY.md'), 'utf8');
+  const para = /\*\*A child that runs the app gets an allowlisted environment\.\*\*[\s\S]*?\n- \*\*/.exec(doc);
+  assert.ok(para, 'SECURITY.md lost its allowlist paragraph');
+  const named = new Set([...para[0].matchAll(/`([A-Z][A-Z0-9_]*)`/g)].map((m) => m[1]));
+  for (const name of CHILD_ENV_NAMES) assert.ok(named.has(name), `${name} is passed to the app children and SECURITY.md does not say so`);
+  for (const name of named) {
+    if (['PORT', 'HOST', 'LC_'].includes(name)) continue; // set by backendEnv, and the LC_* family
+    assert.ok(CHILD_ENV_NAMES.includes(name), `SECURITY.md says ${name} reaches the app children; appChildEnv does not pass it`);
+  }
+});

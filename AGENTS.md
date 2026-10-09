@@ -1180,9 +1180,16 @@ legitimately slower.
   `lines` + `next`; `read_example`: `page` + `nextPage`, because its
   `lines` and `next` were taken before it paged) and answer a `from_line`
   past the end with `pastEnd`; a list that is cut rather than paged says
-  what was left out in a `...Cut` sentence (`findingsCut`,
+  what was left out in a `...Cut` sentence (`findingsCut`, `rulesCut`,
   `remainingCut`, `fixedCut`, `errorsCut`, `screenshotCut`, `build_log`'s
-  `cut`). A new paging field takes one of these names. A
+  `cut`; the backstop's `__answerGuardCut`). Older names outside it, kept
+  because a client reads them: `scaffold_app`'s `remaining`,
+  `migrate_report`'s `files_left_out` (its fields are snake_case),
+  `run_unit_tests`' `testsPerObject` + `testsNote`, `screenshot_view`'s
+  per-view `notAttached`. A new paging field takes one of these names, and
+  the tool description says it - `test/tool-surface.test.mjs` fails on a
+  `...Cut` field the code answers that this list or the tool's description
+  does not name, and on a paging argument a description does not mention. A
   tool whose answer can grow with upstream content pages the same way, never
   by dropping content. **Measure what is sent**: `text()` writes indented
   JSON, so a size is `sizeOf` (with the `depth` an item sits at in the

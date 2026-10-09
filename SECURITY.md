@@ -69,11 +69,20 @@ Worth knowing before assessing a report:
   backend and the unit-test runner execute the transpiled ABAP, and
   open-abap's `@KERNEL` escape gives that code `process.env`. They inherit
   only what Node, the runtime and an app's outbound HTTP need - `PATH`, the
-  home and temp directories, `TZ` and the locale, `NODE_OPTIONS`, the CA and
-  TLS variables, the proxy variables (a proxy URL may carry its
-  credentials: it is passed because an app's HTTP needs it as much as the
-  server's), the Windows system variables - plus `PORT` and the loopback
-  `HOST` (`appChildEnv` in `lib/runtime.mjs` lists each with its reader).
+  home and temp directories (`HOME`, `USERPROFILE`, `TMPDIR`, `TMP`,
+  `TEMP`), `TZ` and the locale (`LANG`, `LANGUAGE`, `LC_*`), `NODE_ENV` and
+  `DEBUG` (express reads them), `NODE_OPTIONS`, `NODE_ICU_DATA`, the CA and
+  TLS variables (`NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `SSL_CERT_DIR`,
+  `OPENSSL_CONF`, and `LD_LIBRARY_PATH` for the libraries they load), the
+  proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `ALL_PROXY`,
+  `NODE_USE_ENV_PROXY` - a proxy URL may carry its credentials: it is passed
+  because an app's HTTP needs it as much as the server's), the Windows
+  system variables (`SYSTEMROOT`, `WINDIR`, `COMSPEC`, `PATHEXT`,
+  `SYSTEMDRIVE`, `APPDATA`, `LOCALAPPDATA`, `USERNAME`, `USERDOMAIN`,
+  `PROCESSOR_ARCHITECTURE`, `NUMBER_OF_PROCESSORS`) - plus `PORT` and the
+  loopback `HOST` (`appChildEnv` in `lib/runtime.mjs` lists each with its
+  reader; `test/security.test.mjs` fails when this list and that one
+  differ).
   The GitHub token, the system-mode SAP credentials and anything else the
   user's shell exports (cloud keys, registry tokens) stay with the server.
   Defence in depth: deploying ABAP is running code with your privileges, and
