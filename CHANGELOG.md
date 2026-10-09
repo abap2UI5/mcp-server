@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **`app_act` says what to pass for a control id only the browser knows.**
+  A row button without an id of its own that opens a popover next to it
+  (`${$source>/id}`, the shape of samples 052 and bench task 13) was
+  refused with "cannot be read here - pass it in args[0]", and nothing
+  said what value that could be: the id is a clone id UI5 generates. The
+  refusal now says so and that any id will do for a backend that only
+  anchors a popover to it - this client places no popover. In the vendored
+  `lib/appclient.mjs`: the VS Code extension and abap2UI5/protocol pick it
+  up with their next re-vendor.
 - **`examples` finds a sample by the controls its view builds.** The
   search read only the catalogue's own words - what a sample is filed
   under and the keywords somebody chose - so `sap.m.Dialog` found 7 of the

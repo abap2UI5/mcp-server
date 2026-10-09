@@ -518,6 +518,25 @@ const DIALOG = (multi, confirmArgs) => page(
 );
 const ROWS = () => ({ T: [{ A: 'a0', B: 'b0', N: 0, SEL: false }, { A: 'a1', B: 'b1', N: 10, SEL: true }, { A: 'a2', B: 'b2', N: 20, SEL: false }] });
 
+/* A row button without an id of its own, pressed to open a popover next to
+ * it (bench task 13, samples 052): ${$source>/id} is the clone id UI5
+ * generates, which nothing but the browser knows. The refusal says what to
+ * pass instead of leaving the agent to guess; a given id is sent as is. */
+test('$source:id of a control without an id: the refusal says what to pass, and a given id is sent', async () => {
+  const xml = page('<Table items="{/T}"><columns><Column/></columns><items><ColumnListItem><cells>'
+    + '<Button text="Details" press=".eB([\'DETAILS\'], ${$source>/id}, ${A})"/>'
+    + '<Button id="fixed" text="Edit" press=".eB([\'EDIT\'], ${$source>/id})"/>'
+    + '</cells></ColumnListItem></items></Table>');
+  const { client, bodies } = fakeApp(xml, ROWS());
+  let s = await client.start('z_t');
+  await rejects(client.act(s.session, { event: 'DETAILS', row: 1 }),
+    /^argument 0 of DETAILS \(\$source:id\) is the id UI5 generates for the pressed control - the view sets none, so only a browser knows it\. Pass any id in args\[0\] \(e\.g\. "a1"\): a backend that only anchors a popover to it \(popover_display by_id\) answers the same/);
+  assert.equal(bodies.length, 1, 'a refused act sends nothing');
+  s = await client.act(s.session, { event: 'DETAILS', row: 1, args: ['a1', null] });
+  s = await client.act(s.session, { event: 'EDIT', row: 0 });
+  assert.deepEqual(bodies.slice(1).map((b) => b.S_FRONT.T_EVENT_ARG), [['a1', 'a1'], ['fixed']], 'an id the view sets is read from it');
+});
+
 test('the pick, single select: the picked row selected, the previous selection cleared, both sent; item arguments from the row', async () => {
   const args = ", ${$parameters>/selectedContexts/0/sPath}, ${$parameters>/selectedItem}.getCells()[1].getTitle(), ${$parameters>/selectedItem}.getCells()[1].getText()"
     + ", ${$parameters>/selectedItem}.getBindingContext().getProperty('A'), ${$parameters>/selectedItem}.getBindingContext().getPath()"
