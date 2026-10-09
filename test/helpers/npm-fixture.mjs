@@ -41,7 +41,11 @@ ${lyingServe
  * a runner over the dev tests (a test include containing FAIL throws in its
  * test, one containing SETUP_THROWS in its class_setup - which the runner
  * calls before the class's first "running" line, as the real one does) and
- * an init.mjs. */
+ * an init.mjs. In the layout of @abaplint/transpiler-cli before 2.14 (one
+ * flat folder) or of 2.14 on (FOLDERS: the input in project/, the libraries
+ * in folders of their own, imported by a relative path into them). */
+const transpiler = (folders) => `const FOLDERS = ${folders};
+${TRANSPILER}`;
 const TRANSPILER = `
 const fs = require('fs'); const path = require('path');
 const cfg = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
@@ -52,20 +56,25 @@ const text = (f) => fs.readFileSync(path.join(cfg.input_folder, f), 'utf8');
 const bad = files.find((f) => text(f).includes('BROKEN'));
 if (bad) { console.log('Error: check_syntax, Method "nope" not found, methodCallChain, ' + bad + ':2'); process.exit(1); }
 const objs = [...new Set(files.map((f) => f.split('.').slice(0, 2).join('.').toLowerCase()))];
-const out = cfg.output_folder;
-fs.writeFileSync(path.join(out, 'cx_root.clas.mjs'), 'export class cx_root {}');
-fs.writeFileSync(path.join(out, 'z2ui5_cl_util.clas.mjs'), 'export class z2ui5_cl_util {}');
-let init = 'await initializeABAP();\\nawait import("./cx_root.clas.mjs");\\n';
+const top = cfg.output_folder;
+const out = FOLDERS ? path.join(top, 'project') : top;
+const lib = FOLDERS ? path.join(top, 'open-abap-core') : top;
+const libRef = FOLDERS ? '../open-abap-core/' : './';
+const own = FOLDERS ? './project/' : './';
+for (const d of [out, lib]) fs.mkdirSync(d, { recursive: true });
+fs.writeFileSync(path.join(lib, 'cx_root.clas.mjs'), 'export class cx_root {}');
+fs.writeFileSync(path.join(lib, 'z2ui5_cl_util.clas.mjs'), 'export class z2ui5_cl_util {}');
+let init = 'await initializeABAP();\\nawait import("' + (FOLDERS ? './open-abap-core/' : './') + 'cx_root.clas.mjs");\\n';
 let data = '';
 for (const o of objs) {
   const name = o.split('.')[0];
   fs.writeFileSync(path.join(out, o + '.mjs'), [
-    'const {cx_root} = await import("./cx_root.clas.mjs");',
+    'const {cx_root} = await import("' + libRef + 'cx_root.clas.mjs");',
     'class ' + name + ' extends cx_root {}',
     'abap.Classes[' + JSON.stringify(name.toUpperCase()) + '] = ' + name + ';',
     'export {' + name + '};',
   ].join('\\n') + '\\n');
-  init += 'await import("./' + o + '.mjs");\\n';
+  init += 'await import("' + own + o + '.mjs");\\n';
   const tests = o + '.testclasses.abap';
   if (files.includes(tests)) {
     const fail = text(tests).includes('FAIL');
@@ -74,10 +83,10 @@ for (const o of objs) {
       'const {' + name + '} = await import("./' + o + '.mjs");',
       'export class ltcl { ' + (setupThrows ? 'static async class_setup() { throw new Error("cx_sy_zerodivide in class_setup"); } ' : '') + 'async constructor_() { return this; } async check() { ' + (fail ? 'throw new Error("assert_equals failed: exp 1 act 2");' : '') + ' } }',
     ].join('\\n') + '\\n');
-    data += '  ret.push({objectName: "' + name.toUpperCase() + '", localClass: "ltcl", methods: [{"name":"check","skip":false}], riskLevel: "HARMLESS", filename: "./' + o + '.testclasses.mjs"});\\n';
+    data += '  ret.push({objectName: "' + name.toUpperCase() + '", localClass: "ltcl", methods: [{"name":"check","skip":false}], riskLevel: "HARMLESS", filename: "' + own + o + '.testclasses.mjs"});\\n';
   }
 }
-fs.writeFileSync(path.join(out, 'index.mjs'), [
+fs.writeFileSync(path.join(top, 'index.mjs'), [
   '/* eslint-disable curly */',
   'import "./init.mjs";',
   'function getData() {',
@@ -98,8 +107,39 @@ fs.writeFileSync(path.join(out, 'index.mjs'), [
   '}',
   'run().then(() => process.exit(0)).catch((err) => { console.log(err); process.exit(1); });',
 ].join('\\n') + '\\n');
-fs.writeFileSync(path.join(out, 'init.mjs'), init);
+fs.writeFileSync(path.join(top, 'init.mjs'), init);
 console.log((objs.length + 2) + ' objects written to disk');
+`;
+
+/* The package's setup/own-apps.mjs of a folder-layout release, reduced to
+ * what the build relies on: project/ copied, every "../<folder>/<file>"
+ * import pointed at the package's module of that name, an index.mjs of its
+ * own, exit 1 with the file named for an import the package cannot serve. */
+const OWN_APPS = `#!/usr/bin/env node
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+const [output, apps] = process.argv.slice(2);
+const runtimeOutput = fileURLToPath(new URL('../output/', import.meta.url));
+const index = new Map();
+for (const d of fs.readdirSync(runtimeOutput, { withFileTypes: true })) {
+  if (d.isDirectory()) for (const f of fs.readdirSync(path.join(runtimeOutput, d.name))) index.set(f, d.name);
+}
+const project = path.join(output, 'project');
+if (!fs.existsSync(project)) { console.error('own-apps: ' + output + ' has no project/ folder'); process.exit(1); }
+fs.rmSync(apps, { recursive: true, force: true });
+fs.mkdirSync(apps, { recursive: true });
+const bad = [];
+for (const f of fs.readdirSync(project)) {
+  const text = fs.readFileSync(path.join(project, f), 'utf8').replace(/"\\.\\.\\/[^"\\/]+\\/([^"\\/]+\\.mjs)"/g, (m, name) => {
+    if (index.has(name)) return '"@abap2ui5/node-runtime/output/' + index.get(name) + '/' + name + '"';
+    bad.push(f + ' imports ' + m);
+    return m;
+  });
+  fs.writeFileSync(path.join(apps, f), text);
+}
+if (bad.length) { console.error('own-apps: ' + bad.join(', ')); process.exit(1); }
+fs.writeFileSync(path.join(apps, 'index.mjs'), '// own-apps\\n');
 `;
 
 /* abaplint: records the config it was handed (and where it ran), answers
@@ -116,8 +156,12 @@ function write(file, text) {
 }
 
 /** Install the fake release into `<workspace>/runtime/<version>` and fetch
- *  the fake open-abap-core; returns the runtime directory. */
-export function fakeRelease(workspace, { version = VERSION, accelerate = true, compress = false, lyingServe = false } = {}) {
+ *  the fake open-abap-core; returns the runtime directory. `layout` is the
+ *  package's output/ ('flat' before transpiler 2.14, 'folders' from it on),
+ *  `transpilerLayout` what its transpiler writes (the same, unless a test
+ *  wants the two apart), `ownApps` whether a folder-layout package ships
+ *  setup/own-apps.mjs. */
+export function fakeRelease(workspace, { version = VERSION, accelerate = true, compress = false, lyingServe = false, layout = 'flat', transpilerLayout = layout, ownApps = true } = {}) {
   const dir = path.join(workspace, 'runtime', version);
   const nm = path.join(dir, 'node_modules');
   const pkg = path.join(nm, '@abap2ui5', 'node-runtime');
@@ -132,11 +176,20 @@ export function fakeRelease(workspace, { version = VERSION, accelerate = true, c
   }));
   write(path.join(pkg, 'srv', 'host.mjs'), hostModule({ accelerate, compress, lyingServe }));
   write(path.join(pkg, 'output', 'init.mjs'), 'export async function initializeABAP() {}\n');
-  write(path.join(pkg, 'output', 'cx_root.clas.mjs'), 'export class cx_root {}\nglobalThis.abap = globalThis.abap || { Classes: {} };\nglobalThis.abap.Classes.CX_ROOT = cx_root;\n');
+  const cxRoot = 'export class cx_root {}\nglobalThis.abap = globalThis.abap || { Classes: {} };\nglobalThis.abap.Classes.CX_ROOT = cx_root;\n';
+  if (layout === 'folders') {
+    write(path.join(pkg, 'output', 'open-abap-core', 'cx_root.clas.mjs'), cxRoot);
+    write(path.join(pkg, 'output', 'project', 'zcl_sicf.clas.mjs'), 'export class zcl_sicf {}\n');
+    // a framework app, where 2.14 writes the framework's classes (app_list reads it)
+    write(path.join(pkg, 'output', 'project', 'z2ui5_cl_pop_fake.clas.mjs'), 'export class z2ui5_cl_pop_fake { async z2ui5_if_app$main(client) {} }\n');
+    if (ownApps) write(path.join(pkg, 'setup', 'own-apps.mjs'), OWN_APPS);
+  } else {
+    write(path.join(pkg, 'output', 'cx_root.clas.mjs'), cxRoot);
+  }
   write(path.join(pkg, 'downport', '02', 'z2ui5_if_app.intf.abap'), 'INTERFACE z2ui5_if_app PUBLIC. ENDINTERFACE.\n');
   const cli = path.join(nm, '@abaplint', 'transpiler-cli');
   write(path.join(cli, 'package.json'), JSON.stringify({ name: '@abaplint/transpiler-cli', version: '2.13.91', bin: { abap_transpile: './abap_transpile' } }));
-  write(path.join(cli, 'abap_transpile'), TRANSPILER);
+  write(path.join(cli, 'abap_transpile'), transpiler(transpilerLayout === 'folders'));
   const lint = path.join(nm, '@abaplint', 'cli');
   write(path.join(lint, 'package.json'), JSON.stringify({ name: '@abaplint/cli', version: '2.120.60', bin: { abaplint: './abaplint' } }));
   write(path.join(lint, 'abaplint'), ABAPLINT);

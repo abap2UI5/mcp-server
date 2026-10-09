@@ -231,11 +231,12 @@ const HAVE_TAR = (() => {
 
 /** A checkout-shaped temp dir with a package.json version and (as the served
  *  archive) node/output, node/downport, node/deps and a manifest. */
-function fakeCheckoutAndArchive(version, { manifest = true } = {}) {
+function fakeCheckoutAndArchive(version, { manifest = true, transpiler = null, layout = 'flat' } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-prebuilt-test-'));
   const a2 = path.join(root, 'abap2UI5');
   fs.mkdirSync(path.join(a2, 'node_modules', 'express'), { recursive: true }); // no npm ci in a test
   fs.writeFileSync(path.join(a2, 'package.json'), JSON.stringify({ name: 'abap2UI5', version }));
+  if (transpiler) fs.writeFileSync(path.join(a2, 'package-lock.json'), JSON.stringify({ packages: { 'node_modules/@abaplint/transpiler-cli': { version: transpiler } } }));
   fs.mkdirSync(path.join(a2, 'node/output'), { recursive: true });
   fs.writeFileSync(path.join(a2, 'node/output/stale.mjs'), 'stale'); // a previous build's leftover
   const src = path.join(root, 'src');
@@ -243,6 +244,10 @@ function fakeCheckoutAndArchive(version, { manifest = true } = {}) {
   fs.writeFileSync(path.join(src, 'node/output/init.mjs'), 'export const init = 1;');
   fs.writeFileSync(path.join(src, 'node/output/index.mjs'), `${RUNNER_LOOP}}`);
   fs.writeFileSync(path.join(src, 'node/downport/z2ui5_cl_x.clas.abap'), 'CLASS z2ui5_cl_x DEFINITION.');
+  if (layout === 'folders') {
+    fs.mkdirSync(path.join(src, 'node/output/project'), { recursive: true });
+    fs.writeFileSync(path.join(src, 'node/output/project/z2ui5_cl_x.clas.mjs'), '');
+  }
   fs.writeFileSync(path.join(src, 'node/deps/open-abap-core/src/x.clas.abap'), '');
   if (manifest) {
     fs.writeFileSync(path.join(src, 'backend-manifest.json'), JSON.stringify({ version, commit: 'abc123', builtAt: '2026-09-19T00:00:00Z', contents: ['node/downport', 'node/output', 'node/deps'] }));
@@ -298,6 +303,32 @@ test('downloadPrebuilt unpacks the archive over the old build and reads the mani
     delete process.env.A2UI5_MCP_PREBUILT_URL;
     srv.close();
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/* transpiler 2.14 moved the output into a folder per origin: an archive of
+ * one layout under a checkout whose transpiler writes the other (main past
+ * the switch, its version's release before it) is refused, not unpacked
+ * under a node/srv that imports from the other places. */
+test('downloadPrebuilt refuses an archive whose output layout is not the checkout transpiler\'s', { skip: !HAVE_TAR && 'needs tar on PATH' }, async () => {
+  for (const [transpiler, layout, ok] of [['2.14.2', 'flat', false], ['2.13.93', 'folders', false], ['2.14.2', 'folders', true], ['2.13.93', 'flat', true]]) {
+    const { root, a2, tar } = fakeCheckoutAndArchive('1.146.0', { transpiler, layout });
+    const { srv, url } = await serve(tar);
+    process.env.A2UI5_MCP_PREBUILT_URL = url;
+    const lines = [];
+    try {
+      const res = await downloadPrebuilt({ a2, onLine: (l) => lines.push(l), timeoutMs: 60000 });
+      assert.equal(res.ok, ok, `${transpiler} ${layout}: ${lines.join('\n')}`);
+      assert.equal(Boolean(res.layoutMismatch), !ok);
+      if (!ok) {
+        assert.ok(lines.some((l) => /the archive's node\/output is (flat|folders), and the checkout's transpiler \(2\.1[34]\.\d+\) writes/.test(l)), lines.join('\n'));
+        assert.ok(!fs.existsSync(path.join(a2, 'node/output')) && !prebuiltManifest(a2), 'nothing of the archive stays');
+      }
+    } finally {
+      delete process.env.A2UI5_MCP_PREBUILT_URL;
+      srv.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   }
 });
 

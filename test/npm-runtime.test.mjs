@@ -14,7 +14,7 @@ import path from 'node:path';
 import {
   decideBackend, backendKind, sandbox, deployApp, removeApp, readAppSource, listDevApps, lintApp, buildBackend,
   backendBuilt, runUnitTests, setupStatus, backendStatus, frameworkLintConfig, npmLintTarget, npmModeProblem, planBuild,
-  npmPreferenceProblem, startBackend, buildLog,
+  npmPreferenceProblem, startBackend, buildLog, builtAppClasses,
 } from '../lib/runtime.mjs';
 import { resetNpmBackend, appsDir, downportDir } from '../lib/npm-backend.mjs';
 import { fakeRelease, fakeTemplate, APP, TESTS, VERSION, CORE_SHA } from './helpers/npm-fixture.mjs';
@@ -24,7 +24,7 @@ const ENV = [
   'AI_DEMOKIT_HOME', 'APP_TEMPLATE_HOME', 'A2UI5_MCP_REMOTE', 'A2UI5_MCP_OFFLINE', 'LINT_RECORD', 'A2UI5_MCP_SCREENSHOT_DIR',
 ];
 
-function withNpm(fn, { install = true } = {}) {
+function withNpm(fn, { install = true, release = {} } = {}) {
   return async (t) => {
     const saved = Object.fromEntries(ENV.map((v) => [v, process.env[v]]));
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-npm-rt-'));
@@ -39,7 +39,7 @@ function withNpm(fn, { install = true } = {}) {
     delete process.env.AI_DEMOKIT_HOME;
     delete process.env.A2UI5_MCP_OFFLINE;
     resetNpmBackend();
-    const dir = install ? fakeRelease(workspace) : path.join(workspace, 'runtime', VERSION);
+    const dir = install ? fakeRelease(workspace, release) : path.join(workspace, 'runtime', VERSION);
     try {
       await fn(t, { root, workspace, dir });
     } finally {
@@ -273,6 +273,52 @@ test('build_backend on the package: the sandbox transpiled, the dev tests run al
   assert.match(broken.tail, /check_syntax, Method "nope" not found/);
   assert.ok(fs.existsSync(path.join(appsDir(dir), 'zcl_npm_a.clas.mjs')));
 }));
+
+/* @abaplint/transpiler-cli 2.14 writes a folder per origin: the sandbox in
+ * project/, open-abap-core in a folder of its own, imported by a relative
+ * path into it. apps/ stays flat, the imports go to the package's module in
+ * ITS folder (by the package's own own-apps.mjs), the runner runs the tests
+ * from apps/. */
+test('a folder-layout release (transpiler 2.14): apps/ flat, imports on the package\'s folders, the runner on apps/', withNpm(async (t, { dir }) => {
+  deployApp({ className: 'zcl_npm_a', source: APP('zcl_npm_a'), testclasses: TESTS() });
+  deployApp({ className: 'zcl_npm_b', source: APP('zcl_npm_b'), testclasses: TESTS(true) });
+  const lines = [];
+  const res = await buildBackend({ mode: 'auto', onLine: (l) => lines.push(l) });
+  assert.equal(res.ok, true, `${res.tail}\n${lines.join('\n')}`);
+  const apps = fs.readdirSync(appsDir(dir)).sort();
+  assert.deepEqual(apps.filter((f) => f.endsWith('.mjs')), ['index.mjs', 'init.mjs', 'zcl_npm_a.clas.mjs', 'zcl_npm_a.clas.testclasses.mjs', 'zcl_npm_b.clas.mjs', 'zcl_npm_b.clas.testclasses.mjs']);
+  assert.ok(!apps.includes('project') && !apps.includes('open-abap-core'), 'no output folder in apps/');
+  const mod = fs.readFileSync(path.join(appsDir(dir), 'zcl_npm_a.clas.mjs'), 'utf8');
+  assert.match(mod, /await import\("@abap2ui5\/node-runtime\/output\/open-abap-core\/cx_root\.clas\.mjs"\)/);
+  assert.doesNotMatch(mod, /"\.\.\//, 'no import into another folder of the staging');
+  const runner = fs.readFileSync(path.join(appsDir(dir), 'index.mjs'), 'utf8');
+  assert.match(runner, /filename: "\.\/zcl_npm_a\.clas\.testclasses\.mjs"/, 'the runner names the test modules beside it');
+  assert.doesNotMatch(runner, /\.\/project\//);
+  assert.match(fs.readFileSync(path.join(appsDir(dir), 'init.mjs'), 'utf8'), /await import\("\.\/zcl_npm_a\.clas\.mjs"\);\nawait import\("\.\/zcl_npm_b\.clas\.mjs"\);/, 'the boot order out of init.mjs\'s ./project/ imports');
+  assert.ok(builtAppClasses().some((a) => a.app === 'Z2UI5_CL_POP_FAKE' && a.source === 'framework'), 'app_list finds the framework\'s apps in output/project/');
+
+  const one = await runUnitTests({ className: 'zcl_npm_a' });
+  assert.equal(one.ok, true, JSON.stringify(one));
+  assert.deepEqual(one.tests.map((x) => `${x.object} ${x.localClass}->${x.method}`), ['ZCL_NPM_A ltcl->check']);
+  const two = await runUnitTests({ className: 'zcl_npm_b' });
+  assert.equal(two.ok, false);
+  assert.match(two.failed.error, /assert_equals failed/);
+}, { release: { layout: 'folders' } }));
+
+test('a transpiler whose layout is not the package\'s fails the build, named, and leaves apps/ alone', withNpm(async () => {
+  deployApp({ className: 'zcl_npm_a', source: APP('zcl_npm_a') });
+  const res = await buildBackend({ mode: 'auto' });
+  assert.equal(res.ok, false);
+  assert.match(res.tail, /the transpiler wrote a folders output, and @abap2ui5\/node-runtime 1\.145\.0's output\/ is flat - the transpiler installed in .* is not the one the release was built with/);
+  assert.equal(backendBuilt(), false);
+}, { release: { layout: 'flat', transpilerLayout: 'folders' } }));
+
+test('a folder-layout release without setup/own-apps.mjs fails the build instead of guessing its folders', withNpm(async () => {
+  deployApp({ className: 'zcl_npm_a', source: APP('zcl_npm_a') });
+  const res = await buildBackend({ mode: 'auto' });
+  assert.equal(res.ok, false);
+  assert.match(res.tail, /writes its output\/ in a folder per origin and carries no setup\/own-apps\.mjs/);
+}, { release: { layout: 'folders', ownApps: false } }));
 
 /* app_start (or backend start) during build_backend booted the output
  * from before the build, and the build then reported built while that

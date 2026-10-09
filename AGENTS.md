@@ -254,16 +254,31 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
   libraries out of the output - it transpiles and writes every dependency
   object too (737 objects, 1148 files for one app class) - so it writes into
   a staging directory, and `apps/` receives only the files of the sandbox's
-  own objects. Their imports of anything else (`const {cx_root} = await
-  import("./cx_root.clas.mjs")`) are pointed at the package's `./output/*`
-  export (`rewriteImports`): **a second copy of a framework module is the
-  bug to avoid** - cx_root's copy would register itself over the package's
-  in `abap.Classes`, and every `e instanceof abap.Classes['CX_ROOT']` the
+  own objects. Their imports of anything else are pointed at the package's
+  `./output/*` export: **a second copy of a framework module is the bug to
+  avoid** - cx_root's copy would register itself over the package's in
+  `abap.Classes`, and every `e instanceof abap.Classes['CX_ROOT']` the
   framework's CATCH compiles to would then miss the exceptions of the first.
-  (The package README's own recipe, `import("./output/zcl_my_app.clas.mjs")`
-  beside a full transpiler output, has exactly that second copy.) An import
-  shape the rewrite does not know fails the build (`strayImports`) instead
-  of the boot. `apps/index.mjs` is the transpiler's runner, which lists no
+  Two output layouts, by the transpiler the release records
+  (`outputLayout`; the staging's layout must be the package's `output/`
+  one, else the build fails - another transpiler was installed):
+  **flat** (transpiler before 2.14, releases up to 1.146.0) - one folder,
+  `await import("./cx_root.clas.mjs")`, rewritten here (`rewriteImports`)
+  to `<pkg>/output/cx_root.clas.mjs`; **folders** (2.14 on) - the sandbox
+  in `project/`, each library in a folder of its own
+  (`await import("../open-abap-core/cx_root.clas.mjs")`), `init.mjs` and the
+  runner `index.mjs` at the top, and the package's `output/` alike. There
+  the package's own `setup/own-apps.mjs` (the bin `abap2ui5-own-apps`), run
+  as a child like the transpiler, copies `project/` into `apps/` and points
+  every other import at `<pkg>/output/<folder>/<file>` - the package indexes
+  its own folders, so no copy of that logic lives here; a release of that
+  layout without the file fails the build. `apps/` is flat either way: the
+  runner's `"./project/<file>"` test modules become `"./<file>"`
+  (`flatRunner`), and the boot order is read off `init.mjs`'s
+  `./project/` imports. Whichever wrote `apps/`, an import there of
+  anything but a dev module beside it or the package - an unknown shape, a
+  `../<folder>/` one - fails the build (`strayImports`) instead of the
+  boot. `apps/index.mjs` is the transpiler's runner, which lists no
   dependency's tests - the dev apps' alone; `apps/init.mjs` is the ONE boot
   (`initialize()`, `accelerate()` when the release exports it, the dev
   modules in the transpiler's own order) that the runner and the host both
@@ -755,6 +770,11 @@ changes upstream, this repo must change in the same breath:
 - abap2UI5 core: `node/srv/express.mjs`, `node/setup/abap_transpile.json`
   (its `libs[].folder` entries are what the incremental transpile checks for
   under the checkout before it clones open-abap-core itself), `node/downport/`,
+  `node/output/` (from transpiler 2.14 on a folder per origin - `project/`
+  for the framework, `open-abap-core/`, `express-icf-shim/`; `app_list`
+  reads the class modules one folder down too, and `downloadPrebuilt`
+  refuses an archive whose layout is not the one the checkout's locked
+  transpiler writes, which auto answers with the framework's own build),
   `node/output/init.mjs`, **`node/output/index.mjs`** (the transpiler's
   generated unit-test runner — `run_unit_tests` filters it on the one loop
   line `for (const st of getData()) {`, `RUNNER_LOOP` in `lib/runtime.mjs`;
@@ -797,7 +817,11 @@ changes upstream, this repo must change in the same breath:
   `compress`, feature-detected - a release without them boots and serves as
   before; the **`./output/*` export**, which every rewritten import of a dev
   module goes through (a narrowed exports map is every dev app failing to
-  load, reported by the host as a module not found); `./package.json` - the
+  load, reported by the host as a module not found) - from the transpiler
+  2.14 release on as `output/<folder>/<file>`; **`setup/own-apps.mjs`** in
+  those releases (run as `node <pkg>/setup/own-apps.mjs <staging> <apps>`:
+  its arguments, its exit code, and that it leaves the `project/` files
+  under their names in `<apps>`); `./package.json` - the
   version, `abap2ui5.transpiler`, `abap2ui5.openAbapCore` (from the release
   after 1.145.0; `KNOWN_OPEN_ABAP_CORE` covers the one before), the express
   peer range; `downport/` (the transpile's library and the lint's
@@ -805,9 +829,11 @@ changes upstream, this repo must change in the same breath:
   install check). And the TRANSPILER's output shape, which the build now
   reads rather than merely runs: the `await import("./x.mjs")` lines at the
   start of a line (`rewriteImports`; a shape it does not know fails the
-  build through `strayImports`), a runner `index.mjs` that imports
-  `"./init.mjs"` (without it the build fails - the runner would boot nothing)
-  and lists only non-dependency tests, `init.mjs`'s import order (the boot
+  build through `strayImports`), from 2.14 on the `project/` folder the
+  transpile's input goes into (`outputLayout`, `PROJECT_DIR`), a runner
+  `index.mjs` that imports `"./init.mjs"` (without it the build fails - the
+  runner would boot nothing) and lists only non-dependency tests (2.14:
+  `filename: "./project/<file>"`), `init.mjs`'s import order (the boot
   order; sorted when unreadable), and `RUNNER_LOOP`.
 - abap-cloud-gui: **`tools/report2cloud/lib/convert.mjs`** (`convert(source,
   { file, className, textpool })` answering `{ ok, className, programName,
@@ -1234,8 +1260,14 @@ legitimately slower.
   full transpiler output replaces the package's class, and every framework
   exception after that is uncatchable. The build keeps only the dev
   objects' files and points every other import at the package's
-  `./output/*` (`rewriteImports`); keep it that way when the build changes,
-  and keep the failing-build answer to an import shape it does not know.
+  `./output/*` (`rewriteImports` for a flat release, the package's own
+  `own-apps.mjs` for a folder-layout one); keep it that way when the build
+  changes, and keep the failing-build answer to an import shape it does not
+  know. `test/npm-integration.test.mjs` pins it end to end: every import of
+  `apps/` is checked against the package's files, and the app's unit test
+  catches a runtime exception with `CATCH cx_root`; run it on a local build
+  of the package with `A2UI5_MCP_TEST_RUNTIME_TGZ=<the .tgz abap2UI5's
+  npm run pack:node-runtime writes>` before that package is released.
   The package README's "Your own apps" recipe (`import("./output/...")`
   beside a full output) has exactly this flaw - which is why this server
   does not follow it literally.

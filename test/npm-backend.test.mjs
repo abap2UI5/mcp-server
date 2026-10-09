@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import {
   readRuntimePin, compareVersions, openAbapCoreOf, transpilerOf, expressRangeOf, cliVersionOf, desiredDeps,
   installSpecs, devObjects, devOutputFiles, rewriteImports, strayImports, bootOrder, appsInitSource, transpileConfig, tableSchema, transparentTables,
+  flatRunner, outputLayout, outputModules,
   selectRuntimeVersion, installedRuntimes, currentRuntimeVersion, ensureRuntime, ensureOpenAbapCore, buildApps, npmView,
   prepareRuntime,
   runtimeDir, runtimeBase, npmSandboxDir, openAbapCoreDir, appsDir, downportDir, npmCommand, resetNpmBackend,
@@ -143,6 +144,32 @@ test('imports of framework modules point at the package, dev modules stay beside
   // what the rewrite does not know is reported, not left to fail at boot
   assert.deepEqual(strayImports(rewriteImports(src, local), local), ['not_code.mjs']);
   assert.deepEqual(strayImports('x = await import("./zcl_a.clas.mjs")', local), []);
+});
+
+test('the folder layout of transpiler 2.14: told apart from the flat one, its runner and boot order read for a flat apps/', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-layout-'));
+  try {
+    fs.writeFileSync(path.join(root, 'init.mjs'), '');
+    fs.writeFileSync(path.join(root, 'cx_root.clas.mjs'), '');
+    assert.equal(outputLayout(root), 'flat');
+    assert.equal(outputModules(root), 2);
+    for (const d of ['project', 'open-abap-core']) fs.mkdirSync(path.join(root, d));
+    fs.writeFileSync(path.join(root, 'project', 'zcl_a.clas.mjs'), '');
+    fs.writeFileSync(path.join(root, 'project', 'zcl_a.clas.mjs.map'), '');
+    fs.writeFileSync(path.join(root, 'open-abap-core', 'cx_static_check.clas.mjs'), '');
+    assert.equal(outputLayout(root), 'folders');
+    assert.equal(outputModules(root), 4, 'the modules of every folder, no source map');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+  const runner = 'import "./init.mjs";\n  ret.push({objectName: "ZCL_A", localClass: "ltcl", filename: "./project/zcl_a.clas.testclasses.mjs"});\n';
+  assert.equal(flatRunner(runner), 'import "./init.mjs";\n  ret.push({objectName: "ZCL_A", localClass: "ltcl", filename: "./zcl_a.clas.testclasses.mjs"});\n');
+  const init = 'await import("./open-abap-core/cx_root.clas.mjs");\nawait import("./project/zcl_b.clas.mjs");\nawait import("./project/zcl_a.clas.mjs");\n';
+  assert.deepEqual(bootOrder(init, ['zcl_a.clas.mjs', 'zcl_b.clas.mjs']), ['zcl_b.clas.mjs', 'zcl_a.clas.mjs'], 'the ./project/ imports, a library\'s left alone');
+  // an import into another folder of the output is a second copy of a library class: reported
+  const local = new Set(['zcl_a.clas.mjs']);
+  assert.deepEqual(strayImports('const {cx_root} = await import("../open-abap-core/cx_root.clas.mjs");\nawait import("./zcl_a.clas.mjs");\nimport "./sub/x.mjs";', local), ['../open-abap-core/cx_root.clas.mjs', './sub/x.mjs']);
+  assert.deepEqual(strayImports(`const {cx_root} = await import("${RUNTIME_PKG}/output/open-abap-core/cx_root.clas.mjs");`, local), []);
 });
 
 test('the boot imports the dev modules in the transpiler\'s order and says whether it accelerates', () => {
