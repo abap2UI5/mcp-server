@@ -816,6 +816,10 @@ test('scope_of names a missing OpenUI5 checkout as the reason for UNRESOLVED', a
     const dir = path.join(root, 'openui5');
     process.env.OPENUI5_SRC = dir;
     assert.equal(openui5Dir(path.join(root, 'samples-controls')), dir);
+    // a relative one as the script reads it: it runs in the corpus, not where the server was started
+    process.env.OPENUI5_SRC = path.join('..', 'my-openui5');
+    assert.equal(openui5Dir(path.join(root, 'samples-controls')), path.join(root, 'my-openui5'));
+    process.env.OPENUI5_SRC = dir;
     assert.match(scopeOfNote(out, dir), /^the OpenUI5 checkout scope_of reads the JSDoc from is not there \(.*openui5[\\/]src is missing\), so every OpenUI5 entity reads UNRESOLVED whatever its name - clone https:\/\/github\.com\/SAP\/openui5 there .*OPENUI5_SRC/);
     assert.equal(scopeOfNote('sap.m.Wizard   IN SCOPE (since 1.30)', dir), null, 'nothing unresolved: nothing to explain');
     fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
