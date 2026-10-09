@@ -122,7 +122,9 @@
   the gates produced them - a warning on line 140, a hint on 108, a
   warning on 26), and the ones that fit are the head of that list;
   `counts` stays whole and `findingsCut` / `remainingCut` say how many
-  were left out; `fix_view`'s corrected source always goes whole.
+  were left out; `fix_view`'s corrected source and `validate_view`'s rule
+  explanations (`explain: true`, about 1,000 characters a rule) always go
+  whole, and the findings get the room that is left.
 - **`build_log`, `build_backend` and `read_app` answers fit.** `build_log`
   answered `tail` lines whatever their length (2,000 transpiler lines:
   464,000 characters) - the last lines that fit come back now, a line past

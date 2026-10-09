@@ -1159,7 +1159,10 @@ async function handle(name, args = {}, ctx = {}) {
        * in source order within a severity (bySeverity), as many as fit one
        * answer (lib/budget.mjs fitFindings) - a cut list is the head of it */
       const rank = (f) => severityRank(severityOf(f));
-      const fitted = fitFindings(bySeverity(await flagFixable(result.findings), rank), { rankOf: rank });
+      /* the rules go whole (explain: true is a paragraph per rule, about
+       * 1,000 characters each) and the findings get what is left */
+      const room = Math.max(10_000, ANSWER_BUDGET - 10_000 - sizeOf(rules || {}, 1));
+      const fitted = fitFindings(bySeverity(await flagFixable(result.findings), rank), { budget: room, rankOf: rank });
       const findings = fitted.findings;
       return text({
         ok,

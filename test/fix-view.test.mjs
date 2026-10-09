@@ -172,3 +172,33 @@ test('validate_view and fix_view list the findings most severe first, in source 
     await client.close();
   }
 });
+
+/* The findings got ANSWER_BUDGET - 10,000 whatever else the answer
+ * carried, and explain: true adds a paragraph per rule that fired (about
+ * 1,000 characters each): a view of a few hundred defects across fourteen
+ * rules answered 61,900 characters. The rules are measured first and the
+ * findings get what is left. */
+test('validate_view with explain: true still fits one answer', { skip }, async () => {
+  const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const one = (i) => `<Button text="b${i}" notaprop="x" icon="sap-icon://nonexistent${i}" type="Bogus"/><Bogus${i % 3}/>`
+    + `<Link text="l" href="http://example.com/x${i}" /><Image src="img/x${i}.png"/><Text text="t" id="dup"/>`
+    + '<Panel><contentx><Text text="a"/></contentx></Panel><smartfield:SmartField value="x"/>'
+    + '<Input value="{/a}" valueLiveUpdate="maybe" maxLength="-3"/><html:div>raw</html:div><Label text="x" design="Shiny"/>'
+    + '<Table><columns><Column/></columns><items><ColumnListItem><cells><Text text="a"/><Text text="b"/></cells></ColumnListItem></items></Table>'
+    + `<MessagePage/><Text text="{path:'/a', type:'Foo'}"/><foo:Bar/><Text text="x" text="y"/>`;
+  const xml = '<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m" xmlns:unused="sap.ui.unused" xmlns:smartfield="sap.ui.comp.smartfield" xmlns:html="http://www.w3.org/1999/xhtml"><Page>'
+    + Array.from({ length: 300 }, (_, i) => one(i)).join('') + '</Page></mvc:View>';
+  const transport = new StdioClientTransport({ command: process.execPath, args: [path.join(ROOT, 'server.mjs')], env: { ...process.env, A2UI5_MCP_REMOTE: '0' }, stderr: 'ignore' });
+  const client = new Client({ name: 'explain', version: '0' }, { capabilities: {} });
+  await client.connect(transport);
+  try {
+    const t = (await client.callTool({ name: 'validate_view', arguments: { xml, render: false, explain: true } })).content[0].text;
+    const r = JSON.parse(t);
+    assert.ok(Object.keys(r.rules).length >= 10, `rules: ${Object.keys(r.rules).length}`);
+    assert.ok(r.rules[Object.keys(r.rules)[0]].detail, 'the paragraphs are there');
+    assert.ok(r.findingsCut && r.findings.length > 0);
+    assert.ok(t.length < ANSWER_BUDGET, `validate_view answered ${t.length} characters`);
+  } finally {
+    await client.close();
+  }
+});
