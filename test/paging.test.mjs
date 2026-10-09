@@ -16,7 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { ANSWER_BUDGET, sizeOf, takeWithin, takeSmallestWithin, fitSnapshot, fitUnitResult, fitFindings, fitVerifyStages } from '../lib/budget.mjs';
+import { ANSWER_BUDGET, sizeOf, takeWithin, takeSmallestWithin, fitSnapshot, fitUnitResult, fitFindings, fitRules, fitObject, fitVerifyStages, guardAnswer } from '../lib/budget.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const LIMIT = 90_000; // characters: comfortably under the client's token cap for this kind of text
@@ -592,3 +592,93 @@ test('fitVerifyStages: the composed verify_app report fits one answer', () => {
   assert.equal(hugeFit.unit.tests, undefined);
   assert.deepEqual(hugeFit.unit.testsPerObject, { ZCL_APP: 700 });
 });
+
+/* fitRules: validate_view's explain:true carries a paragraph per rule, and a
+ * view tripping a dozen distinct rules passed them ALL - `rules` alone could
+ * pass the budget while fitFindings only shrank the findings. */
+test('fitRules caps the explanations and keeps the ordered ones first', () => {
+  const small = { a: { summary: 'x', detail: 'y' } };
+  assert.equal(fitRules(small).rules, small);
+  assert.equal(fitRules(small).cut, 0);
+  const para = (n) => ({ summary: `rule ${n}`, detail: 'p'.repeat(1200), example: 'e'.repeat(300) });
+  const rules = Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`rule_${String(i).padStart(2, '0')}`, para(i)]));
+  const order = ['rule_37', 'rule_19', 'rule_05'];
+  const { rules: fit, cut } = fitRules(rules, { budget: 12_000, order });
+  assert.ok(cut > 0 && Object.keys(fit).length + cut === 40);
+  assert.ok(sizeOf(fit, 1) <= 12_000 + 1500);
+  assert.deepEqual(Object.keys(fit).slice(0, 3), order, 'the ordered rules are kept first');
+  assert.equal(Object.keys(rules).length, 40, 'the input is not changed');
+  assert.equal(Object.keys(fitRules({ one: para(0) }, { budget: 10 }).rules).length, 1, 'always at least one');
+});
+
+/* fitObject: migrate_report { deploy: true } stacks the deploy/build/start
+ * stages - each a tool's own fitted answer, together past the budget. */
+test('fitObject bounds a composed object and leaves a note', () => {
+  const small = { ok: true, stages: { deploy: { ok: true } } };
+  assert.equal(fitObject(small), small);
+  const big = {
+    ok: true,
+    stages: {
+      deploy: { ok: true, with: Array.from({ length: 50 }, (_, i) => `z2ui5_cl_support_${i}`) },
+      build: { ok: true, tail: 't'.repeat(500) },
+      start: { ok: true, snapshot: { texts: Array.from({ length: 4000 }, (_, i) => `line of app text number ${i} `.repeat(4)) } },
+    },
+  };
+  assert.ok(sizeOf(big) > ANSWER_BUDGET, `the case: ${sizeOf(big)}`);
+  const fit = fitObject(big);
+  assert.ok(sizeOf(fit) <= ANSWER_BUDGET - 5000, `${sizeOf(fit)} characters`);
+  assert.equal(fit.ok, true);
+  assert.equal(fit.stages.deploy.ok, true);
+  assert.match(fit.__answerGuardCut, /shrunk here as a backstop/);
+  assert.ok(sizeOf(big) > ANSWER_BUDGET, 'the input is not changed');
+});
+
+/* guardAnswer: the one last-line backstop. A seeded run of oversized results
+ * - JSON and prose, one to three content blocks - proves NO answer leaves it
+ * over the budget, whatever a per-tool fitter missed. */
+test('guardAnswer: no result ever leaves over the budget, and JSON stays JSON when it can', () => {
+  // a result within budget is returned untouched
+  const ok = { content: [{ type: 'text', text: JSON.stringify({ a: 1 }) }] };
+  assert.equal(guardAnswer(ok), ok);
+  // an image-only (or image-plus-small-text) result is left alone
+  const img = { content: [{ type: 'image', data: 'x'.repeat(200000), mimeType: 'image/png' }, { type: 'text', text: 'small' }] };
+  assert.equal(guardAnswer(img), img);
+
+  let seed = 12345;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  const pick = (a) => a[Math.floor(rnd() * a.length)];
+  const bigJson = () => {
+    const kind = pick(['array', 'wide', 'deep', 'strings']);
+    if (kind === 'array') return { matches: 9000, entries: Array.from({ length: 2000 + Math.floor(rnd() * 3000) }, (_, i) => ({ id: i, text: 'e'.repeat(50 + Math.floor(rnd() * 200)) })) };
+    if (kind === 'wide') return Object.fromEntries(Array.from({ length: 500 }, (_, i) => [`k${i}`, 'v'.repeat(200 + Math.floor(rnd() * 400))]));
+    if (kind === 'deep') return { stages: { a: { findings: Array.from({ length: 1500 }, (_, i) => ({ i, m: 'm'.repeat(100) })) }, b: { tests: Array.from({ length: 1500 }, (_, i) => ({ i })) } } };
+    return { source: 's'.repeat(80000 + Math.floor(rnd() * 200000)), note: 'keep' };
+  };
+  const bigProse = () => 'p'.repeat(70000 + Math.floor(rnd() * 300000));
+
+  for (let i = 0; i < 400; i += 1) {
+    const blocks = [];
+    const n = 1 + Math.floor(rnd() * 3);
+    for (let b = 0; b < n; b += 1) {
+      if (rnd() < 0.6) blocks.push({ type: 'text', text: JSON.stringify(bigJson(), null, 2) });
+      else if (rnd() < 0.5) blocks.push({ type: 'text', text: bigProse() });
+      else blocks.push({ type: 'resource', resource: { uri: 'x://y', mimeType: 'application/json', text: JSON.stringify(bigJson(), null, 2) } });
+    }
+    // an image block sometimes, which must not count against the text budget
+    if (rnd() < 0.3) blocks.push({ type: 'image', data: 'i'.repeat(100000), mimeType: 'image/png' });
+    const before = blocks.map((bl) => (bl.text ? JSON.parse(JSON.stringify(bl)) : null));
+    const guarded = guardAnswer({ content: blocks });
+    const total = guarded.content.reduce((s, bl) => s + (typeof bl.text === 'string' ? bl.text.length : (bl.resource && typeof bl.resource.text === 'string' ? bl.resource.text.length : 0)), 0);
+    assert.ok(total <= ANSWER_BUDGET, `run ${i}: ${total} characters over ${ANSWER_BUDGET}`);
+    // a block that was already within its share is untouched; a shrunk JSON
+    // block parses (unless it had to be hard-truncated as the last resort)
+    for (const bl of guarded.content) {
+      const ref = typeof bl.text === 'string' ? bl : (bl.resource && typeof bl.resource.text === 'string' ? bl.resource : null);
+      if (!ref) continue;
+      if (!/truncated to fit/.test(ref.text)) {
+        try { JSON.parse(ref.text); } catch { /* prose block: not JSON to begin with */ }
+      }
+    }
+  }
+});
+

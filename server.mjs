@@ -59,13 +59,13 @@ import { agentTargetProblem, planAgentSetup, writePlan, pinProblems, pinWarning,
 import { fixSource } from './lib/fixview.mjs';
 import { lintOptionsFor } from './lib/lintopts.mjs';
 import { withRenderFallback, renderSkippedNote, warmThenCold, validateHint, bySeverity } from './lib/validate.mjs';
-import { ANSWER_BUDGET, sizeOf, takeWithin, takeSmallestWithin, fitSnapshot, fitUnitResult, fitFindings, fitVerifyStages } from './lib/budget.mjs';
+import { ANSWER_BUDGET, sizeOf, takeWithin, takeSmallestWithin, fitSnapshot, fitUnitResult, fitFindings, fitRules, fitObject, fitVerifyStages, guardAnswer } from './lib/budget.mjs';
 import { getRenderer, dropRenderer, closeRenderers, rendererLooksDead } from './lib/renderer.mjs';
 import { TOOLS } from './lib/tools.mjs';
 import { RESOURCES, RESOURCE_TEMPLATES, GUIDE_CHAPTER_TEMPLATE, readResource } from './lib/resources.mjs';
 import { PROMPTS, getPrompt } from './lib/prompts.mjs';
 import { missingSiblingMessage, missingLocalSiblingMessage } from './lib/siblings.mjs';
-import { hydrate, REMOTE_TOOLS, resourceRepos, fetchRemoteFile, isRemoteCheckout, remoteBase } from './lib/remote.mjs';
+import { hydrate, REMOTE_TOOLS, resourceRepos, fetchRemoteFile, isRemoteCheckout, remoteBase, resolvedInside } from './lib/remote.mjs';
 import { resolveKey, RESOLVERS } from './lib/repos.mjs';
 import { oneOf, boundedInt, stringArray, checkStringArgs } from './lib/args.mjs';
 import {
@@ -429,7 +429,11 @@ async function deployMigrated(res, ctx) {
     stages[label] = { ok: !r.isError, ...(parsed && typeof parsed === 'object' ? parsed : { text: parsed }) };
     return !r.isError;
   };
-  const stop = (at) => ({ ok: !at, ...(at ? { stoppedAt: at } : {}), stages });
+  /* the composed stages are each a tool's own (fitted) answer, but together
+   * they can pass the budget - the build stage's tail, the app_start
+   * snapshot, a deploy note - so the composed object is fitted once more
+   * (lib/budget.mjs fitObject) */
+  const stop = (at) => fitObject({ ok: !at, ...(at ? { stoppedAt: at } : {}), stages });
   const box = missingSandbox();
   if (box) return (stage('deploy', box), stop('deploy'));
   const popups = resolvePopups(res.converter);
@@ -611,6 +615,15 @@ async function handle(name, args = {}, ctx = {}) {
       let at;
       let from;
       if (root && !isRemoteCheckout(root) && fs.existsSync(path.join(root, file))) {
+        /* The path passed safeRelPath's string checks, but a checkout is
+         * untrusted content - a sample repo can ship src/.../x.clas.abap as a
+         * symbolic link to /etc/passwd or out of the tree, and reading through
+         * it would hand the client a file the repository does not contain.
+         * Refuse when the resolved path leaves the checkout (lib/remote.mjs). */
+        if (!resolvedInside(root, path.join(root, file))) {
+          return toolError(`refusing ${repo}/${file} — it resolves, through a symbolic link, outside the checkout at ${root}; `
+            + 'read_example reads files a repository actually contains');
+        }
         at = path.join(root, file);
         from = root;
       } else {
@@ -1152,15 +1165,22 @@ async function handle(name, args = {}, ctx = {}) {
       counts[result.renderSeverity || 'error'] += result.renderErrors.length;
       const failOn = opt.failOn || 'warning';
       const ok = failOn === 'never' || SEVERITIES.slice(severityRank(failOn)).every((s) => counts[s] === 0);
-      const rules = await explainRules(result.findings, args.explain === true);
+      const explained = await explainRules(result.findings, args.explain === true);
       // additive: fixable: true per finding fix_view can clear (older linter
       // without ./fix: no flag, findings untouched)
       /* the counts stay whole; the findings are listed most severe first,
        * in source order within a severity (bySeverity), as many as fit one
        * answer (lib/budget.mjs fitFindings) - a cut list is the head of it */
       const rank = (f) => severityRank(severityOf(f));
-      /* the rules go whole (explain: true is a paragraph per rule, about
-       * 1,000 characters each) and the findings get what is left */
+      /* explain: true is a paragraph per rule (~1,000 characters each), and a
+       * view that trips a dozen distinct rules carried them ALL - `rules`
+       * alone could pass the budget. Capped to half of it, the rules the most
+       * severe findings are about kept first (lib/budget.mjs fitRules); the
+       * findings then get what is left. */
+      const ruleOrder = [...new Set(bySeverity(result.findings, rank).map((f) => f.type).filter(Boolean))];
+      const { rules, cut: rulesCut } = explained
+        ? fitRules(explained, { budget: Math.floor((ANSWER_BUDGET - 10_000) / 2), order: ruleOrder })
+        : { rules: null, cut: 0 };
       const room = Math.max(10_000, ANSWER_BUDGET - 10_000 - sizeOf(rules || {}, 1));
       const fitted = fitFindings(bySeverity(await flagFixable(result.findings), rank), { budget: room, rankOf: rank });
       const findings = fitted.findings;
@@ -1170,6 +1190,7 @@ async function handle(name, args = {}, ctx = {}) {
         findings,
         ...(fitted.cut ? { findingsCut: `${fitted.cut} more finding(s) did not fit one answer - the most severe are listed, counts has them all: fix these and validate again` } : {}),
         ...(rules ? { rules } : {}),
+        ...(rulesCut ? { rulesCut: `${rulesCut} more rule explanation(s) left out to fit one answer - the kept ones are for the most severe findings; the rest are on the linter's rules page` } : {}),
         renderErrors: result.renderErrors,
         reconstructedDocs: result.docs.length,
         skippedRender: result.skippedRender ? `view parts in helper methods (${result.helperTokens} calls) — not statically reconstructable` : undefined,
@@ -1747,9 +1768,14 @@ server.setRequestHandler(CompleteRequestSchema, async (req) => {
 server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
   try {
     checkStringArgs(ACTIVE_TOOLS.find((t) => t.name === req.params.name), req.params.arguments || {});
-    if (SYSTEM) return await handleSystem(req.params.name, req.params.arguments || {}, { signal: extra && extra.signal });
+    /* guardAnswer is the last-line backstop (lib/budget.mjs): every tool
+     * fits its own answer, but a composed or unbounded one can still add up
+     * past the client's cap, and an over-cap answer shows the agent nothing.
+     * Applied here, at the one place a tool result is handed back, so no tool
+     * can escape it - whatever a per-tool fitter missed. */
+    if (SYSTEM) return guardAnswer(await handleSystem(req.params.name, req.params.arguments || {}, { signal: extra && extra.signal }));
     await hydrateRepos(REMOTE_TOOLS[req.params.name]);
-    return await handle(req.params.name, req.params.arguments || {}, {
+    return guardAnswer(await handle(req.params.name, req.params.arguments || {}, {
       progressToken: req.params._meta && req.params._meta.progressToken,
       sendNotification: extra && extra.sendNotification,
       /* The SDK aborts this when the client sends notifications/cancelled for
@@ -1757,7 +1783,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
        * which kills the child's whole process tree - a cancelled build must
        * not keep transpiling under a request nobody is waiting for. */
       signal: extra && extra.signal,
-    });
+    }));
   } catch (e) {
     return toolError(String((e && e.message) || e));
   }

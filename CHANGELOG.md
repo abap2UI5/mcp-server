@@ -2,6 +2,47 @@
 
 ## Unreleased
 
+- **No tool answer can pass the client's size limit any more - a backstop at
+  the one place answers are serialised.** Every tool already fits its own
+  answer (the paging vocabulary), but a composed or unbounded one could still
+  add up past the cap, and a client handed more than its cap shows the agent
+  NOTHING. `guardAnswer` (`lib/budget.mjs`) now wraps every tool result at the
+  single dispatch point: an over-budget answer has its largest array fields
+  and longest strings trimmed the documented way (a JSON block stays JSON; a
+  `__answerGuardCut` note says it happened and how to page the rest), so no
+  answer leaves over the budget whatever a per-tool fitter missed. Per-tool
+  fitting stays the primary mechanism; this is the last line. A seeded
+  property test drives 400 oversized results through it. Two spots that could
+  reach the edge are also fixed at the source: `validate_view` (and so
+  `verify_app`) caps `explain: true`'s rule explanations (`fitRules`) - a
+  view tripping a dozen distinct rules carried them all, and `rules` alone
+  could pass the budget while only the findings beside it were ever shrunk
+  (`rulesCut` now names what was left out, the most severe findings' rules
+  kept first) - and `migrate_report { deploy: true }` fits its composed
+  deploy/build/start stages together (`fitObject`).
+- **Security: a hostile checkout can no longer steer a read or a write
+  outside it through a symbolic link.** The path checks (`safeRelPath`, the
+  sandbox name gate) stopped a `..` or an absolute path in a STRING; they did
+  not stop a symbolic link in the checkout itself, and a checkout is
+  untrusted content (a sample cloned from GitHub, an app under deploy).
+  `read_example` reading a "sample" that is a link to a file outside the
+  repository, `docs_search` walking a page directory symlinked out of the
+  docs tree (or into a cycle), and `deploy_app` / `migrate_report`'s deploy /
+  `read_app` writing or reading through a link planted in the dev sandbox all
+  now refuse when the path - every symlink on it resolved - leaves the
+  intended root (`resolvedInside` in `lib/remote.mjs`). `test/security.test.mjs`
+  pins each.
+- **Security hardening: the backend and unit-test children no longer inherit
+  this server's secrets.** The expensive half boots the transpiled app, and
+  open-abap's `@KERNEL` escape lets ABAP reach `process.env` - running the app
+  is trusted code (SECURITY.md), but the backend has no use for the GitHub
+  token (the parent's mirror calls alone need it) or, when a sandbox and a
+  system registration share one shell, the system-mode SAP credentials, and
+  those are the highest-value secrets the server defines. They are now
+  withheld from both children (`appChildEnv` in `lib/runtime.mjs`); defence in
+  depth, not a substitute for not deploying untrusted ABAP. `test/backend.test.mjs`
+  pins it.
+
 - **`scope_of` says when the OpenUI5 checkout is what is missing.**
   Without the checkout samples-controls' `scripts/scope-of.mjs` reads
   the JSDoc from (`OPENUI5_SRC`, else `fork-openui5` beside the corpus),

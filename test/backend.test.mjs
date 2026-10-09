@@ -176,6 +176,26 @@ test('the backend child never inherits ALLOWED_HOSTS', async () => {
     { KEEP: '1', PORT: '9', HOST: '127.0.0.1' }, 'any spelling - Windows reads environment names case-insensitively');
 });
 
+/* A child that boots or tests an app can reach process.env through
+ * open-abap's @KERNEL escape; the GitHub token and the system-mode SAP
+ * credentials - the secrets this server defines - must not be in it. */
+test('the backend child never inherits the GitHub token or the system-mode credentials', async () => {
+  const { appChildEnv } = await import('../lib/runtime.mjs');
+  const env = backendEnv({
+    GITHUB_TOKEN: 'gh', GH_TOKEN: 'gh2', github_token: 'lower',
+    A2UI5_MCP_SYSTEM_PASSWORD: 'pw', A2UI5_MCP_SYSTEM_PASSWORD_CMD: 'cmd', A2UI5_MCP_SYSTEM_USER: 'u', A2UI5_MCP_SYSTEM_URL: 'https://sap',
+    PATH: '/bin', KEEP: '1',
+  }, { port: 9, host: '127.0.0.1' });
+  for (const k of ['GITHUB_TOKEN', 'GH_TOKEN', 'github_token', 'A2UI5_MCP_SYSTEM_PASSWORD', 'A2UI5_MCP_SYSTEM_PASSWORD_CMD', 'A2UI5_MCP_SYSTEM_USER', 'A2UI5_MCP_SYSTEM_URL']) {
+    assert.equal(env[k], undefined, `${k} must not reach a child that runs the app`);
+  }
+  assert.equal(env.PATH, '/bin', 'what the child legitimately needs stays');
+  assert.equal(env.KEEP, '1');
+  // appChildEnv on its own leaves the rest untouched (no PORT/HOST added)
+  assert.equal(appChildEnv({ GITHUB_TOKEN: 'x', KEEP: '1' }).GITHUB_TOKEN, undefined);
+  assert.equal(appChildEnv({ GITHUB_TOKEN: 'x', KEEP: '1' }).KEEP, '1');
+});
+
 /* Express 5 calls app.listen's callback with the bind error: a backend over a
  * port somebody else holds said "Listening on" and exited, and the port wait
  * was answered by the other process - the app tools then talked to it. */
