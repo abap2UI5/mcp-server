@@ -178,6 +178,10 @@ test('a failed download is not tried again for FAILURE_BACKOFF_MS - with or with
   assert.equal(again.error, first.error);
   assert.match(again.backoff, /^not retried for \d+ s$/);
   assert.match(remoteStatus('corpus'), /could not be fetched either: HTTP 404/, 'the reason stays in the message');
+  /* and says when it is tried again: a user who fixed the network (a
+   * proxy, a token) read the same error for three minutes without a word
+   * that nothing had been tried */
+  assert.match(remoteStatus('corpus'), /HTTP 404.* \(tried \d+ s ago - not tried again for another \d+ s\)$/);
   // a stale mirror stands in for the failure the same way
   const full = fakeFetch(Object.fromEntries(REMOTE_FILES.corpus.map((f) => [`/${f}`, `v1 ${f}`])));
   assert.equal((await hydrate('corpus', { local: null, fetchImpl: full, force: true })).fetched, true);

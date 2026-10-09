@@ -159,7 +159,8 @@
   checkout and with GitHub unreachable, every call of a mirrored tool waited
   out the 20 s fetch timeout again (`examples`, three mirrors, a minute).
   A failure is now the answer for three minutes - the stale copy when there
-  is one, the reason in the missing-checkout message otherwise.
+  is one, the reason in the missing-checkout message otherwise, with how
+  long ago it was tried and when it is tried again.
 - **A client's cancel reaches the app tools' roundtrip.** `app_start` and
   `app_act` (sandbox and system mode) waited out the client's 120 s
   timeout after `notifications/cancelled`, holding the session's queue the
