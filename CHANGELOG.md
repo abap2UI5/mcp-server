@@ -103,11 +103,12 @@
   cancel was ignored: the request stayed open until the build ended (tens
   of minutes for a full one). It stops waiting now and answers as
   cancelled; the build goes on for the call that started it.
-- **`api_reference` pages its compact list too.** Without `query`,
-  `offset` and `limit` were ignored and the whole surface came back to a
-  call that asked for its second page. Both lists page by entry now; the
-  compact answer counts `entries` and says `returned` / `more` like the
-  queried one.
+- **`api_reference` pages its compact list too, and takes `kind` in the
+  singular.** Without `query`, `offset` and `limit` were ignored and the
+  whole surface came back to a call that asked for its second page. Both
+  lists page by entry now; the compact answer counts `entries` and says
+  `returned` / `more` like the queried one. `kind: "method"` (or
+  `constant`, `type`) was refused - it is the same filter as the plural.
 - **`app_guide` pages by chapter.** The default call - the one its
   description tells an agent to make first - answered the whole guide,
   48,000 characters of the 60,000 an answer may carry, and the guide grows

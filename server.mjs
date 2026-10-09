@@ -852,7 +852,11 @@ async function handle(name, args = {}, ctx = {}) {
         return toolError(`the abap2UI5 checkout has no ${API_PATH.join('/')} (looked in ${apiFile()}) — `
           + 'update it (git pull); the client API lives there');
       }
-      const kind = oneOf(args.kind, {
+      /* the singular names the same filter - `kind: "method"` is what an
+       * agent asking for one method types, and a refusal of it was a
+       * roundtrip for nothing. Anything else stays strict (lib/args.mjs). */
+      const SINGULAR = { method: 'methods', constant: 'constants', type: 'types' };
+      const kind = oneOf(Object.hasOwn(SINGULAR, args.kind ?? '') ? SINGULAR[args.kind] : args.kind, {
         name: 'kind', allowed: ['methods', 'constants', 'types', 'all'], dflt: 'all',
       });
       const parsed = api.parsed;

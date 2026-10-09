@@ -438,6 +438,12 @@ test('api_reference pages its matches by entry - methods, constant groups, types
     const kind = await call('api_reference', { query: 'entry', kind: 'constants' });
     assert.equal(kind.matches, 1);
     assert.equal(kind.methods, undefined);
+    /* the singular is the same filter: `kind: "method"` - what an agent
+     * asking for one method types - was refused, a roundtrip for nothing */
+    assert.deepEqual(await call('api_reference', { query: 'entry', kind: 'constant' }), kind);
+    assert.deepEqual(await call('api_reference', { kind: 'method', limit: 2 }), head);
+    assert.equal((await call('api_reference', { kind: 'type' })).entries, 0);
+    assert.match(await call('api_reference', { kind: 'Methods' }, { error: true }), /unknown kind 'Methods' — use methods, constants, types or all/);
   });
 });
 
