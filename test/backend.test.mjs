@@ -21,28 +21,31 @@ const PORT = 3917; // out of the way of the default 3000 and anything parallel
 const FAKE_EXPRESS = `
 import http from 'http';
 import fs from 'fs';
+// the test's switches, from a file beside this one: the backend child sees
+// only the allowlisted environment (lib/runtime.mjs appChildEnv)
+const K = (() => { try { return JSON.parse(fs.readFileSync(new URL('./knobs.json', import.meta.url), 'utf8')); } catch { return {}; } })();
 const s = http.createServer((req, res) => res.end('ok'));
 let stopping = false; // a SIGTERM before the delayed listen: never listens
 // HOST as the framework's express.mjs reads it: unset binds every interface
 const listen = () => !stopping && s.listen(process.env.PORT, process.env.HOST, () => {
-  if (process.env.BOOT_MARKER) fs.appendFileSync(process.env.BOOT_MARKER, process.pid + '\\n');
-  if (process.env.ADDRESS_MARKER) fs.writeFileSync(process.env.ADDRESS_MARKER, s.address().address);
+  if (K.BOOT_MARKER) fs.appendFileSync(K.BOOT_MARKER, process.pid + '\\n');
+  if (K.ADDRESS_MARKER) fs.writeFileSync(K.ADDRESS_MARKER, s.address().address);
   console.log('Listening on ' + process.env.PORT);
 });
 s.on('error', (e) => {
   if (e.code === 'EADDRINUSE') setTimeout(listen, 100);
   else throw e;
 });
-if (process.env.ENV_MARKER) fs.writeFileSync(process.env.ENV_MARKER, JSON.stringify({ allowedHosts: process.env.ALLOWED_HOSTS ?? null, port: process.env.PORT }));
-if (process.env.SAY_LISTENING_AND_EXIT) {
+if (K.ENV_MARKER) fs.writeFileSync(K.ENV_MARKER, JSON.stringify({ allowedHosts: process.env.ALLOWED_HOSTS ?? null, port: process.env.PORT, env: process.env }));
+if (K.SAY_LISTENING_AND_EXIT) {
   // express 5's app.listen over a port in use: the callback runs with the
   // error, the host prints its line, and the process ends with nothing bound
   // (EXIT_AFTER_MS: a boot that crashes a moment after it said so)
   console.log('Listening on ' + process.env.PORT);
-  if (process.env.EXIT_AFTER_MS) setTimeout(() => process.exit(0), Number(process.env.EXIT_AFTER_MS));
+  if (K.EXIT_AFTER_MS) setTimeout(() => process.exit(0), Number(K.EXIT_AFTER_MS));
   else process.exit(0);
 }
-setTimeout(listen, Number(process.env.LISTEN_DELAY_MS || 0));
+setTimeout(listen, Number(K.LISTEN_DELAY_MS || 0));
 process.on('SIGTERM', () => {
   stopping = true;
   s.close();
@@ -60,7 +63,19 @@ const marker = path.join(base, 'boots.txt');
 
 process.env.A2UI5_MCP_PORT = String(PORT);
 process.env.A2UI5_HOME = a2;
-process.env.BOOT_MARKER = marker;
+const knobFile = path.join(a2, 'node', 'srv', 'knobs.json');
+const knobs = {};
+/* A switch of the fake backend's: written to knobs.json beside it, since the
+ * child no longer inherits this process' environment wholesale. */
+const setKnob = (k, v) => {
+  knobs[k] = v;
+  fs.writeFileSync(knobFile, JSON.stringify(knobs));
+};
+const clearKnob = (k) => {
+  delete knobs[k];
+  fs.writeFileSync(knobFile, JSON.stringify(knobs));
+};
+setKnob('BOOT_MARKER', marker);
 
 const { startBackend, stopBackend, backendStatus, backendEnv, LIVENESS_MS } = await import('../lib/runtime.mjs');
 
@@ -91,14 +106,14 @@ test('two concurrent starts spawn one backend, not two on one port', async () =>
  * user's environment exports (a host name) must not decide it either. */
 test('the checkout backend is started on the loopback interface only', async () => {
   const address = path.join(base, 'address.txt');
-  process.env.ADDRESS_MARKER = address;
+  setKnob('ADDRESS_MARKER', address);
   process.env.HOST = '0.0.0.0';
   try {
     await startBackend();
     assert.equal(fs.readFileSync(address, 'utf8'), '127.0.0.1');
   } finally {
     await stopBackend();
-    delete process.env.ADDRESS_MARKER;
+    clearKnob('ADDRESS_MARKER');
     delete process.env.HOST;
     await sleep(1400); // let the killed child free the port
   }
@@ -161,39 +176,66 @@ test('a backend that cannot be spawned fails the start at once, with the reason'
  * off; one the user's shell exports must not reach the dev backend. */
 test('the backend child never inherits ALLOWED_HOSTS', async () => {
   const envMarker = path.join(base, 'env.json');
-  process.env.ENV_MARKER = envMarker;
+  setKnob('ENV_MARKER', envMarker);
   process.env.ALLOWED_HOSTS = '*';
   try {
     await startBackend();
-    assert.deepEqual(JSON.parse(fs.readFileSync(envMarker, 'utf8')), { allowedHosts: null, port: String(PORT) });
+    const seen = JSON.parse(fs.readFileSync(envMarker, 'utf8'));
+    assert.deepEqual({ allowedHosts: seen.allowedHosts, port: seen.port }, { allowedHosts: null, port: String(PORT) });
   } finally {
     await stopBackend();
-    delete process.env.ENV_MARKER;
+    clearKnob('ENV_MARKER');
     delete process.env.ALLOWED_HOSTS;
     await sleep(1400);
   }
-  assert.deepEqual(backendEnv({ allowed_hosts: '*', Allowed_Hosts: 'x', KEEP: '1', PORT: '1' }, { port: 9, host: '127.0.0.1' }),
-    { KEEP: '1', PORT: '9', HOST: '127.0.0.1' }, 'any spelling - Windows reads environment names case-insensitively');
+  assert.deepEqual(backendEnv({ allowed_hosts: '*', Allowed_Hosts: 'x', PATH: '/bin', PORT: '1' }, { port: 9, host: '127.0.0.1' }),
+    { PATH: '/bin', PORT: '9', HOST: '127.0.0.1' }, 'any spelling - Windows reads environment names case-insensitively');
 });
 
 /* A child that boots or tests an app can reach process.env through
- * open-abap's @KERNEL escape; the GitHub token and the system-mode SAP
- * credentials - the secrets this server defines - must not be in it. */
-test('the backend child never inherits the GitHub token or the system-mode credentials', async () => {
+ * open-abap's @KERNEL escape; it gets an ALLOWLIST of the environment, so
+ * neither the secrets this server defines (the GitHub token, the system-mode
+ * SAP credentials) nor any the user's shell exports (cloud keys, npm tokens)
+ * reach it - while what Node, the runtime and an app's outbound HTTP need
+ * stays, in any spelling. */
+test('a child that runs the app gets the allowlisted environment only', async () => {
   const { appChildEnv } = await import('../lib/runtime.mjs');
-  const env = backendEnv({
-    GITHUB_TOKEN: 'gh', GH_TOKEN: 'gh2', github_token: 'lower',
+  const decoys = {
+    GITHUB_TOKEN: 'gh', GH_TOKEN: 'gh2', github_token: 'lower', NPM_TOKEN: 'npm', NODE_AUTH_TOKEN: 'na',
+    AWS_SECRET_ACCESS_KEY: 'aws', AWS_ACCESS_KEY_ID: 'id', ANTHROPIC_API_KEY: 'k', DATABASE_URL: 'pg://u:p@h/db',
     A2UI5_MCP_SYSTEM_PASSWORD: 'pw', A2UI5_MCP_SYSTEM_PASSWORD_CMD: 'cmd', A2UI5_MCP_SYSTEM_USER: 'u', A2UI5_MCP_SYSTEM_URL: 'https://sap',
-    PATH: '/bin', KEEP: '1',
-  }, { port: 9, host: '127.0.0.1' });
-  for (const k of ['GITHUB_TOKEN', 'GH_TOKEN', 'github_token', 'A2UI5_MCP_SYSTEM_PASSWORD', 'A2UI5_MCP_SYSTEM_PASSWORD_CMD', 'A2UI5_MCP_SYSTEM_USER', 'A2UI5_MCP_SYSTEM_URL']) {
-    assert.equal(env[k], undefined, `${k} must not reach a child that runs the app`);
+    SSH_AUTH_SOCK: '/tmp/agent', ALLOWED_HOSTS: '*', NODE_TLS_REJECT_UNAUTHORIZED: '0', KEEP: '1',
+  };
+  const needed = {
+    PATH: '/bin', HOME: '/home/u', TMPDIR: '/tmp/u', TZ: 'Europe/Berlin', LANG: 'de_DE.UTF-8', LC_ALL: 'de_DE.UTF-8',
+    NODE_OPTIONS: '--max-old-space-size=4096', NODE_EXTRA_CA_CERTS: '/ca.pem', HTTPS_PROXY: 'http://proxy:8080', no_proxy: 'localhost',
+    SystemRoot: 'C:\\Windows', ComSpec: 'C:\\Windows\\system32\\cmd.exe', Path: 'C:\\bin', USERPROFILE: 'C:\\Users\\u',
+  };
+  const env = backendEnv({ ...decoys, ...needed }, { port: 9, host: '127.0.0.1' });
+  assert.deepEqual(env, { ...needed, PORT: '9', HOST: '127.0.0.1' }, 'exactly the allowlist, any spelling, plus the port and the bind');
+  assert.deepEqual(appChildEnv({ ...decoys, ...needed }), needed, 'appChildEnv on its own adds no PORT/HOST');
+});
+
+/* The same, measured in the spawned child itself: a parent environment full
+ * of decoys, and the backend sees none of them. */
+test('the spawned backend sees none of a polluted parent environment', async () => {
+  const envMarker = path.join(base, 'env-polluted.json');
+  setKnob('ENV_MARKER', envMarker);
+  const decoys = { AWS_SECRET_ACCESS_KEY: 'aws', NPM_TOKEN: 'npm', GITHUB_TOKEN: 'gh', A2UI5_MCP_SYSTEM_PASSWORD: 'pw', SOME_APP_SECRET: 's' };
+  Object.assign(process.env, decoys);
+  try {
+    await startBackend();
+    const seen = JSON.parse(fs.readFileSync(envMarker, 'utf8')).env;
+    for (const k of Object.keys(decoys)) assert.equal(seen[k], undefined, `${k} reached the backend child`);
+    assert.equal(seen.PATH, process.env.PATH, 'PATH is passed');
+    assert.equal(seen.PORT, String(PORT));
+    assert.equal(seen.HOST, '127.0.0.1');
+  } finally {
+    await stopBackend();
+    clearKnob('ENV_MARKER');
+    for (const k of Object.keys(decoys)) delete process.env[k];
+    await sleep(1400);
   }
-  assert.equal(env.PATH, '/bin', 'what the child legitimately needs stays');
-  assert.equal(env.KEEP, '1');
-  // appChildEnv on its own leaves the rest untouched (no PORT/HOST added)
-  assert.equal(appChildEnv({ GITHUB_TOKEN: 'x', KEEP: '1' }).GITHUB_TOKEN, undefined);
-  assert.equal(appChildEnv({ GITHUB_TOKEN: 'x', KEEP: '1' }).KEEP, '1');
 });
 
 /* Express 5 calls app.listen's callback with the bind error: a backend over a
@@ -202,12 +244,12 @@ test('the backend child never inherits the GitHub token or the system-mode crede
 test('a backend that exits right after "Listening on" fails the start; the port\'s owner is not taken for it', async () => {
   const blocker = http.createServer((req, res) => setTimeout(() => res.end('somebody else'), 400));
   await new Promise((r) => blocker.listen(PORT, '127.0.0.1', r));
-  process.env.SAY_LISTENING_AND_EXIT = '1';
+  setKnob('SAY_LISTENING_AND_EXIT', '1');
   try {
     await assert.rejects(startBackend(), /exited \(0\) right after it said it was listening - port \d+ is answered by another process/);
     assert.equal(backendStatus().running, false);
   } finally {
-    delete process.env.SAY_LISTENING_AND_EXIT;
+    clearKnob('SAY_LISTENING_AND_EXIT');
     await new Promise((r) => blocker.close(r));
   }
 });
@@ -219,16 +261,16 @@ test('a backend that exits right after "Listening on" fails the start; the port\
 test('a port owner that answers at once does not hide a backend that exits after "Listening on"', async () => {
   const blocker = http.createServer((req, res) => res.end('somebody else'));
   await new Promise((r) => blocker.listen(PORT, '127.0.0.1', r));
-  process.env.SAY_LISTENING_AND_EXIT = '1';
+  setKnob('SAY_LISTENING_AND_EXIT', '1');
   try {
     for (const after of ['', '', '', '50', String(LIVENESS_MS - 200)]) {
-      process.env.EXIT_AFTER_MS = after;
+      setKnob('EXIT_AFTER_MS', after);
       await assert.rejects(startBackend(), /exited \(0\) right after it said it was listening/, `exit after ${after || 0} ms`);
       assert.equal(backendStatus().running, false);
     }
   } finally {
-    delete process.env.SAY_LISTENING_AND_EXIT;
-    delete process.env.EXIT_AFTER_MS;
+    clearKnob('SAY_LISTENING_AND_EXIT');
+    clearKnob('EXIT_AFTER_MS');
     await new Promise((r) => blocker.close(r));
   }
 });
@@ -239,7 +281,7 @@ test('a port owner that answers at once does not hide a backend that exits after
  * answered "not running" while the start went on to listen. Every stop
  * reaches it now, and the start says it was stopped. */
 test('a stop kills a backend that has not listened yet, and the start says so', async () => {
-  process.env.LISTEN_DELAY_MS = '700';
+  setKnob('LISTEN_DELAY_MS', '700');
   try {
     const start = startBackend();
     start.catch(() => {});
@@ -250,7 +292,7 @@ test('a stop kills a backend that has not listened yet, and the start says so', 
     assert.equal(await portOpen(), false, 'the backend whose start was cut short listened anyway, as an orphan');
     assert.equal(backendStatus().running, false);
   } finally {
-    delete process.env.LISTEN_DELAY_MS;
+    clearKnob('LISTEN_DELAY_MS');
     await stopBackend();
   }
 });

@@ -49,6 +49,21 @@ Worth knowing before assessing a report:
   Anything else is refused with the reason - a screenshot is then returned
   but not saved - and `A2UI5_MCP_REMOTE_DIR` / `A2UI5_MCP_SCREENSHOT_DIR` put
   them elsewhere (a directory those variables name is not checked).
+- **A child that runs the app gets an allowlisted environment.** The
+  backend and the unit-test runner execute the transpiled ABAP, and
+  open-abap's `@KERNEL` escape gives that code `process.env`. They inherit
+  only what Node, the runtime and an app's outbound HTTP need - `PATH`, the
+  home and temp directories, `TZ` and the locale, `NODE_OPTIONS`, the CA and
+  TLS variables, the proxy variables (a proxy URL may carry its
+  credentials: it is passed because an app's HTTP needs it as much as the
+  server's), the Windows system variables - plus `PORT` and the loopback
+  `HOST` (`appChildEnv` in `lib/runtime.mjs` lists each with its reader).
+  The GitHub token, the system-mode SAP credentials and anything else the
+  user's shell exports (cloud keys, registry tokens) stay with the server.
+  Defence in depth: deploying ABAP is running code with your privileges, and
+  an allowlist does not change that. The build, lint, git and npm children
+  run no app code and keep the full environment their own configuration
+  lives in.
 - **It runs with the privileges of whoever started it**, over the checkouts
   beside it, and the expensive half of its tool loop (`build_backend`,
   `run_app`) **executes code**: it transpiles the ABAP and boots the resulting

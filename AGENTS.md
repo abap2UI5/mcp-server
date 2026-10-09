@@ -319,8 +319,17 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
   exit is seen, so the wait alone lost that race; a backend that dies
   later is caught by the next call (its sessions' generation). Start, stop,
   port and orphan handling are the checkout's, unchanged. The child's
-  environment never carries `ALLOWED_HOSTS` (`backendEnv`): the framework's
-  `express.mjs` reads `*` there as "no DNS-rebinding guard".
+  environment is an ALLOWLIST (`appChildEnv` - PATH, home, temp, TZ and
+  locale, the Node/TLS/proxy variables, the Windows system ones; the list
+  and why each is there sit beside `CHILD_ENV_ALLOW` in `lib/runtime.mjs`),
+  the same for the unit-test runner: both run the app, and `@KERNEL` reaches
+  `process.env`. Plus `PORT` and `HOST`, and never `ALLOWED_HOSTS`
+  (`backendEnv`): the framework's `express.mjs` reads `*` there as "no
+  DNS-rebinding guard". A variable an app needs is the app's to carry, not
+  a reason to widen the list - widen it only with the reader named. The build,
+  lint, git and npm children keep the full environment: they run no app
+  code, and git and npm need their own configuration (`GIT_*`,
+  `npm_config_*`, credential helpers, the proxy).
 - **Unit tests**: `apps/index.mjs`, filtered like the checkout's runner.
   NEVER the package's `output/index.mjs` - that is the framework's own suite.
 - **Lint**: app-template's `abaplint.jsonc` retargeted

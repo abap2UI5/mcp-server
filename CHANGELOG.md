@@ -32,16 +32,32 @@
   now refuse when the path - every symlink on it resolved - leaves the
   intended root (`resolvedInside` in `lib/remote.mjs`). `test/security.test.mjs`
   pins each.
-- **Security hardening: the backend and unit-test children no longer inherit
-  this server's secrets.** The expensive half boots the transpiled app, and
-  open-abap's `@KERNEL` escape lets ABAP reach `process.env` - running the app
-  is trusted code (SECURITY.md), but the backend has no use for the GitHub
-  token (the parent's mirror calls alone need it) or, when a sandbox and a
-  system registration share one shell, the system-mode SAP credentials, and
-  those are the highest-value secrets the server defines. They are now
-  withheld from both children (`appChildEnv` in `lib/runtime.mjs`); defence in
-  depth, not a substitute for not deploying untrusted ABAP. `test/backend.test.mjs`
-  pins it.
+- **Security hardening: what transpiled ABAP can reach.** open-abap's
+  `@KERNEL` escape (`WRITE '@KERNEL <js>'.`) turns a literal into JavaScript
+  once transpiled, and that code runs in the backend and unit-test children
+  with `process.env` in reach. Running the app is trusted code (SECURITY.md);
+  this is defence in depth, not a substitute for not deploying untrusted
+  ABAP.
+  - The children no longer inherit this server's environment: they get an
+    ALLOWLIST (`appChildEnv` in `lib/runtime.mjs`) - `PATH`, the home and
+    temp directories, `TZ` and the locale, `NODE_OPTIONS`, the CA/TLS and
+    proxy variables, `NODE_ENV`/`DEBUG`, the Windows system variables -
+    plus `PORT` and the loopback `HOST`, never `ALLOWED_HOSTS`. A denylist
+    of the secrets this server knows (the GitHub token, the system-mode
+    credentials) would still hand over everything else a shell exports -
+    cloud keys, registry tokens. Enumerated from what the children read
+    (the npm host, the framework's `express.mjs`, the runtime and express -
+    `NODE_ENV` and `DEBUG` are all of it - and Node itself; the Windows
+    names from Node's documentation), and measured: `deploy_app`, `build_backend`, `app_start`
+    and `run_unit_tests` ran end to end on the npm backend from a parent
+    environment of decoys (`GITHUB_TOKEN`, `AWS_SECRET_ACCESS_KEY`,
+    `NPM_TOKEN`, `DATABASE_URL`, the SAP password, `ALLOWED_HOSTS=*`) with
+    an app and a test class that print `Object.keys(process.env)` through
+    `@KERNEL` - both children saw only allowlisted names - and the
+    framework checkout's backend booted and served an app the same way.
+    The build, lint, git and npm children run no app code and keep the
+    full environment. `test/backend.test.mjs` pins it, the spawned child
+    included.
 
 - **`scope_of` says when the OpenUI5 checkout is what is missing.**
   Without the checkout samples-controls' `scripts/scope-of.mjs` reads
