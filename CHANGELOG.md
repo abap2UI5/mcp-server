@@ -2,10 +2,6 @@
 
 ## Unreleased
 
-- **A `from_line` past the end says so.** `read_example` and `read_app`
-  clamped it to the last line without a word - usually the empty line
-  after the final newline - and the answer read as an empty file. The
-  last line still comes back, with `pastEnd` naming the line count.
 - **`scope_of` says when the OpenUI5 checkout is what is missing.**
   Without the checkout samples-controls' `scripts/scope-of.mjs` reads
   the JSDoc from (`OPENUI5_SRC`, else `fork-openui5` beside the corpus),
@@ -71,11 +67,6 @@
   (`mode: prebuilt+incremental`); an explicit `prebuilt` or `transpile`
   still builds the framework alone and names the apps it left out
   (`devAppsNotBuilt`, and a `next` that says how to add them).
-- **A `build_backend` that joined the running build reports progress.**
-  Its description promises progress notifications to a call with a
-  `progressToken`; a call that joined the build in flight heard none
-  until the build ended. Every joined call now follows the build's lines
-  until it ends or the call is cancelled.
 - **`docs_search` counts every matching page.** `matches` was the number
   of pages it returned - 10 for a query 37 pages answer - so a cut answer
   read as the whole site's, and nothing said where the rest was. `matches`
@@ -85,7 +76,10 @@
   whole, and samples-controls' largest ports are 84,000 characters - past
   what a client accepts, so the agent read none of it. A long sample comes
   in pages of whole lines now (`page`, `nextPage`, `from_line`), measured
-  as the answer is written, like `read_app`.
+  as the answer is written, like `read_app`. A `from_line` past the end -
+  in either tool - was clamped to the last line without a word, usually
+  the empty line after the final newline, and read as an empty file; the
+  last line still comes back, with `pastEnd` naming the line count.
 - **An npm build that cannot write its files fails with a reason.** A
   workspace whose `open-abap-core/` or sandbox the build could not write
   (a file where the directory belongs, a read-only or full disk) threw out
@@ -100,17 +94,14 @@
   Both are in the vendored modules (`lib/appclient.mjs`,
   `lib/snapshot.mjs`): the VS Code extension and abap2UI5/protocol pick
   the change up with their next re-vendor.
-- **A `build_backend` that joined the running build can be cancelled.** A
-  second call of the same mode joins the build in flight, and its own
-  cancel was ignored: the request stayed open until the build ended (tens
-  of minutes for a full one). It stops waiting now and answers as
-  cancelled; the build goes on for the call that started it.
-- **`api_reference` pages its compact list too, and takes `kind` in the
-  singular.** Without `query`, `offset` and `limit` were ignored and the
-  whole surface came back to a call that asked for its second page. Both
-  lists page by entry now; the compact answer counts `entries` and says
-  `returned` / `more` like the queried one. `kind: "method"` (or
-  `constant`, `type`) was refused - it is the same filter as the plural.
+- **A `build_backend` that joined the running build can be cancelled, and
+  reports progress.** A second call of the same mode joins the build in
+  flight, and its own cancel was ignored: the request stayed open until
+  the build ended (tens of minutes for a full one). It stops waiting now
+  and answers as cancelled; the build goes on for the call that started
+  it. And a joined call with a `progressToken` heard no progress
+  notification until the build ended - it follows the build's lines now,
+  until the build ends or the call is cancelled.
 - **`app_guide` pages by chapter.** The default call - the one its
   description tells an agent to make first - answered the whole guide,
   48,000 characters of the 60,000 an answer may carry, and the guide grows
@@ -146,11 +137,6 @@
   `{ ms: true }` waited 1 ms, each reported as performed. A step's unknown
   field, a `commit` that is no boolean and an `ms` that is no number are
   refused naming the step.
-- **A backend that dies right after "Listening on" fails the start
-  reliably.** Over a port another process holds, that process answered the
-  port wait before the child's exit was seen, and two starts in three still
-  reported the backend running. The child has to stay up for half a second
-  past its "Listening on" now (the start ends early when it exits).
 - **`setup_status` finds git, tar, npm and npx without `which`.** It
   spawned `which` (`where` on Windows) once per program, with no timeout,
   and on an image without `which` reported every program missing. The PATH
@@ -188,8 +174,12 @@
   was answered by whoever held the port - `app_start` and `run_app` then
   talked to a foreign server. The host listens on a plain `http.Server`
   now and exits 1 with "port N on 127.0.0.1 is in use by another process"
-  (also over a release whose own `serve()` has the bug), and a start whose
-  child has exited by the time the port answers fails, on both backends.
+  (also over a release whose own `serve()` has the bug). And on both
+  backends a child that exits right after "Listening on" fails the start:
+  the port's owner answered the port wait before the exit was seen, and
+  two starts in three still reported the backend running - the child now
+  has to stay up half a second past its "Listening on" (the start ends
+  early when it exits).
 - **System mode never logs the password of a refused URL.** With
   credentials in `A2UI5_MCP_SYSTEM_URL` (refused) or a URL that does not
   parse, the "ready in SYSTEM MODE" notification showed the raw URL, user
@@ -203,10 +193,13 @@
   answer is indented, so 600 tests went out at 68,000 characters. Measured
   as written now (`sizeOf`); `migrate_report`'s cuts the same way.
 - **`capabilities` and `api_reference` are paged** like `examples`:
-  `offset` and `limit`, a `more` that names the next offset, every entry
-  whole. A broad query answered ~61,000 and ~75,000 characters. Pages are
-  measured at the depth their entries sit in the answer, `examples` and
-  `pitfalls` too - a full `examples` page came out ~2% over the budget.
+  `offset` and `limit`, `returned`, a `more` that names the next offset,
+  every entry whole. A broad query answered ~61,000 and ~75,000
+  characters. `api_reference` pages its compact list (no `query`) the same
+  way, by entry, counting `entries`, and takes `kind` in the singular
+  (`method`, `constant`, `type`), which it refused. Pages are measured at
+  the depth their entries sit in the answer, `examples` and `pitfalls`
+  too: a full `examples` page came out ~2% over the budget.
 - **`ALLOWED_HOSTS` from the user's shell no longer reaches the backend.**
   The framework's `express.mjs` reads `ALLOWED_HOSTS=*` as "answer any Host
   and any Origin", which switched its DNS-rebinding guard off for the dev

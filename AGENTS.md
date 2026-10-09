@@ -1142,7 +1142,18 @@ legitimately slower.
   (`fitFindings`; the counts stay whole, `findingsCut` / `remainingCut`
   say what was left - a validator needs no paging, the agent fixes and
   validates again); `run_unit_tests` counts a long run's tests per object instead;
-  `test/paging.test.mjs` walks the pages to the end over fake checkouts. A
+  `docs_search` pages by `offset` (at most 50 pages a call);
+  `test/paging.test.mjs` walks the pages to the end over fake checkouts.
+  **One vocabulary for it, in every tool** - an agent learns it once:
+  `matches` counts every hit and `returned` the page; `offset` (echoed
+  when not 0) and `more`, a sentence naming the exact next call, page the
+  lists; the line-paged reads name their next `from_line` (`read_app`:
+  `lines` + `next`; `read_example`: `page` + `nextPage`, because its
+  `lines` and `next` were taken before it paged) and answer a `from_line`
+  past the end with `pastEnd`; a list that is cut rather than paged says
+  what was left out in a `...Cut` sentence (`findingsCut`,
+  `remainingCut`, `fixedCut`, `errorsCut`, `screenshotCut`, `build_log`'s
+  `cut`). A new paging field takes one of these names. A
   tool whose answer can grow with upstream content pages the same way, never
   by dropping content. **Measure what is sent**: `text()` writes indented
   JSON, so a size is `sizeOf` (with the `depth` an item sits at in the

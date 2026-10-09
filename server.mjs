@@ -456,12 +456,6 @@ async function deployMigrated(res, ctx) {
   return stop(null);
 }
 
-/* One page of `items` for a tool that pages by `offset` and `limit` (no
- * limit: every match that fits), cut at the answer budget like examples and
- * pitfalls. `taken` is the page; `notes` the answer's paging fields - where
- * it starts, how many it carries, and the exact arguments that fetch the
- * rest (`more`, absent when nothing is left; `same` names the arguments to
- * repeat). */
 /* The whole lines from `fromLine` (1-based) that fit one answer: `{ from,
  * to, page }`. Each line is measured as the answer writes it - JSON-escaped,
  * its line break a `\n` - not raw: a class of JSON string templates went
@@ -489,6 +483,12 @@ function linePage(all, fromLine) {
   };
 }
 
+/* One page of `items` for a tool that pages by `offset` and `limit` (no
+ * limit: every match that fits), cut at the answer budget like examples and
+ * pitfalls. `taken` is the page; `notes` the answer's paging fields - where
+ * it starts, how many it carries, and the exact arguments that fetch the
+ * rest (`more`, absent when nothing is left; `same` names the arguments to
+ * repeat). */
 function pageWithin(items, args, same) {
   const offset = boundedInt(args.offset, { name: 'offset', dflt: 0, min: 0 });
   const limit = boundedInt(args.limit, { name: 'limit', dflt: 'every match that fits one answer', min: 1 });
