@@ -138,3 +138,37 @@ test('validate_view and fix_view fit a view of hundreds of findings into one ans
     await client.close();
   }
 });
+
+/* The findings came back in the order the gates produced them - neither the
+ * linter's report order (source order, report.mjs problemsOf) nor severity:
+ * this app answered a warning on line 140, a hint on line 108, then a warning
+ * on line 26. And a cut answer kept the most severe, so the head of a long
+ * list and the whole of a short one were sorted by different rules. Both
+ * tools list the most severe first, in source order within a severity - the
+ * cut answer is the head of that list. */
+test('validate_view and fix_view list the findings most severe first, in source order within a severity', { skip }, async () => {
+  const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const fs = await import('node:fs');
+  const abap = fs.readFileSync(path.join(ROOT, 'test/fixtures/agent-app/zcl_agent_mcp.clas.abap'), 'utf8');
+  const { severityOf, severityRank } = await importViewCheck('./findings');
+  const sorted = (list) => list.every((f, i) => i === 0 || (() => {
+    const a = list[i - 1];
+    const ra = severityRank(severityOf(a));
+    const rb = severityRank(severityOf(f));
+    return ra > rb || (ra === rb && ((a.line ?? Infinity) < (f.line ?? Infinity) || ((a.line ?? Infinity) === (f.line ?? Infinity) && (a.column ?? 0) <= (f.column ?? 0))));
+  })());
+  const transport = new StdioClientTransport({ command: process.execPath, args: [path.join(ROOT, 'server.mjs')], env: { ...process.env, A2UI5_MCP_REMOTE: '0' }, stderr: 'ignore' });
+  const client = new Client({ name: 'order', version: '0' }, { capabilities: {} });
+  await client.connect(transport);
+  try {
+    const v = JSON.parse((await client.callTool({ name: 'validate_view', arguments: { abap_source: abap, render: false } })).content[0].text);
+    const severities = new Set(v.findings.map((f) => severityOf(f)));
+    assert.ok(v.findings.length >= 3 && severities.size >= 2, `the fixture has findings of more than one severity: ${JSON.stringify(v.findings.map((f) => [f.severity, f.line]))}`);
+    assert.ok(sorted(v.findings), `validate_view: ${JSON.stringify(v.findings.map((f) => [f.severity, f.line]))}`);
+    // fix_view's remaining: the same order
+    const f = JSON.parse((await client.callTool({ name: 'fix_view', arguments: { abap_source: abap } })).content[0].text);
+    assert.ok(sorted(f.remaining), `fix_view remaining: ${JSON.stringify(f.remaining.map((x) => [x.severity, x.line]))}`);
+  } finally {
+    await client.close();
+  }
+});

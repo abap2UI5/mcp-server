@@ -58,7 +58,7 @@ import { scaffold, readSpec, validClassName, classNameRule, templateFiles, SPEC_
 import { agentTargetProblem, planAgentSetup, writePlan, pinProblems, pinWarning, agentSetupNextSteps } from './lib/agent-setup.mjs';
 import { fixSource } from './lib/fixview.mjs';
 import { lintOptionsFor } from './lib/lintopts.mjs';
-import { withRenderFallback, renderSkippedNote, warmThenCold, validateHint } from './lib/validate.mjs';
+import { withRenderFallback, renderSkippedNote, warmThenCold, validateHint, bySeverity } from './lib/validate.mjs';
 import { ANSWER_BUDGET, sizeOf, takeWithin, takeSmallestWithin, fitSnapshot, fitUnitResult, fitFindings } from './lib/budget.mjs';
 import { getRenderer, dropRenderer, closeRenderers, rendererLooksDead } from './lib/renderer.mjs';
 import { TOOLS } from './lib/tools.mjs';
@@ -1145,9 +1145,11 @@ async function handle(name, args = {}, ctx = {}) {
       const rules = await explainRules(result.findings, args.explain === true);
       // additive: fixable: true per finding fix_view can clear (older linter
       // without ./fix: no flag, findings untouched)
-      /* the counts stay whole; the findings listed are the most severe that
-       * fit one answer (lib/budget.mjs fitFindings) */
-      const fitted = fitFindings(await flagFixable(result.findings), { rankOf: (f) => severityRank(severityOf(f)) });
+      /* the counts stay whole; the findings are listed most severe first,
+       * in source order within a severity (bySeverity), as many as fit one
+       * answer (lib/budget.mjs fitFindings) - a cut list is the head of it */
+      const rank = (f) => severityRank(severityOf(f));
+      const fitted = fitFindings(bySeverity(await flagFixable(result.findings), rank), { rankOf: rank });
       const findings = fitted.findings;
       return text({
         ok,
@@ -1195,7 +1197,8 @@ async function handle(name, args = {}, ctx = {}) {
       const room = Math.max(10_000, ANSWER_BUDGET - 10_000 - sizeOf(res.source || ''));
       const fixedFit = fitFindings(res.fixed, { budget: Math.floor(room / 3) });
       const { severityOf: sevOf, severityRank: sevRank } = await importViewCheck('./findings');
-      const remainingFit = fitFindings(await flagFixable(res.remaining), { budget: room - Math.floor(room / 3), rankOf: (f) => sevRank(sevOf(f)) });
+      const rank = (f) => sevRank(sevOf(f));
+      const remainingFit = fitFindings(bySeverity(await flagFixable(res.remaining), rank), { budget: room - Math.floor(room / 3), rankOf: rank });
       const remaining = remainingFit.findings;
       return text({
         applied: res.applied,
