@@ -59,7 +59,7 @@ import { agentTargetProblem, planAgentSetup, writePlan, pinProblems, pinWarning,
 import { fixSource } from './lib/fixview.mjs';
 import { lintOptionsFor } from './lib/lintopts.mjs';
 import { withRenderFallback, renderSkippedNote, warmThenCold, validateHint, bySeverity } from './lib/validate.mjs';
-import { ANSWER_BUDGET, sizeOf, takeWithin, takeSmallestWithin, fitSnapshot, fitUnitResult, fitFindings } from './lib/budget.mjs';
+import { ANSWER_BUDGET, sizeOf, takeWithin, takeSmallestWithin, fitSnapshot, fitUnitResult, fitFindings, fitVerifyStages } from './lib/budget.mjs';
 import { getRenderer, dropRenderer, closeRenderers, rendererLooksDead } from './lib/renderer.mjs';
 import { TOOLS } from './lib/tools.mjs';
 import { RESOURCES, RESOURCE_TEMPLATES, GUIDE_CHAPTER_TEMPLATE, readResource } from './lib/resources.mjs';
@@ -1402,8 +1402,10 @@ async function handle(name, args = {}, ctx = {}) {
       /* A stage that failed makes the CALL an error: the report used to come
        * back with isError false and `ok: false` inside, so a client (or an
        * agent) that goes by the protocol's flag saw a green verify_app. */
+      /* each stage is fitted alone; together they are fitted again
+       * (lib/budget.mjs fitVerifyStages) */
       const done = (stoppedAt, extra) => ({
-        ...text({ ok: !stoppedAt, ...(stoppedAt ? { stoppedAt } : {}), stages, ...(extra || {}) }),
+        ...text({ ok: !stoppedAt, ...(stoppedAt ? { stoppedAt } : {}), stages: fitVerifyStages(stages), ...(extra || {}) }),
         ...(stoppedAt ? { isError: true } : {}),
       });
       // 1. validate - skipped, not failed, without a linter checkout

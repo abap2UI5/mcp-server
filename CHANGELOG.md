@@ -124,7 +124,11 @@
   `counts` stays whole and `findingsCut` / `remainingCut` say how many
   were left out; `fix_view`'s corrected source and `validate_view`'s rule
   explanations (`explain: true`, about 1,000 characters a rule) always go
-  whole, and the findings get the room that is left.
+  whole, and the findings get the room that is left. `verify_app`, which
+  composes the tools' answers, fits its stages together too: a passed
+  validate stage gives up findings first, then the unit stage counts its
+  tests per object (a few hundred hints and tests were ~100,000
+  characters).
 - **`build_log`, `build_backend` and `read_app` answers fit.** `build_log`
   answered `tail` lines whatever their length (2,000 transpiler lines:
   464,000 characters) - the last lines that fit come back now, a line past

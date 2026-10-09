@@ -16,7 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { ANSWER_BUDGET, sizeOf, takeWithin, takeSmallestWithin, fitSnapshot, fitUnitResult, fitFindings } from '../lib/budget.mjs';
+import { ANSWER_BUDGET, sizeOf, takeWithin, takeSmallestWithin, fitSnapshot, fitUnitResult, fitFindings, fitVerifyStages } from '../lib/budget.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const LIMIT = 90_000; // characters: comfortably under the client's token cap for this kind of text
@@ -555,4 +555,40 @@ test('fitFindings: a list that fits is the same; past the budget the most severe
   assert.ok(errors.every((f) => kept.has(f.type)) || findings.every((f) => f.severity === 'error'), 'errors go first');
   assert.deepEqual(findings, many.filter((f) => kept.has(f.type)), 'in the order the gate reported them');
   assert.equal(fitFindings([{ big: 'x'.repeat(100_000) }]).findings.length, 1, 'always one');
+});
+
+/* verify_app composes the single tools' answers, each fitted to one answer
+ * by itself - and together past it: a validate stage that passed with a few
+ * hundred hints (advisory, so ok) and a unit stage of a few hundred tests
+ * answered ~100,000 characters, and the client showed the agent nothing of
+ * the loop it had just run. The passed validate stage gives up findings
+ * first (validate_view lists them), then the unit stage counts per object. */
+test('fitVerifyStages: the composed verify_app report fits one answer', () => {
+  const hint = (i) => ({ type: 'event-arg-single-row-table', severity: 'hint', line: i + 1, column: 3, message: `t_arg = VALUE #( ( \`${'x'.repeat(60)}\` ) ) builds a one-row table for a single argument (${i})`, url: 'https://abap2ui5.github.io/linter/#event-arg-single-row-table' });
+  const findings = Array.from({ length: 140 }, (_, i) => hint(i));
+  const tests = Array.from({ length: 330 }, (_, i) => ({ object: 'ZCL_APP', class: 'LTCL_TEST', method: `test_method_${i}`, ok: true }));
+  const stages = {
+    validate: { ok: true, counts: { error: 0, warning: 0, hint: 150 }, findings, findingsCut: '10 more finding(s) did not fit one answer', renderErrors: [], hint: 'hints are advisory, ok stays true' },
+    deploy: { ok: true, deployed: 'zcl_app' },
+    build: { ok: true, built: true, mode: 'incremental' },
+    unit: { ok: true, ran: 330, skipped: 0, tests, failed: [] },
+    boot: { ok: true, booted: true, errors: [] },
+  };
+  const before = sizeOf({ ok: true, stages });
+  assert.ok(sizeOf(stages.validate) < ANSWER_BUDGET && sizeOf(stages.unit) < ANSWER_BUDGET && before > ANSWER_BUDGET, `each fits alone, together ${before}`);
+  const fit = fitVerifyStages(stages);
+  assert.ok(sizeOf({ ok: true, stages: fit }) <= ANSWER_BUDGET - 5000, `${sizeOf({ ok: true, stages: fit })} characters`);
+  assert.deepEqual(fit.validate.findings, findings.slice(0, fit.validate.findings.length), 'the head of the list stays');
+  assert.match(fit.validate.findingsCut, new RegExp(`^${150 - fit.validate.findings.length} more finding\\(s\\) left out of this report - validate_view lists them`));
+  assert.deepEqual(fit.deploy, stages.deploy);
+  assert.equal(stages.validate.findings.length, 140, 'the input is not changed');
+  // a report that fits is the same object
+  const small = { validate: { ok: true, counts: { error: 0, warning: 0, hint: 1 }, findings: [hint(0)] }, build: { ok: true } };
+  assert.equal(fitVerifyStages(small), small);
+  // when the findings alone cannot make room, the unit stage is counted per object too
+  const huge = { ...stages, unit: { ...stages.unit, tests: Array.from({ length: 700 }, (_, i) => tests[i % 330]), ran: 700 } };
+  const hugeFit = fitVerifyStages(huge);
+  assert.ok(sizeOf({ ok: true, stages: hugeFit }) <= ANSWER_BUDGET - 5000, `${sizeOf({ ok: true, stages: hugeFit })} characters`);
+  assert.equal(hugeFit.unit.tests, undefined);
+  assert.deepEqual(hugeFit.unit.testsPerObject, { ZCL_APP: 700 });
 });

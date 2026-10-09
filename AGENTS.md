@@ -1142,6 +1142,8 @@ legitimately slower.
   (`fitFindings`; the counts stay whole, `findingsCut` / `remainingCut`
   say what was left - a validator needs no paging, the agent fixes and
   validates again); `run_unit_tests` counts a long run's tests per object instead;
+  `verify_app`, whose stages are those tools' answers, fits them together
+  once more (`fitVerifyStages`);
   `docs_search` pages by `offset` (at most 50 pages a call);
   `test/paging.test.mjs` walks the pages to the end over fake checkouts.
   **One vocabulary for it, in every tool** - an agent learns it once:
