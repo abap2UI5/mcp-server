@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   hydrate, fetchRemoteFile, safeRelPath, isRemoteCheckout, readMarker, remoteRoot, remoteEnabled,
-  mirrorFresh, remoteStatus, lastHydrate, resetRemote, FAILURE_BACKOFF_MS, REMOTE_FILES, REMOTE_TOOLS, resourceRepos, MARKER, TEXT_MAX_BYTES,
+  mirrorFresh, remoteStatus, lastHydrate, resetRemote, FAILURE_BACKOFF_MS, REMOTE_FILES, REMOTE_OPTIONAL, REMOTE_TOOLS, resourceRepos, MARKER, TEXT_MAX_BYTES,
 } from '../lib/remote.mjs';
 import { resolveKey, REPO_DIRS } from '../lib/repos.mjs';
 import { privateDirProblem } from '../lib/private-dir.mjs';
@@ -97,7 +97,8 @@ test('hydrate fetches the fixed file list into a mirror the resolver then hands 
   assert.equal(res.fetched, true);
   assert.equal(res.root, remoteRoot('corpus'));
   assert.equal(path.dirname(res.root), dir);
-  assert.equal(fetchImpl.calls.length, REMOTE_FILES.corpus.length);
+  // the fixed list, and the optional files the fake does not have (404: left out)
+  assert.equal(fetchImpl.calls.length, REMOTE_FILES.corpus.length + REMOTE_OPTIONAL.corpus.length);
   assert.ok(fetchImpl.calls.every((u) => u.startsWith('https://raw.githubusercontent.com/abap2UI5/samples-controls/main/')));
   for (const f of REMOTE_FILES.corpus) assert.equal(fs.readFileSync(path.join(res.root, f), 'utf8'), `content of ${f}`);
   assert.ok(isRemoteCheckout(res.root));
@@ -112,7 +113,7 @@ test('hydrate fetches the fixed file list into a mirror the resolver then hands 
   // fresh: a second hydrate costs nothing
   const again = await hydrate('corpus', { local: null, fetchImpl });
   assert.equal(again.fromCache, true);
-  assert.equal(fetchImpl.calls.length, REMOTE_FILES.corpus.length, 'a fresh mirror is not fetched again');
+  assert.equal(fetchImpl.calls.length, REMOTE_FILES.corpus.length + REMOTE_OPTIONAL.corpus.length, 'a fresh mirror is not fetched again');
   assert.ok(mirrorFresh('corpus'));
 }));
 
@@ -253,6 +254,24 @@ test('a refresh takes out the files the repository no longer lists, and keeps th
   assert.ok(!fs.existsSync(path.join(again.root, 'docs/old.md')), 'a page gone upstream is gone from the mirror');
   assert.ok(fs.existsSync(path.join(again.root, 'docs/index.md')));
   assert.ok(fs.existsSync(onDemand), 'a file the marker never listed is not the refresh\'s to remove');
+}));
+
+/* catalogue-derived.json makes `examples` find a sample by a control its
+ * view builds - an improvement, never a precondition: a mirror carries it
+ * when the repository has it, goes without when it does not, and a refresh
+ * that no longer finds it takes the old copy away. */
+test('an optional mirror file is carried when it is there and never costs the mirror', withEnv(async () => {
+  assert.deepEqual(REMOTE_OPTIONAL.corpus, ['catalogue-derived.json']);
+  assert.deepEqual(REMOTE_OPTIONAL.samples, ['catalogue-derived.json']);
+  const files = Object.fromEntries(REMOTE_FILES.samples.map((f) => [`/${f}`, `content of ${f}`]));
+  const withDerived = await hydrate('samples', { local: null, force: true, fetchImpl: fakeFetch({ ...files, '/catalogue-derived.json': '{"controls":[]}' }) });
+  assert.equal(withDerived.fetched, true);
+  assert.equal(fs.readFileSync(path.join(withDerived.root, 'catalogue-derived.json'), 'utf8'), '{"controls":[]}');
+  assert.deepEqual(readMarker(withDerived.root).files, [...REMOTE_FILES.samples, 'catalogue-derived.json']);
+  const without = await hydrate('samples', { local: null, force: true, fetchImpl: fakeFetch(files) });
+  assert.equal(without.fetched, true, 'a 404 of an optional file is no failed mirror');
+  assert.ok(!fs.existsSync(path.join(without.root, 'catalogue-derived.json')), 'the copy of the last refresh is gone with it');
+  assert.deepEqual(readMarker(without.root).files, REMOTE_FILES.samples);
 }));
 
 test('fetchRemoteFile reads one file on demand, from the cache while fresh', withEnv(async () => {

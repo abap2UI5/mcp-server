@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { stripJsonc, LOCAL_BENIGN, benignRules, deployApp, removeApp } from '../lib/runtime.mjs';
 import { parseCapabilities, searchCapabilities } from '../lib/capabilities.mjs';
-import { parseExamples, searchExamples, catalogueEntries, CATALOGUES, matchRow } from '../lib/examples.mjs';
+import { parseExamples, searchExamples, catalogueEntries, derivedControls, CATALOGUES, matchRow } from '../lib/examples.mjs';
 import { CORPUS_DIRS, resolveLintConfig, viewCheckCandidates, SERVER_ROOT } from '../lib/repos.mjs';
 import { sliceCatalogue } from '../lib/pitfalls.mjs';
 import { sliceGuide, guideChapters } from '../lib/guide.mjs';
@@ -1070,6 +1070,44 @@ test('a verified port outranks an unverified one when the relevance ties', () =>
   const named = searchExamples({ query: 'gadget0', repo: 'samples-controls', rawCatalogue: mixed });
   assert.equal(named[0].title, 'sap.m.Gadget0');
   assert.equal(named[0].status, 'generated');
+});
+
+/* catalogue-derived.json (samples-controls, samples) lists every control
+ * type a sample's view BUILDS. The catalogue's own words name what a port is
+ * filed under, so "sap.m.Dialog" found 7 of the 33 ports that build one. A
+ * term found among the built controls matches too, ranks below one found in
+ * the catalogue's words, and the hit names what it was found by. */
+test('examples finds a sample by a control its view builds (catalogue-derived.json)', () => {
+  const cat = {
+    ports: [
+      { class: 'z2ui5_cl_smpc_app_001', file: 'src/01/01/z2ui5_cl_smpc_app_001.clas.abap', library: 'sap.m', entity: 'sap.m.Dialog', title: 'Dialog', summary: 'a dialog', keywords: 'dialog sap.m', status: 'generated' },
+      { class: 'z2ui5_cl_smpc_app_002', file: 'src/01/01/z2ui5_cl_smpc_app_002.clas.abap', library: 'sap.m', entity: 'sap.m.PlanningCalendar', title: 'Planning Calendar', summary: 'appointments', keywords: 'planningcalendar sap.m', status: 'checked' },
+      { class: 'z2ui5_cl_smpc_app_003', file: 'src/01/01/z2ui5_cl_smpc_app_003.clas.abap', library: 'sap.m', entity: 'sap.m.Bar', title: 'Bar', summary: 'a bar', keywords: 'bar sap.m', status: 'checked' },
+    ],
+  };
+  const derived = {
+    controls: ['sap.m.Dialog', 'sap.m.Button', 'sap.m.PlanningCalendar', 'sap.m.Bar'],
+    ports: [
+      { class: 'z2ui5_cl_smpc_app_001', controls: [0, 1] },
+      { class: 'z2ui5_cl_smpc_app_002', controls: [2, 0, 1] },
+      { class: 'z2ui5_cl_smpc_app_003', controls: [3] },
+    ],
+  };
+  const q = (query, rawDerived = derived) => searchExamples({ query, repo: 'samples-controls', rawCatalogue: cat, rawDerived });
+  // without the derived file: only the port whose catalogue words say so
+  assert.deepEqual(q('sap.m.Dialog', null).map((e) => e.cls), ['Z2UI5_CL_SMPC_APP_001']);
+  // with it: the calendar that builds a Dialog too, ranked below the port about one
+  const hits = q('sap.m.Dialog');
+  assert.deepEqual(hits.map((e) => e.cls), ['Z2UI5_CL_SMPC_APP_001', 'Z2UI5_CL_SMPC_APP_002']);
+  assert.deepEqual(hits[1].builds, ['sap.m.Dialog'], 'the hit names the control it was found by');
+  // AND across both halves: a catalogue word and a built control
+  assert.deepEqual(q('appointments button').map((e) => e.cls), ['Z2UI5_CL_SMPC_APP_002']);
+  // the full control list never travels in the answer
+  assert.ok(!JSON.stringify(q('bar')).includes('PlanningCalendar'), 'only the matched controls are named');
+  assert.equal(JSON.stringify(q('appointments')[0]).includes('builds'), false, 'a hit not found by a control names none');
+  // the samples shape keys its list `samples`; anything else is no derived file
+  assert.equal(derivedControls({ controls: ['sap.m.Table'], samples: [{ class: 'z2ui5_cl_smp_app_001', controls: [0] }] }).get('Z2UI5_CL_SMP_APP_001')[0], 'sap.m.Table');
+  for (const bad of [null, {}, { controls: 'x' }, { controls: [] }, { controls: [], ports: 'x' }]) assert.equal(derivedControls(bad), null, JSON.stringify(bad));
 });
 
 /* Which FILE answers, pinned against a checkout on disk: catalogue.json where

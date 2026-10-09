@@ -282,7 +282,10 @@ reads as "nobody has built this". It reads each repository's committed
 port's verification status (checked over reviewed over generated, used to
 break ranking ties), the learning-path stage, and what a stack sample needs
 from the system — and falls back to parsing `SAMPLES.md` on a checkout from
-before that file existed. `screenshot_view` and `run_app` answer the
+before that file existed. Where samples and samples-controls commit
+`catalogue-derived.json` beside it, a query also matches the control types
+each sample's view builds, so `sap.m.Dialog` finds every sample that builds
+one, not only those filed under it. `screenshot_view` and `run_app` answer the
 same question at three orders of magnitude apart: the first photographs the
 reconstructed **view** with no backend, the second the **running app** after a
 build. Most iterations should end at the first.

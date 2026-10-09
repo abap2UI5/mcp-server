@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **`examples` finds a sample by the controls its view builds.** The
+  search read only the catalogue's own words - what a sample is filed
+  under and the keywords somebody chose - so `sap.m.Dialog` found 7 of the
+  33 samples-controls ports that build one, `sap.m.SelectDialog` 2 of 8,
+  `sap.m.Table` 23 of 62. samples and samples-controls commit
+  `catalogue-derived.json` beside the catalogue: every control type each
+  view builds. A query now matches those too, ranked below a match in the
+  catalogue's words, and the hit names the controls it was found by under
+  `builds`. The GitHub mirror carries the file when the repository has it
+  and is never refused for its absence; without it the search is the old one.
 - **abap2UI5-bench no longer counts the app's own method as a client call**
   (`bench/`, not part of the package). The `expect` check's `calls`
   matched any `->name(`, and the canonical template names its helpers

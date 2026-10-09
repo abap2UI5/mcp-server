@@ -700,6 +700,16 @@ changes upstream, this repo must change in the same breath:
   (`lib/examples.mjs` `catalogueEntries`) folds them into the single entry
   shape the row parser produces; a shape change upstream is a change here. A
   JSON that does not parse falls back to the page below, never to an error.
+- samples and samples-controls: **`catalogue-derived.json`** beside it - what
+  the linter knows about each class, keyed by `class`; `examples` reads its
+  `controls` dictionary and each entry's `controls` indices (the list is
+  `ports[]` in samples-controls, `samples[]` in samples - `derivedControls`
+  in `lib/examples.mjs`), so a query matches the control types a view
+  BUILDS, ranked below a match in the catalogue's own words and named under
+  `builds`. Optional on both sides: a checkout or mirror without it searches
+  as before (`REMOTE_OPTIONAL` in `lib/remote.mjs` - a mirror carries it when
+  the repository has it and is never refused for its absence), and a shape
+  change is the search without it, not an error.
 - the same three repos: the `SAMPLES.md` **row shape** —
   `| **title** — sub<br>summary<br><sub>keywords</sub> | [`CLASS`](path) |`.
   All three generate it identically and one parser reads all three
