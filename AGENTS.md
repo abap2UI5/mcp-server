@@ -1180,6 +1180,14 @@ legitimately slower.
   the registration and sweeps every tool name over stdio under a loader hook
   (`test/helpers/guard-probe.mjs`) that marks what guardAnswer returned - an
   unmarked answer fails it.
+- **A checkout file is read and written through `lib/contain.mjs`.** A
+  checkout is untrusted content, and a repository can ship a symbolic link:
+  `insideRoot` / `readInside` refuse a path that resolves outside its
+  checkout (a DANGLING link counts as outside - a write through it creates
+  its target), `writeNoFollow` / `writeInside` open with `O_NOFOLLOW` so a
+  link in the last component fails the write instead of redirecting it.
+  A new reader of a checkout document, a new writer into the sandbox or a
+  checkout, uses them; `test/security.test.mjs` plants the links.
 - **`migrate_report` refuses open-abap's `@KERNEL` escape.** `WRITE
   '@KERNEL <js>'.` writes text on SAP and runs `<js>` once transpiled;
   `transpilerHazards` (lib/migrate.mjs) finds it in the report (comments

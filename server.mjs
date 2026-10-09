@@ -66,6 +66,7 @@ import { RESOURCES, RESOURCE_TEMPLATES, GUIDE_CHAPTER_TEMPLATE, readResource } f
 import { PROMPTS, getPrompt } from './lib/prompts.mjs';
 import { missingSiblingMessage, missingLocalSiblingMessage } from './lib/siblings.mjs';
 import { hydrate, REMOTE_TOOLS, resourceRepos, fetchRemoteFile, isRemoteCheckout, remoteBase, resolvedInside } from './lib/remote.mjs';
+import { readInside } from './lib/contain.mjs';
 import { resolveKey, RESOLVERS } from './lib/repos.mjs';
 import { oneOf, boundedInt, stringArray, checkStringArgs } from './lib/args.mjs';
 import {
@@ -710,7 +711,7 @@ async function handle(name, args = {}, ctx = {}) {
           + 'so a name outside this rule produces a repository that fails its own gate.');
       }
 
-      const { files, missing, spec, noSpec } = scaffold(root, {
+      const { files, missing, refused, spec, noSpec } = scaffold(root, {
         cls,
         packageText: args.package,
         repo: args.repo,
@@ -762,6 +763,7 @@ async function handle(name, args = {}, ctx = {}) {
          * repository, and a project quietly missing its CI workflow is not
          * noticed until somebody wonders why nothing is checked. */
         ...(missing.length ? { missing, warning: 'the template no longer has these — the project is incomplete without them' } : {}),
+        ...(refused.length ? { refused, refusedWhy: 'template.json lists these, and each is not a plain path inside the template or resolves, through a symbolic link, outside it - never served' } : {}),
         next: 'write these files, then `npm install` and `npm run check` (abaplint + the abap2UI5-linter). '
           + 'The app class is a working starting point: read app_guide before changing it.',
       });
@@ -803,7 +805,10 @@ async function handle(name, args = {}, ctx = {}) {
           throw new Error(`the app-template ${mirror ? 'mirror' : 'checkout'} at ${root} has no ${rel}, which its ${SPEC_FILE} lists — `
             + 'update it (git pull), or point APP_TEMPLATE_HOME at a complete checkout');
         }
-        return fs.readFileSync(at);
+        /* what is read here is written into the user's project: a template
+         * file that is a link out of the checkout (~/.ssh/id_rsa as CLAUDE.md)
+         * would be copied into it - refused (lib/contain.mjs) */
+        return readInside(root, rel, undefined, 'the app-template checkout');
       };
       let plan;
       try {
@@ -933,7 +938,7 @@ async function handle(name, args = {}, ctx = {}) {
         return toolError(`the samples-controls checkout has no scripts/generation-prompt.txt (looked in ${p}) — `
           + 'update it (git pull); the rulebook lives there');
       }
-      const rules = fs.readFileSync(p, 'utf8');
+      const rules = readInside(resolveSamplesControls(), ['scripts', 'generation-prompt.txt'], 'utf8', 'the samples-controls checkout');
       return text(
         rules +
           '\n\n---\nThis is the PORTING brief. Building an app of your own instead? Call `app_guide`.\n' +

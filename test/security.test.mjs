@@ -3,7 +3,8 @@
 // path derived from it must not be steered outside the checkout through a
 // symbolic link. safeRelPath and the sandbox name gate stop a `..` in a
 // STRING; these pin the other half, resolved through the real file system.
-// Each case failed before the containment fix (lib/remote.mjs resolvedInside).
+// Each case failed before its containment fix (lib/contain.mjs resolvedInside,
+// insideRoot/readInside, writeNoFollow).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -13,6 +14,8 @@ import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { resolvedInside } from '../lib/remote.mjs';
+import { writeNoFollow, writeInside, readInside, OutsideRootError } from '../lib/contain.mjs';
+import { deployFiles } from '../lib/migrate.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -119,6 +122,144 @@ test('deploy_app and read_app refuse a sandbox file that is a symlink out of the
       assert.equal(r.isError, true, 'reading through the symlink must be refused');
       assert.doesNotMatch(r.text, /ORIGINAL/, 'the outside file content must not leak');
     });
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+/* A DANGLING link is the case realpath cannot resolve: its parent resolved
+ * inside, so it counted as inside - and a write through it creates the file
+ * wherever it points (a ~/.config/autostart entry, a shell rc). */
+test('resolvedInside: a dangling link is never inside; writeNoFollow never writes through a link', () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-sec-'));
+  try {
+    const root = path.join(base, 'root');
+    fs.mkdirSync(root);
+    const target = path.join(base, 'created-outside.txt');
+    fs.symlinkSync(target, path.join(root, 'dangling'));
+    assert.equal(resolvedInside(root, path.join(root, 'dangling')), false, 'a dangling link is not inside');
+    assert.throws(() => writeNoFollow(path.join(root, 'dangling'), 'x'), OutsideRootError);
+    assert.equal(fs.existsSync(target), false, 'nothing was created through the dangling link');
+    fs.writeFileSync(path.join(base, 'victim.txt'), 'ORIGINAL');
+    fs.symlinkSync(path.join(base, 'victim.txt'), path.join(root, 'live'));
+    assert.throws(() => writeNoFollow(path.join(root, 'live'), 'x'), /symbolic link/);
+    assert.equal(fs.readFileSync(path.join(base, 'victim.txt'), 'utf8'), 'ORIGINAL');
+    fs.symlinkSync(base, path.join(root, 'up'));
+    assert.throws(() => writeInside(root, ['up', 'new.txt'], 'x'), OutsideRootError, 'a linked directory on the way');
+    assert.equal(fs.existsSync(path.join(base, 'new.txt')), false);
+    assert.throws(() => readInside(root, 'live', 'utf8'), /outside the checkout/);
+    writeNoFollow(path.join(root, 'plain.txt'), 'ok');
+    assert.equal(fs.readFileSync(path.join(root, 'plain.txt'), 'utf8'), 'ok', 'a plain file is written as before');
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('deploy_app refuses a DANGLING link in the sandbox - nothing is created where it points', async () => {
+  const base = evilCheckouts();
+  const created = path.join(base, 'autostart-entry.txt');
+  fs.rmSync(path.join(base, 'corpus', 'src', 'zz_dev', 'zcl_evil.clas.abap'));
+  fs.symlinkSync(created, path.join(base, 'corpus', 'src', 'zz_dev', 'zcl_evil.clas.abap'));
+  try {
+    await withServer(base, { SAMPLES_CONTROLS_HOME: path.join(base, 'corpus'), A2UI5_HOME: path.join(base, 'nowhere') }, async (call) => {
+      const src = 'CLASS zcl_evil DEFINITION PUBLIC.\n  PUBLIC SECTION.\n    INTERFACES z2ui5_if_app.\nENDCLASS.\nCLASS zcl_evil IMPLEMENTATION.\nENDCLASS.\n';
+      const d = await call('deploy_app', { class_name: 'zcl_evil', abap_source: src, lint: false });
+      assert.equal(d.isError, true, d.text);
+      assert.match(d.text, /symbolic link|outside the dev sandbox/);
+      assert.equal(fs.existsSync(created), false, 'the write did not follow the dangling link');
+    });
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+/** A secret outside, and checkouts whose documents are links to it. */
+function evilDocuments() {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-sec-'));
+  const w = (rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
+  const link = (rel) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.symlinkSync(path.join(base, 'secret.txt'), path.join(base, rel)); };
+  w('secret.txt', 'TOP-SECRET-DO-NOT-LEAK\n## Chapter\n');
+  // abap2UI5: the guide, the interface and a catalogue of pitfalls are links out
+  w('a2/node/srv/express.mjs', '// probe\n');
+  link('a2/docs/agents/building-apps.md');
+  link('a2/src/02/z2ui5_if_client.intf.abap');
+  link('a2/.claude/skills/abap-check/SKILL.md');
+  link('a2/.claude/skills/ui5-check/SKILL.md');
+  // samples-controls: the capability map and the porting brief
+  w('corpus/scripts/e2e-build.mjs', '// probe\n');
+  link('corpus/CAPABILITIES.md');
+  link('corpus/scripts/generation-prompt.txt');
+  // samples: the catalogue
+  w('samples/SAMPLES.md', '# Samples\n');
+  w('samples/package.json', '{"name":"abap2UI5-samples"}');
+  link('samples/catalogue.json');
+  // docs: docs/ itself is a link to a tree outside
+  w('docs/package.json', '{"name":"abap2ui5-docs"}');
+  w('outside/index.md', '# Outside\n\nTOP-SECRET page binding\n');
+  fs.symlinkSync(path.join(base, 'outside'), path.join(base, 'docs', 'docs'));
+  // app-template: template.json lists a path out of it and a file that is a link out
+  w('template/abaplint.jsonc', '{}\n');
+  link('template/CLAUDE.md');
+  w('template/template.json', JSON.stringify({
+    placeholderClass: 'zcl_app_001',
+    files: { shared: ['CLAUDE.md', '../secret.txt'], named: [] },
+    substitutions: { class: { files: [], renamesPath: true }, packageText: [], repo: [] },
+    agentSetup: { files: { 'CLAUDE.md': 'why' } },
+  }));
+  w('project/.git/HEAD', 'ref: refs/heads/main\n');
+  return base;
+}
+
+test('the knowledge tools never answer with a checkout file that is a link out of it', async () => {
+  const base = evilDocuments();
+  try {
+    await withServer(base, {
+      A2UI5_HOME: path.join(base, 'a2'),
+      SAMPLES_CONTROLS_HOME: path.join(base, 'corpus'),
+      SAMPLES_HOME: path.join(base, 'samples'),
+      SAMPLES_STACK_HOME: path.join(base, 'nowhere'),
+      DOCS_HOME: path.join(base, 'docs'),
+      APP_TEMPLATE_HOME: path.join(base, 'template'),
+    }, async (call) => {
+      for (const [name, args] of [
+        ['app_guide', {}], ['api_reference', {}], ['pitfalls', {}], ['pitfalls', { area: 'view' }],
+        ['capabilities', {}], ['capabilities', { query: 'x' }], ['generation_rules', {}],
+        ['examples', { query: 'x' }], ['docs_search', { query: 'binding' }], ['scaffold_app', {}],
+      ]) {
+        const r = await call(name, args);
+        assert.doesNotMatch(r.text, /TOP-SECRET/, `${name} ${JSON.stringify(args)} leaked the file behind the link`);
+        if (name !== 'examples' && name !== 'scaffold_app') assert.match(r.text, /symbolic link/, `${name}: says why`);
+      }
+      const ex = await call('examples', { query: 'x' });
+      assert.match(ex.text, /catalogue\.json resolve\(s\), through a symbolic link, outside the checkout/);
+      const sc = await call('scaffold_app', {});
+      assert.match(sc.text, /"refused"[\s\S]*CLAUDE\.md[\s\S]*\.\.\/secret\.txt/, sc.text);
+      // add_agent_setup: the template file is copied INTO the project - refused, nothing written
+      const ag = await call('add_agent_setup', { project_dir: path.join(base, 'project') });
+      assert.equal(ag.isError, true, ag.text);
+      assert.match(ag.text, /symbolic link/);
+      assert.equal(fs.existsSync(path.join(base, 'project', 'CLAUDE.md')), false, 'nothing written into the project');
+    });
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+/* migrate_report { deploy: true } copies src/01 of the abap-cloud-gui
+ * checkout and the popups into the sandbox: a file there that is a link out
+ * of its checkout is not copied (read_app would serve its target back). */
+test('deployFiles skips a support file that is a link out of its checkout', () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-sec-'));
+  try {
+    const w = (rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
+    w('secret.txt', 'TOP-SECRET');
+    w('cgui/src/01/z2ui5_cl_cgui_report.clas.abap', 'CLASS z2ui5_cl_cgui_report DEFINITION. ENDCLASS.');
+    fs.symlinkSync(path.join(base, 'secret.txt'), path.join(base, 'cgui', 'src', '01', 'z2ui5_cl_cgui_leak.clas.abap'));
+    w('popups/src/00/z2ui5_cl_pop_x.clas.abap', 'CLASS z2ui5_cl_pop_x DEFINITION. ENDCLASS.');
+    const box = path.join(base, 'box');
+    const res = deployFiles({ files: { 'zcl_k.clas.abap': 'x' }, dir: box, cloudGui: path.join(base, 'cgui'), popups: path.join(base, 'popups'), classNameOf: (n) => n });
+    assert.deepEqual(fs.readdirSync(box).sort(), ['z2ui5_cl_cgui_report.clas.abap', 'z2ui5_cl_pop_x.clas.abap', 'zcl_k.clas.abap']);
+    assert.ok(!res.support.includes('z2ui5_cl_cgui_leak'));
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }

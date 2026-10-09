@@ -759,3 +759,20 @@ test('a class the transpiler rejects fails the build with its message, and the l
   fs.rmSync(path.join(dir, 'node_modules', '@abaplint'), { recursive: true });
   assert.match((await buildApps({ dir, version: '1.145.0', inputDir: box, coreDir: core })).reason, /abap_transpile is not installed.*build_backend installs it/);
 }));
+
+/* The transpiler reads every sandbox file with links followed, and the
+ * sandbox can be checkout content (the corpus' src/zz_dev): a link out of it
+ * is refused by name before anything is transpiled (lib/contain.mjs). */
+test('the build refuses a sandbox that holds a symbolic link out of it', withWorkspace(async () => {
+  const { dir, core } = fakeRuntime('1.145.0');
+  const box = npmSandboxDir();
+  fs.mkdirSync(box, { recursive: true });
+  fs.writeFileSync(path.join(box, 'zcl_a.clas.abap'), '* source');
+  const secret = path.join(path.dirname(box), 'secret.txt');
+  fs.writeFileSync(secret, 'TOP-SECRET');
+  fs.symlinkSync(secret, path.join(box, 'zcl_leak.clas.abap'));
+  const res = await buildApps({ dir, version: '1.145.0', inputDir: box, coreDir: core });
+  assert.equal(res.ok, false);
+  assert.match(res.reason, /zcl_leak\.clas\.abap, which resolve\(s\), through a symbolic link, outside it/);
+  assert.ok(!fs.existsSync(appsDir(dir)), 'nothing was built');
+}));

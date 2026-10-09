@@ -48,7 +48,23 @@ Worth knowing before assessing a report:
   narrows one of its own that others can read (`lib/private-dir.mjs`).
   Anything else is refused with the reason - a screenshot is then returned
   but not saved - and `A2UI5_MCP_REMOTE_DIR` / `A2UI5_MCP_SCREENSHOT_DIR` put
-  them elsewhere (a directory those variables name is not checked).
+  them elsewhere (a directory those variables name is not checked - below).
+- **A directory the operator names is trusted like the operator's shell.**
+  `A2UI5_MCP_REMOTE_DIR`, `A2UI5_MCP_SCREENSHOT_DIR` and
+  `A2UI5_MCP_WORKSPACE` (and a checkout env var such as `A2UI5_HOME`) are
+  used as they are: no owner, mode or symbolic-link check, because the
+  person who set the variable chose the place, and refusing a shared team
+  directory or a symlinked home they set up on purpose would be the server
+  second-guessing its operator. What follows from that is the operator's to
+  keep true: whoever can write into such a directory decides what the
+  server serves and runs. The mirror directory is what the knowledge tools
+  answer with and what `add_agent_setup` copies into a project; the
+  workspace holds the `node_modules` the backend, the transpiler and
+  abaplint run from; the screenshot directory receives the pictures of the
+  user's apps and the build log `build_log` reads back. Point them at
+  directories only you can write - never at a world-writable place such as
+  `/tmp` itself. The defaults are checked (above) precisely because nobody
+  chose them.
 - **A child that runs the app gets an allowlisted environment.** The
   backend and the unit-test runner execute the transpiled ABAP, and
   open-abap's `@KERNEL` escape gives that code `process.env`. They inherit
@@ -64,6 +80,25 @@ Worth knowing before assessing a report:
   an allowlist does not change that. The build, lint, git and npm children
   run no app code and keep the full environment their own configuration
   lives in.
+- **A checkout's symbolic links are not followed out of it.** A checkout is
+  untrusted content - a sample, docs or template repository cloned from
+  GitHub, a sandbox an earlier deploy filled - and a repository can ship a
+  symbolic link (`docs/agents/building-apps.md -> ~/.ssh/id_rsa`). Every
+  file a tool answers with or copies (the guide, the interface, the
+  pitfalls, the capability map, the porting brief, the sample catalogues,
+  the docs tree, a sample `read_example` reads, the template files
+  `scaffold_app` serves and `add_agent_setup` copies into a project, the
+  support classes `migrate_report { deploy: true }` copies, the sandbox the
+  npm build transpiles) is read only when it resolves inside its checkout,
+  and every write into the sandbox or a checkout is refused when its path
+  leaves it - a dangling link included, since writing through one creates
+  its target wherever it points - and opened with `O_NOFOLLOW`, so a link
+  that appears after the check fails the write instead of redirecting it
+  (`lib/contain.mjs`). Checkouts whose CODE this server runs anyway - the
+  framework (its backend), samples-controls' scripts (`scope_of`, the full
+  build), abap-cloud-gui's converter (imported in-process), app-template's
+  `scripts/check-pin.mjs` - are trusted the way that code is; the link
+  checks still apply to what is read from them.
 - **`migrate_report` refuses a report that carries the transpiler's code
   escape.** On an SAP system `WRITE '@KERNEL <text>'.` writes a line; the
   transpiler copies `<text>` into the generated module as JavaScript. No

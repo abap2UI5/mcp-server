@@ -40,8 +40,23 @@
   docs tree (or into a cycle), and `deploy_app` / `migrate_report`'s deploy /
   `read_app` writing or reading through a link planted in the dev sandbox all
   now refuse when the path - every symlink on it resolved - leaves the
-  intended root (`resolvedInside` in `lib/remote.mjs`). `test/security.test.mjs`
-  pins each.
+  intended root (`resolvedInside`, now in `lib/contain.mjs`). A sweep of
+  every file read and write found the rest, and they go through the same
+  check now: the guide (`app_guide` and its resources), the interface
+  (`api_reference`), both pitfall catalogues, the capability map, the
+  porting brief (`generation_rules`), the sample catalogues `examples`
+  searches, the docs tree's root itself (a `docs -> ~` link walked the home
+  directory), every template file `scaffold_app` serves (template.json may
+  also no longer list `../` paths - both are answered as `refused`) and
+  `add_agent_setup` copies into a project (and the `check-pin.mjs` it
+  imports), the support classes `migrate_report { deploy: true }` copies,
+  the sandbox the npm build hands the transpiler, the corpus copies the
+  incremental build makes and the lint config it writes into a checkout.
+  A DANGLING link counted as inside (its parent resolved inside) and a
+  write through it creates its target wherever it points - it is outside
+  now; and the sandbox and project writes open with `O_NOFOLLOW`
+  (`writeNoFollow`), so a link that appears after the check fails the
+  write instead of redirecting it. `test/security.test.mjs` pins each.
 - **Security hardening: what transpiled ABAP can reach.** open-abap's
   `@KERNEL` escape (`WRITE '@KERNEL <js>'.`) turns a literal into JavaScript
   once transpiled, and that code runs in the backend and unit-test children
