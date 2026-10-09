@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **A `from_line` past the end says so.** `read_example` and `read_app`
+  clamped it to the last line without a word - usually the empty line
+  after the final newline - and the answer read as an empty file. The
+  last line still comes back, with `pastEnd` naming the line count.
 - **`scope_of` says when the OpenUI5 checkout is what is missing.**
   Without the checkout samples-controls' `scripts/scope-of.mjs` reads
   the JSDoc from (`OPENUI5_SRC`, else `fork-openui5` beside the corpus),

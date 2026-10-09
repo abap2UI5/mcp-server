@@ -467,7 +467,8 @@ async function deployMigrated(res, ctx) {
  * its line break a `\n` - not raw: a class of JSON string templates went
  * out ~35% over. At least one line, however long. */
 function linePage(all, fromLine) {
-  const from = boundedInt(fromLine, { name: 'from_line', dflt: 1, min: 1, max: Math.max(1, all.length) });
+  const asked = boundedInt(fromLine, { name: 'from_line', dflt: 1, min: 1 });
+  const from = Math.min(asked, Math.max(1, all.length));
   const page = [];
   let used = 0;
   for (let i = from - 1; i < all.length; i += 1) {
@@ -477,7 +478,15 @@ function linePage(all, fromLine) {
     page.push(all[i]);
     used += n;
   }
-  return { from, to: from + page.length - 1, page };
+  /* a from_line past the end used to be clamped without a word: the last
+   * line came back - usually the empty one after the final newline - and
+   * read as an empty file */
+  return {
+    from,
+    to: from + page.length - 1,
+    page,
+    ...(asked > all.length ? { pastEnd: `from_line ${asked} is past the end - the file has ${all.length} lines; its last line is shown` } : {}),
+  };
 }
 
 function pageWithin(items, args, same) {
@@ -613,12 +622,14 @@ async function handle(name, args = {}, ctx = {}) {
       const all = fs.readFileSync(at, 'utf8').split('\n');
       const page = linePage(all, args.from_line);
       const paged = page.from > 1 || page.to < all.length;
+      const pastEnd = page.pastEnd ? { pastEnd: page.pastEnd } : {};
       return text({
         repo,
         path: file,
         from,
         lines: all.length,
         ...(paged ? { page: { from_line: page.from, to_line: page.to }, ...(page.to < all.length ? { nextPage: { from_line: page.to + 1 } } : {}) } : {}),
+        ...pastEnd,
         source: page.page.join('\n'),
         next: 'take the pattern, not the file: an app of your own keeps its own class name, package and events (app_guide chapter 2)',
       });
@@ -1047,12 +1058,13 @@ async function handle(name, args = {}, ctx = {}) {
        * as the answer writes it - JSON-escaped, its line break a `\n` - not
        * raw: a class of JSON string templates went out ~35% over. */
       const all = res.source.split('\n');
-      const { from, to, page } = linePage(all, args.from_line);
+      const { from, to, page, pastEnd } = linePage(all, args.from_line);
       const paged = from > 1 || to < all.length;
       return text({
         ...res,
         source: page.join('\n'),
         ...(paged ? { lines: { from, to, total: all.length }, ...(to < all.length ? { next: { from_line: to + 1 } } : {}) } : {}),
+        ...(pastEnd ? { pastEnd } : {}),
         ...(res.staleInBackend
           ? { hint: 'deployed after the last build — run_app still boots the older code; run build_backend' }
           : {}),

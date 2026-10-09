@@ -188,6 +188,9 @@ test('read_app pages a class by lines, measured as the answer is written', async
     assert.ok(from, 'more than one page');
     assert.equal(seen.length, total, 'every line arrives once');
     assert.equal(seen.join('\n'), src);
+    const past = await call('read_app', { class_name: 'zcl_json_heavy', from_line: total + 1 });
+    assert.equal(past.pastEnd, `from_line ${total + 1} is past the end - the file has ${total} lines; its last line is shown`);
+    assert.deepEqual(past.lines, { from: total, to: total, total });
   });
 });
 
@@ -218,6 +221,12 @@ test('read_example pages a long sample by lines and every line arrives once', as
     const small = await call('read_example', { repo: 'samples', path: 'src/01/z2ui5_cl_smp_app_900.clas.abap', from_line: total });
     assert.deepEqual(small.page, { from_line: total, to_line: total });
     assert.equal(small.nextPage, undefined);
+    assert.equal(small.pastEnd, undefined, 'the last line is no past-the-end page');
+    /* past the end: the last line, and a sentence - it was clamped without
+     * a word and read as an empty or a one-line file */
+    const past = await call('read_example', { repo: 'samples', path: 'src/01/z2ui5_cl_smp_app_900.clas.abap', from_line: 5000 });
+    assert.equal(past.pastEnd, `from_line 5000 is past the end - the file has ${total} lines; its last line is shown`);
+    assert.equal(past.source, 'ENDCLASS.');
   });
 });
 
