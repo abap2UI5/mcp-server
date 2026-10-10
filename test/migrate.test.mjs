@@ -9,8 +9,9 @@
 // The deploy test (deploy: true) also needs the popups (POPUPS_HOME, or
 // .deps/popups / build/popups of the checkout, or ../popups) and the network
 // of test/npm-integration.test.mjs - it builds on the published
-// @abap2ui5/node-runtime in a workspace of its own - and skips with
-// A2UI5_MCP_SKIP_NETWORK_TESTS=1 like that test does.
+// @abap2ui5/node-runtime in a workspace of its own - and runs only under
+// A2UI5_MCP_NETWORK_TESTS=1 (skipping with A2UI5_MCP_SKIP_NETWORK_TESTS=1)
+// like that test does.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -274,6 +275,8 @@ test('the migrate_report tool over stdio: the class, the migration report, the r
 
 function reachable() {
   if (process.env.A2UI5_MCP_SKIP_NETWORK_TESTS) return 'A2UI5_MCP_SKIP_NETWORK_TESTS is set';
+  // opt-in: the registry loop is 20 s and more per test, and a local `npm test` is the sibling-free suite (ci.yml sets it)
+  if (!process.env.A2UI5_MCP_NETWORK_TESTS) return 'A2UI5_MCP_NETWORK_TESTS is not set';
   const npm = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['view', '@abap2ui5/node-runtime', 'version', '--json'], {
     encoding: 'utf8', timeout: 30_000, shell: process.platform === 'win32',
   });

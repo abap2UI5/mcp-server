@@ -77,7 +77,14 @@ const clearKnob = (k) => {
 };
 setKnob('BOOT_MARKER', marker);
 
-const { startBackend, stopBackend, backendStatus, backendEnv, LIVENESS_MS } = await import('../lib/runtime.mjs');
+const { startBackend, stopBackend, backendStatus, backendEnv, backendTiming } = await import('../lib/runtime.mjs');
+
+/* Turned down for the dozen fake backends this file starts: the liveness
+ * wait (500 ms a start) and the port poll (300 ms a miss) are the start's,
+ * not the fake's. The late-exit case below uses the value in force. */
+backendTiming.livenessMs = 300; // 150 was too close under load: the late exit's event has to land inside it
+backendTiming.portPollMs = 25;
+const LIVENESS_MS = backendTiming.livenessMs;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const portOpen = () =>
@@ -89,6 +96,24 @@ const portOpen = () =>
     req.on('timeout', () => req.destroy());
     req.on('error', () => resolve(false));
   });
+/* Instead of a fixed sleep after every stop (1.4 s each, six of them): the
+ * port is free as soon as the killed fake closed its listener, and its
+ * process (which lingers a second after that, on purpose - see FAKE_EXPRESS)
+ * is waited for by pid where a test needs its exit to have landed. */
+const until = async (cond, what, ms = 5000) => {
+  const t0 = Date.now();
+  while (!(await cond())) {
+    if (Date.now() - t0 > ms) throw new Error(`${what} did not happen within ${ms} ms`);
+    await sleep(20);
+  }
+};
+const portFree = () => until(async () => !(await portOpen()), 'the port being freed');
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const bootedPids = () => fs.readFileSync(marker, 'utf8').split('\n').filter(Boolean).map(Number);
+const exited = async (pid) => {
+  await until(() => !alive(pid), `pid ${pid} exiting`);
+  await sleep(50); // its exit event in this process lands a moment after the process is gone
+};
 
 test('two concurrent starts spawn one backend, not two on one port', async () => {
   fs.writeFileSync(marker, '');
@@ -115,27 +140,31 @@ test('the checkout backend is started on the loopback interface only', async () 
     await stopBackend();
     clearKnob('ADDRESS_MARKER');
     delete process.env.HOST;
-    await sleep(1400); // let the killed child free the port
+    await portFree();
   }
 });
 
 test('a stale child exiting late does not orphan the live backend', async () => {
+  fs.writeFileSync(marker, '');
   await startBackend();
   assert.equal(backendStatus().running, true);
+  const [old] = bootedPids();
   // kill the first child; its listener closes now, its exit event comes later
   await stopBackend();
-  await sleep(150);
+  await portFree();
+  assert.equal(alive(old), true, 'the fake lingers after it freed the port - the window the bug needs');
   // a NEW backend is live before the old child's process has fully exited
   await startBackend();
   assert.equal(backendStatus().running, true);
   // now the old child's exit event lands - it must not clear the live slot
-  await sleep(1400);
+  await exited(old);
   assert.equal(backendStatus().running, true,
     'the stale exit cleared the live server reference (the orphan bug)');
   // and because the reference survived, stop still reaches the live child
+  const [, live] = bootedPids();
   await stopBackend();
   assert.equal(backendStatus().running, false);
-  await sleep(1400); // let the killed child free the port
+  await exited(live);
   assert.equal(await portOpen(), false, 'the backend survived stopBackend as an orphan');
 });
 
@@ -157,7 +186,7 @@ test('a backend that cannot be spawned fails the start at once, with the reason'
     const st = await startBackend();
     assert.equal(st.running, true, 'no node on the PATH: the server\'s own node starts the backend');
     await stopBackend();
-    await sleep(1400); // let the killed child free the port
+    await portFree();
     process.execPath = path.join(empty, 'no-such-node');
     const t0 = Date.now();
     await assert.rejects(startBackend(), /could not be started \(.*no-such-node\).*ENOENT/);
@@ -186,7 +215,7 @@ test('the backend child never inherits ALLOWED_HOSTS', async () => {
     await stopBackend();
     clearKnob('ENV_MARKER');
     delete process.env.ALLOWED_HOSTS;
-    await sleep(1400);
+    await portFree();
   }
   assert.deepEqual(backendEnv({ allowed_hosts: '*', Allowed_Hosts: 'x', PATH: '/bin', PORT: '1' }, { port: 9, host: '127.0.0.1' }),
     { PATH: '/bin', PORT: '9', HOST: '127.0.0.1' }, 'any spelling - Windows reads environment names case-insensitively');
@@ -234,7 +263,7 @@ test('the spawned backend sees none of a polluted parent environment', async () 
     await stopBackend();
     clearKnob('ENV_MARKER');
     for (const k of Object.keys(decoys)) delete process.env[k];
-    await sleep(1400);
+    await portFree();
   }
 });
 
@@ -263,7 +292,7 @@ test('a port owner that answers at once does not hide a backend that exits after
   await new Promise((r) => blocker.listen(PORT, '127.0.0.1', r));
   setKnob('SAY_LISTENING_AND_EXIT', '1');
   try {
-    for (const after of ['', '', '', '50', String(LIVENESS_MS - 200)]) {
+    for (const after of ['', '', '', '50', String(LIVENESS_MS - 150)]) {
       setKnob('EXIT_AFTER_MS', after);
       await assert.rejects(startBackend(), /exited \(0\) right after it said it was listening/, `exit after ${after || 0} ms`);
       assert.equal(backendStatus().running, false);

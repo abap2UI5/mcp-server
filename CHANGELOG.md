@@ -30,6 +30,13 @@
   with each failure in a row per repository (3, 6, 12 min ... up to the
   mirror TTL) and starts over at a success; the hydrate answer carries
   `failures` and `backoffMs`.
+- **`npm test` in well under a minute.** The three tests that install the
+  published runtime from the registry (npm-integration's loop and sandbox
+  table, agent-integration's app tools, migrate's deploy) are opt-in under
+  `A2UI5_MCP_NETWORK_TESTS=1`, which CI sets; the backend lifecycle tests
+  wait for the port and the child's exit instead of sleeping 1.4 s after
+  every stop, and turn the start's liveness wait and port poll down
+  (`backendTiming`, a test hook, not an environment variable).
 - **A build nothing changed for is not made.** `build_backend` (and the
   build stage of `verify_app` and `migrate_report { deploy: true }`)
   always stopped the backend and transpiled the sandbox - 7-8 s on the npm

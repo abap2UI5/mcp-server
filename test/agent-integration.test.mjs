@@ -7,7 +7,8 @@
 // then through the server itself over stdio (app_list, app_start, app_act,
 // app_describe), so the tool wiring is proven on the same build.
 //
-// SKIPPED BY ITSELF when the npm registry or GitHub cannot be reached (and
+// OPT-IN under A2UI5_MCP_NETWORK_TESTS=1 (ci.yml sets it), and SKIPPED BY
+// ITSELF even then when the npm registry or GitHub cannot be reached (and
 // with A2UI5_MCP_SKIP_NETWORK_TESTS=1), exactly like
 // test/npm-integration.test.mjs, whose gate this is. A workspace of its own
 // (a temp dir); with npm's cache warm from that test the install is seconds.
@@ -29,6 +30,8 @@ const PICK_FILE = path.join(ROOT, 'test', 'fixtures', 'agent-app', 'zcl_agent_mc
 
 function reachable() {
   if (process.env.A2UI5_MCP_SKIP_NETWORK_TESTS) return 'A2UI5_MCP_SKIP_NETWORK_TESTS is set';
+  // opt-in: the registry loop is 20 s and more per test, and a local `npm test` is the sibling-free suite (ci.yml sets it)
+  if (!process.env.A2UI5_MCP_NETWORK_TESTS) return 'A2UI5_MCP_NETWORK_TESTS is not set';
   const npm = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['view', '@abap2ui5/node-runtime', 'version', '--json'], {
     encoding: 'utf8', timeout: 30_000, shell: process.platform === 'win32',
   });

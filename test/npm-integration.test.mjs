@@ -5,10 +5,11 @@
 // build, its unit tests, the backend booted, an HTTP GET of the page and a
 // POST roundtrip that starts the app and returns its view.
 //
-// SKIPPED BY ITSELF when the npm registry or GitHub cannot be reached (and
+// OPT-IN: runs under A2UI5_MCP_NETWORK_TESTS=1 (ci.yml sets it), and skips
+// itself even then when the npm registry or GitHub cannot be reached (and
 // with A2UI5_MCP_SKIP_NETWORK_TESTS=1): everything else in `npm test` is
-// network-free, this is the one test that proves the recipe against what is
-// actually published. It uses a workspace of its own (a temp dir), so it
+// network-free and fast, this is the one test that proves the recipe
+// against what is actually published - half a minute and more a run. It uses a workspace of its own (a temp dir), so it
 // installs cold every run; npm's own cache makes the second run cheaper.
 // A2UI5_MCP_TEST_RUNTIME_TGZ=<abap2ui5-node-runtime-X.Y.Z.tgz> runs it on a
 // local build of the package instead (test/helpers/local-runtime.mjs).
@@ -28,6 +29,8 @@ const PORT = 4441;
 
 function reachable() {
   if (process.env.A2UI5_MCP_SKIP_NETWORK_TESTS) return 'A2UI5_MCP_SKIP_NETWORK_TESTS is set';
+  // opt-in: the registry loop is 20 s and more per test, and a local `npm test` is the sibling-free suite (ci.yml sets it)
+  if (!process.env.A2UI5_MCP_NETWORK_TESTS) return 'A2UI5_MCP_NETWORK_TESTS is not set';
   const npm = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['view', '@abap2ui5/node-runtime', 'version', '--json'], {
     encoding: 'utf8', timeout: 30_000, shell: process.platform === 'win32',
   });

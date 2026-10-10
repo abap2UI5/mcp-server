@@ -91,9 +91,11 @@ because the backend hands its paths to children running elsewhere), `A2UI5_MCP_B
 framework clone as the answer to "no checkout", the default before the npm
 backend), `A2UI5_MCP_RUNTIME_VERSION` (the `@abap2ui5/node-runtime` release,
 X.Y.Z; default the registry's latest - `A2UI5_MCP_OFFLINE` also stops that
-question), `A2UI5_MCP_SKIP_NETWORK_TESTS` (the three `npm test` files that
+question), `A2UI5_MCP_NETWORK_TESTS=1` (the three `npm test` files that
 reach the registry - npm-integration, agent-integration and migrate's
-deploy test - skip themselves), and the child-process timeouts `A2UI5_MCP_LINT_TIMEOUT_MS` /
+deploy test - run; they are opt-in, half a minute and more each, and
+`ci.yml` sets it) and `A2UI5_MCP_SKIP_NETWORK_TESTS` (they skip even then),
+and the child-process timeouts `A2UI5_MCP_LINT_TIMEOUT_MS` /
 `A2UI5_MCP_SCOPE_TIMEOUT_MS` (default 5 min), `A2UI5_MCP_LINT_WORKER=0`
 (every lint a fresh abaplint process instead of the warm worker, below),
 `A2UI5_MCP_LINT_IDLE_MS` (how long that worker is kept without a request
@@ -1143,10 +1145,12 @@ build/unit/status - against the fake workspace of `test/helpers/npm-fixture.mjs`
 compress detected, and the server's gates over stdio; ports 4431-4432) and
 `test/npm-integration.test.mjs` - the test that reaches the network: the
 whole loop against the published package (install, open-abap-core, lint,
-build, unit tests, boot, GET and a POST roundtrip), about 30 s cold, skipped
-by itself when the registry or GitHub cannot be reached and with
-`A2UI5_MCP_SKIP_NETWORK_TESTS=1`. `test/agent-integration.test.mjs` sits
-behind the same gate: it builds `test/fixtures/agent-app/zcl_agent_mcp`
+build, unit tests, boot, GET and a POST roundtrip), about 30 s cold, OPT-IN
+under `A2UI5_MCP_NETWORK_TESTS=1` (`ci.yml` sets it for both jobs, so the
+coverage stays; a local `npm test` is the sibling-free suite in well under
+a minute) and skipped by itself even then when the registry or GitHub
+cannot be reached and with `A2UI5_MCP_SKIP_NETWORK_TESTS=1`.
+`test/agent-integration.test.mjs` sits behind the same gate: it builds `test/fixtures/agent-app/zcl_agent_mcp`
 (a form, a table with a row action and selection, a popup) and
 `zcl_agent_mcp_pick` (a SelectDialog value help, a MessagePopover) on the published
 package and operates it through `lib/appclient.mjs` and through the server's
