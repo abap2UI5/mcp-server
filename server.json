@@ -145,6 +145,12 @@
           "isRequired": false
         },
         {
+          "name": "A2UI5_MCP_UI5_CACHE_MB",
+          "description": "How many MB of UI5 answers from the CDN (sdk.openui5.org) run_app and interact_app keep in memory across calls, so a second boot does not download them again. 0 switches the cache off. Default: 64.",
+          "format": "number",
+          "isRequired": false
+        },
+        {
           "name": "A2UI5_MCP_RENDER_PAGES",
           "description": "Pages (Chromium tabs) of validate_view's warm render gate, which concurrent calls queue on. Default: 2 (1 to 8).",
           "format": "number",

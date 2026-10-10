@@ -66,7 +66,9 @@ a maintainer setting a machine up does not look.
 Also: `A2UI5_MCP_PORT`, `A2UI5_MCP_OFFLINE=1` (no CDN fallback for UI5, and
 no GitHub mirror either), `A2UI5_MCP_CHROMIUM` (browser path; `CHROMIUM_BIN`,
 the linter's variable, is read after it — then Playwright's managed browser,
-then a system binary, `resolveChromium`), `A2UI5_MCP_RENDER_PAGES` (the
+then a system binary, `resolveChromium`), `A2UI5_MCP_UI5_CACHE_MB` (how many MB of the
+CDN's UI5 answers `run_app`/`interact_app` keep in memory across calls;
+default 64, 0 = off, `ui5RouteHandler` below), `A2UI5_MCP_RENDER_PAGES` (the
 pages of `validate_view`'s warm render gate - concurrent calls queue on the
 pool; default 2, 1 to 8, `renderPages` in `lib/renderer.mjs`),
 `A2UI5_MCP_SCREENSHOT_DIR` (where `run_app` and `interact_app` write their
@@ -471,6 +473,21 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
   `resolveLocal` costs one non-throwing stat per root - a boot asks for
   hundreds of modules, and each used to read the directory, stat every
   package and then exists+stat the file (`test/runtime.test.mjs` counts).
+  **What the CDN answered is kept across calls** (`ui5RouteHandler`): each
+  call opens a browser context of its own - nothing of one page may reach
+  the next - and a fresh context has an empty HTTP cache, so every
+  run_app downloaded the bootstrap and a few hundred modules (several MB)
+  again. The route for `sdk.openui5.org` serves the local packages first,
+  then the hermetic 404 of `A2UI5_MCP_OFFLINE`, then a GET it has seen
+  from a module-level map keyed by URL, else fetches the miss itself
+  (`route.fetch`), keeps a 200 and answers from that response; a fetch
+  that fails is handed back to the browser (`route.continue`) so the
+  report carries its `net::ERR_...`. Bounded by `A2UI5_MCP_UI5_CACHE_MB`
+  (default 64; 0 = off), the oldest entries evicted first; a cached
+  answer carries the content type and the `access-control-*` headers only
+  (the body kept is the decoded one). `test/runtime.test.mjs` drives the
+  handler on a fake route and counts the upstream fetches: the second call
+  makes none.
   **A boot that cannot start is not waited for**: `watchUi5` records every
   failed `/resources/` request of the page for `ui5LoadReport` (the
   sentence the report carries), and the moment the one for the BOOTSTRAP

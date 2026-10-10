@@ -665,6 +665,96 @@ test('libRoots reads the @openui5 directory once per version of it; resolveLocal
   }
 });
 
+// -------------------------------------------------------------- UI5 cache ----
+
+/* Every run_app / interact_app opens a context of its own, whose HTTP cache
+ * is empty, so every call downloaded UI5 from the CDN again. The route
+ * handler keeps the CDN's successful GET answers across calls, bounded by
+ * bytes, behind the local packages and the offline 404. On a fake route. */
+test('the UI5 route answers a second call from the cache: no upstream fetch; bounded, offline and local untouched', async () => {
+  const { ui5RouteHandler, ui5CacheStore, ui5CacheGet, ui5CacheStats, clearUi5Cache, ui5CacheBytes, DEFAULT_UI5_CACHE_MB } = await import('../lib/runtime.mjs');
+  assert.equal(ui5CacheBytes({}), DEFAULT_UI5_CACHE_MB * 1048576);
+  assert.equal(ui5CacheBytes({ A2UI5_MCP_UI5_CACHE_MB: '0' }), 0);
+  assert.equal(ui5CacheBytes({ A2UI5_MCP_UI5_CACHE_MB: '1.5' }), 1.5 * 1048576);
+  assert.equal(ui5CacheBytes({ A2UI5_MCP_UI5_CACHE_MB: 'big' }), DEFAULT_UI5_CACHE_MB * 1048576, 'nonsense is the default');
+  clearUi5Cache();
+  const upstream = { fetches: 0, status: 200 };
+  const fakeRoute = (url, method = 'GET') => {
+    const r = { done: null };
+    r.request = () => ({ url: () => url, method: () => method });
+    r.fulfill = async (o) => { r.done = { fulfill: o }; };
+    r.continue = async () => { r.done = { continue: true }; };
+    r.fetch = async () => {
+      upstream.fetches += 1;
+      if (upstream.status === 'throw') throw new Error('net::ERR_TUNNEL_CONNECTION_FAILED');
+      const res = {
+        status: () => upstream.status,
+        headers: () => ({ 'Content-Type': 'text/javascript', 'content-encoding': 'gzip', 'content-length': '12', 'Access-Control-Allow-Origin': '*', 'x-served-by': 'cdn' }),
+        body: async () => Buffer.from(`body of ${url}`),
+      };
+      return res;
+    };
+    return r;
+  };
+  const CORE = 'https://sdk.openui5.org/resources/sap-ui-core.js';
+  const handler = ui5RouteHandler({ env: {}, cap: 1048576 });
+  // first call: fetched upstream, served from that response, kept
+  const first = fakeRoute(CORE);
+  await handler(first);
+  assert.equal(upstream.fetches, 1);
+  assert.ok(first.done.fulfill.response, 'served from the upstream response');
+  assert.equal(ui5CacheStats().entries, 1);
+  // second call (a new context in the real thing): from the cache, no upstream fetch
+  const second = fakeRoute(CORE);
+  await handler(second);
+  assert.equal(upstream.fetches, 1, 'no second download');
+  assert.deepEqual(second.done.fulfill, {
+    status: 200,
+    headers: { 'content-type': 'text/javascript', 'access-control-allow-origin': '*' },
+    body: Buffer.from(`body of ${CORE}`),
+  }, 'the type and the CORS headers, never the transfer\'s own');
+  // a POST and a non-200 are passed through unkept
+  const post = fakeRoute(CORE + '?x', 'POST');
+  await handler(post);
+  assert.deepEqual(post.done, { continue: true });
+  upstream.status = 404;
+  const missing = fakeRoute('https://sdk.openui5.org/resources/sap/m/Nope.js');
+  await handler(missing);
+  assert.equal(upstream.fetches, 2);
+  assert.ok(missing.done.fulfill.response);
+  assert.equal(ui5CacheGet(missing.request().url()), null, 'a 404 is not kept');
+  // a fetch that fails is the browser's to report (net::ERR_...), in its words
+  upstream.status = 'throw';
+  const dead = fakeRoute('https://sdk.openui5.org/resources/sap/m/Dead.js');
+  await handler(dead);
+  assert.deepEqual(dead.done, { continue: true });
+  // offline: the hermetic 404, nothing fetched or kept; and off with a cap of 0
+  upstream.status = 200;
+  const n = upstream.fetches;
+  const offline = fakeRoute(CORE + '?offline');
+  await ui5RouteHandler({ env: { A2UI5_MCP_OFFLINE: '1' } })(offline);
+  assert.deepEqual(offline.done, { fulfill: { status: 404, body: '' } });
+  const off = fakeRoute(CORE + '?off');
+  await ui5RouteHandler({ env: {}, cap: 0 })(off);
+  assert.deepEqual(off.done, { continue: true });
+  assert.equal(upstream.fetches, n);
+  // the cap: the oldest entries go first, and an entry past the cap is not kept
+  clearUi5Cache();
+  const KB = 1024;
+  assert.equal(ui5CacheStore('a', { status: 200, body: Buffer.alloc(40 * KB) }, 100 * KB), true);
+  assert.equal(ui5CacheStore('b', { status: 200, body: Buffer.alloc(40 * KB) }, 100 * KB), true);
+  assert.equal(ui5CacheStore('c', { status: 200, body: Buffer.alloc(40 * KB) }, 100 * KB), true);
+  assert.deepEqual(ui5CacheStats(), { entries: 2, bytes: 80 * KB }, 'a went to make room');
+  assert.equal(ui5CacheGet('a'), null);
+  assert.ok(ui5CacheGet('b') && ui5CacheGet('c'));
+  assert.equal(ui5CacheStore('huge', { status: 200, body: Buffer.alloc(101 * KB) }, 100 * KB), false);
+  assert.equal(ui5CacheStore('b', { status: 200, body: Buffer.alloc(10 * KB) }, 100 * KB), true, 'a URL stored again replaces its entry');
+  assert.deepEqual(ui5CacheStats(), { entries: 2, bytes: 50 * KB });
+  assert.equal(ui5CacheStore('x', { status: 500, body: 'error' }, 100 * KB), false);
+  clearUi5Cache();
+  assert.deepEqual(ui5CacheStats(), { entries: 0, bytes: 0 });
+});
+
 // ------------------------------------------------------------- getBrowser ----
 
 /* run_app's Chromium was cached for the server's life: one that crashed was

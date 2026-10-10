@@ -623,8 +623,10 @@ duplicates none of their content:
   when it cannot be reached, instead of waiting out the boot timeout). The
   built theme CSS is not in those packages — with
   network access it loads from the CDN (styled screenshots); without, apps
-  render unstyled but structurally complete. `A2UI5_MCP_OFFLINE=1` forces the
-  hermetic behaviour.
+  render unstyled but structurally complete. What the CDN answers is kept
+  in memory across calls (`A2UI5_MCP_UI5_CACHE_MB`, default 64; 0 switches
+  it off), so a second boot does not download UI5 again.
+  `A2UI5_MCP_OFFLINE=1` forces the hermetic behaviour.
 - **Chromium:** `A2UI5_MCP_CHROMIUM` (or `CHROMIUM_BIN`, which the linter
   reads too) names the executable; otherwise the Playwright-managed browser
   (`npx playwright install chromium`); otherwise a system chromium.

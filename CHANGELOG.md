@@ -44,6 +44,14 @@
   fails (64 s to 2.8 s measured), with the same report. Under
   `A2UI5_MCP_OFFLINE` with nothing local to serve, the report is the
   answer before a backend or a browser is started.
+- **UI5 from the CDN is downloaded once, not per call.** Each
+  `run_app`/`interact_app` boots in a browser context of its own, whose
+  HTTP cache is empty, so every call fetched the bootstrap and a few
+  hundred modules from sdk.openui5.org again. The CDN route now keeps its
+  successful answers in memory across calls, bounded by
+  `A2UI5_MCP_UI5_CACHE_MB` (default 64; 0 switches it off), the oldest
+  evicted first; the local `@openui5` packages and the offline 404 come
+  before it, and the per-call context isolation stays.
 - **A build nothing changed for is not made.** `build_backend` (and the
   build stage of `verify_app` and `migrate_report { deploy: true }`)
   always stopped the backend and transpiled the sandbox - 7-8 s on the npm
