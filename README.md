@@ -602,7 +602,9 @@ duplicates none of their content:
   (2-3 s, mostly the framework's parse); whenever the worker cannot stand
   in for the CLI - a checkout without that core, a config it does not
   mirror - the CLI runs as before. `A2UI5_MCP_LINT_WORKER=0` switches the
-  worker off.
+  worker off; `A2UI5_MCP_LINT_IDLE_MS` (default 10 minutes, 0 = never) is
+  how long it is kept without a request - with the framework parsed it
+  holds about 300 MB - before it exits and the next lint starts a fresh one.
 - **Timeouts:** every spawned child is killed (whole process tree) when it
   exceeds its limit — lint/scope 5 min, unit tests 10 min, build (with the
   prebuilt download and the npm install) 30 min by default;

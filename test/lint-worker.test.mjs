@@ -6,12 +6,12 @@
 // needs no abaplint; the same worker was run against the real core by hand
 // (the findings are the CLI's, byte for byte - lib/lint-host.mjs says why
 // the two must agree). Sibling-free.
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { lintWarm, closeLintWorker, coreForCli, sandboxGlobDir, dependencyFolders, dependencyKey, warmLintEnabled } from '../lib/lint-host.mjs';
+import { lintWarm, closeLintWorker, coreForCli, sandboxGlobDir, dependencyFolders, dependencyKey, warmLintEnabled, lintIdleMs, lintWorkerPid, DEFAULT_LINT_IDLE_MS } from '../lib/lint-host.mjs';
 import { fakeRelease, fakeTemplate, APP, VERSION } from './helpers/npm-fixture.mjs';
 
 /* The fake core: the API surface the worker uses, nothing more. A file whose
@@ -234,6 +234,69 @@ test('a timeout and a cancel kill the worker and are answered as such; the next 
     fs.writeFileSync(path.join(base, 'sandbox', 'zcl_a.clas.abap'), 'CLASS zcl_a. FINDME');
     assert.equal((await lint(base)).issues.length, 1);
   } finally {
+    await closeLintWorker();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+/* A parsed framework is about 300 MB of RSS, and the worker held it for the
+ * server's life. On a fake clock: the worker is retired after the idle
+ * time (10 min by default, A2UI5_MCP_LINT_IDLE_MS; 0 = never), a lint that
+ * arrives while it exits starts a fresh one cleanly, and a request resets
+ * the clock. */
+test('an idle worker is retired after A2UI5_MCP_LINT_IDLE_MS; a lint during the retirement starts afresh', async () => {
+  assert.equal(lintIdleMs({}), DEFAULT_LINT_IDLE_MS);
+  assert.equal(lintIdleMs({ A2UI5_MCP_LINT_IDLE_MS: '0' }), 0);
+  assert.equal(lintIdleMs({ A2UI5_MCP_LINT_IDLE_MS: '1500' }), 1500);
+  assert.equal(lintIdleMs({ A2UI5_MCP_LINT_IDLE_MS: 'soon' }), DEFAULT_LINT_IDLE_MS, 'nonsense is the default');
+  assert.equal(lintIdleMs({ A2UI5_MCP_LINT_IDLE_MS: '-1' }), DEFAULT_LINT_IDLE_MS);
+  const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const untilGone = (pid) => new Promise((resolve, reject) => {
+    const t0 = Date.now();
+    const poll = () => (!alive(pid) ? resolve() : Date.now() - t0 > 5000 ? reject(new Error(`pid ${pid} still there`)) : setImmediate(poll));
+    poll();
+  });
+  const base = fakeRoot();
+  try {
+    await closeLintWorker();
+    fs.writeFileSync(path.join(base, 'sandbox', 'zcl_a.clas.abap'), 'CLASS zcl_a. FINDME');
+    mock.timers.enable({ apis: ['setTimeout'] });
+    assert.equal((await lint(base, { env: {} })).reparsed, true);
+    const first = lintWorkerPid();
+    assert.ok(first, 'a live worker after the lint');
+    mock.timers.tick(DEFAULT_LINT_IDLE_MS - 1);
+    assert.equal(lintWorkerPid(), first, 'kept until the idle time is over');
+    // a request resets the clock
+    assert.equal((await lint(base, { env: {} })).reparsed, false, 'the same worker, warm');
+    mock.timers.tick(DEFAULT_LINT_IDLE_MS - 1);
+    assert.equal(lintWorkerPid(), first, 'the clock started over with the request');
+    mock.timers.tick(1);
+    assert.equal(lintWorkerPid(), null, 'retired: the slot is empty before the child has exited');
+    // a lint that arrives while the old child is on its way out
+    const during = await lint(base, { env: {} });
+    assert.equal(during.ok, true);
+    assert.equal(during.reparsed, true, 'a fresh worker, the cold parse paid once more');
+    const second = lintWorkerPid();
+    assert.ok(second && second !== first, 'a new child');
+    mock.timers.reset();
+    await untilGone(first);
+    assert.equal(lintWorkerPid(), second, 'the old child\'s exit does not take the new one');
+    assert.equal((await lint(base, { env: {} })).reparsed, false, 'and it is warm');
+    // 0: never retired
+    mock.timers.enable({ apis: ['setTimeout'] });
+    assert.equal((await lint(base, { env: { A2UI5_MCP_LINT_IDLE_MS: '0' } })).ok, true);
+    mock.timers.tick(24 * 60 * 60_000);
+    assert.equal(lintWorkerPid(), second, 'A2UI5_MCP_LINT_IDLE_MS=0 keeps the worker');
+    // a short idle time of its own
+    assert.equal((await lint(base, { env: { A2UI5_MCP_LINT_IDLE_MS: '250' } })).ok, true);
+    mock.timers.tick(249);
+    assert.equal(lintWorkerPid(), second);
+    mock.timers.tick(1);
+    assert.equal(lintWorkerPid(), null);
+    mock.timers.reset();
+    await untilGone(second);
+  } finally {
+    mock.timers.reset();
     await closeLintWorker();
     fs.rmSync(base, { recursive: true, force: true });
   }

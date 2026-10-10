@@ -175,6 +175,12 @@
           "isRequired": false
         },
         {
+          "name": "A2UI5_MCP_LINT_IDLE_MS",
+          "description": "How long the warm lint worker (about 300 MB with the framework parsed) is kept without a request before it exits, in milliseconds; the next lint starts a fresh one. 0 keeps it for the server's life. Default: 10 minutes.",
+          "format": "number",
+          "isRequired": false
+        },
+        {
           "name": "A2UI5_MCP_LINT_TIMEOUT_MS",
           "description": "Hard timeout of the abaplint run, in milliseconds. Default: 5 minutes.",
           "format": "number",

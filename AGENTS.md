@@ -95,7 +95,9 @@ question), `A2UI5_MCP_SKIP_NETWORK_TESTS` (the three `npm test` files that
 reach the registry - npm-integration, agent-integration and migrate's
 deploy test - skip themselves), and the child-process timeouts `A2UI5_MCP_LINT_TIMEOUT_MS` /
 `A2UI5_MCP_SCOPE_TIMEOUT_MS` (default 5 min), `A2UI5_MCP_LINT_WORKER=0`
-(every lint a fresh abaplint process instead of the warm worker, below), `A2UI5_MCP_UI` (`auto`/`on`/`off`:
+(every lint a fresh abaplint process instead of the warm worker, below),
+`A2UI5_MCP_LINT_IDLE_MS` (how long that worker is kept without a request
+before it exits; default 10 min, 0 = never), `A2UI5_MCP_UI` (`auto`/`on`/`off`:
 whether the app tools declare their MCP Apps screen, below),
 `A2UI5_MCP_APP_FORMAT` (`snapshot`/`adaptive-card`: the app tools' default
 answer format, below), the system mode's `A2UI5_MCP_SYSTEM_URL` / `_USER` /
@@ -390,8 +392,15 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
   tree and answer `timedOut` / `aborted` exactly as the CLI path does; the
   next lint starts a fresh worker. The worker is unreferenced while idle
   (it must not keep the server, or a test file, alive), ends with the
-  parent's IPC channel, and is closed by the shutdown. `test/lint-worker.test.mjs`
-  runs it against a fake core that counts the dependency parses.
+  parent's IPC channel, and is closed by the shutdown. **It is retired
+  when idle**: a parsed framework is about 300 MB of RSS, and the worker
+  held it for the server's life - after `A2UI5_MCP_LINT_IDLE_MS` (default
+  10 min; 0 keeps it) without a request it is asked to exit (killed a
+  second later if it does not), the slot cleared first so a lint that
+  arrives while it exits starts a fresh worker at once and pays the cold
+  parse once more (`retireWorker`). `test/lint-worker.test.mjs`
+  runs it against a fake core that counts the dependency parses, the
+  retirement on a fake clock.
 - **Measured** (this container, cold npm cache): install 10 s, open-abap-core
   1 s, a build 7-8 s (the transpile of the dependency graph - see above - is
   all of it), unit tests 1 s, backend start 1 s.

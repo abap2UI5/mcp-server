@@ -18,6 +18,11 @@
   stop cost the next call a browser launch. It now closes the contexts open
   on the backend (their pages show a dead app) and leaves the browser to
   the shutdown (`closeBrowser`).
+- **The warm lint worker exits when idle.** With the framework parsed it
+  holds about 300 MB, and it held them for the server's life. After
+  `A2UI5_MCP_LINT_IDLE_MS` (default 10 minutes; 0 keeps it) without a
+  request it exits, and the next lint starts a fresh worker (the cold
+  parse once more); a lint that arrives while it exits starts one at once.
 - **A build nothing changed for is not made.** `build_backend` (and the
   build stage of `verify_app` and `migrate_report { deploy: true }`)
   always stopped the backend and transpiled the sandbox - 7-8 s on the npm
