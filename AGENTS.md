@@ -892,7 +892,7 @@ changes upstream, this repo must change in the same breath:
   message saying so, and one without `./rule-docs` costs the agent the
   explanations and nothing else. Neither may cost it the findings. The npm
   side is declared since the release after 0.3.0: `package.json` names `@abap2ui5/linter` as a
-  peer dependency at `>=0.8.0 <0.9.0` (npm 7+ installs a non-optional peer
+  peer dependency at `>=0.8.0 <0.10.0` (npm 7+ installs a non-optional peer
   with the server, so `npx -p @abap2ui5/mcp-server` carries the property
   gate; `test/view-check-install.test.mjs` pins that the hoisted install is
   found) and `@abap2ui5/linter-render` as an OPTIONAL peer in the same range

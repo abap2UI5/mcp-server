@@ -144,7 +144,7 @@ test('setupStatus reports the framework sandbox and the fake checkout', withFake
 
 // ------------------------------------------------------ the CI unit runner ----
 
-import { execFileSync as run } from 'node:child_process';
+import { execFileSync as run, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { frameworkPinOf, collectObjects, writeObjects, parseArgs, renderSummary, staleWorkspaceClone, chooseBackend } from '../scripts/ci-unit.mjs';
 import { filteredRunner, RUNNER_LOOP } from '../lib/runtime.mjs';
@@ -287,6 +287,26 @@ test('the abap2ui5-unit bin runs when invoked through npm\'s bin symlink', () =>
     const out = run(process.execPath, [link, '--help'], { encoding: 'utf8' });
     assert.match(out, /^abap2ui5-unit/, 'the usage, from the header comment - without the shebang');
     assert.equal(run(process.execPath, [link, '--print-pin'], { encoding: 'utf8', cwd: dir }), '\n', 'no abaplint.jsonc here: an empty pin');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/* A path with no class in it is found out before anything is installed:
+ * it used to be checked after the framework install and the backend build,
+ * so a typo cost a CI job its install (or a checkout its full build) for the
+ * same exit 2. Nothing may be written to the workspace on the way. */
+test('the CI runner refuses a path without classes before it installs anything', () => {
+  const script = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ci-unit.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-nosrc-'));
+  try {
+    const ws = path.join(dir, 'ws');
+    const res = spawnSync(process.execPath, [script, 'no-such-dir'], {
+      encoding: 'utf8', cwd: dir, env: { ...process.env, A2UI5_MCP_WORKSPACE: ws, A2UI5_MCP_BACKEND: 'npm' },
+    });
+    assert.equal(res.status, 2, res.stderr);
+    assert.match(res.stderr, /no \*\.clas\.abap under no-such-dir/);
+    assert.equal(fs.existsSync(ws), false, 'nothing installed into the workspace');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
