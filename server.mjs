@@ -1399,12 +1399,17 @@ async function handle(name, args = {}, ctx = {}) {
         built: true,
         mode: res.mode,
         ...(res.runtime ? { runtime: `@abap2ui5/node-runtime ${res.runtime}` } : {}),
+        /* nothing changed since the last build: nothing was transpiled, the
+         * running backend was not stopped, its app sessions still stand */
+        ...(res.unchanged ? { unchanged: true } : {}),
         /* an explicit prebuilt/transpile builds the framework alone; auto
          * goes on into the dev apps' incremental build by itself */
         ...(res.devAppsNotBuilt ? { devAppsNotBuilt: res.devAppsNotBuilt } : {}),
         next: res.devAppsNotBuilt
           ? `the deployed dev app(s) ${res.devAppsNotBuilt.join(', ')} are not in this ${res.mode} build - build_backend (mode auto or incremental) transpiles them into it; then run_app { class_name }`
-          : 'run_app { class_name } to boot and screenshot the app',
+          : res.unchanged
+            ? 'nothing changed since the last build - that build still stands and a running backend was left running; run_app { class_name } to boot and screenshot the app'
+            : 'run_app { class_name } to boot and screenshot the app',
         tail: res.tail.split('\n').slice(-5).join('\n'),
       });
     }

@@ -285,7 +285,17 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
   (`initialize()`, `accelerate()` when the release exports it, the dev
   modules in the transpiler's own order) that the runner and the host both
   import. apps/ is swapped in whole, which is what prunes a removed app, and
-  a failed build leaves the last good one served.
+  a failed build leaves the last good one served. **A build nothing changed
+  for is not made**: the record `apps/.abap2ui5-mcp-build.json` carries a
+  `fingerprint` (`buildFingerprint`: the sandbox's file names and bytes,
+  the release, the transpiler version, the open-abap-core commit), and a
+  `buildApps` whose fingerprint is the record's answers `unchanged: true`
+  without transpiling - and without the stop: `beforeBuild` (the server's
+  `stopBackend`) is called by the build only when one really starts, so the
+  backend and the app tools' sessions on it (their generation is its pid)
+  stay. `build_backend`, and `verify_app`'s and `migrate_report`'s build
+  stages through it, say `unchanged: true` then; a changed byte, a new
+  release or another transpiler builds as before.
 - **Database tables** (TABL, with their DTELs): a sandbox may hold them -
   `migrate_report { deploy: true }` brings abap-cloud-gui's variant and
   layout stores (`z2ui5_cgui_var`, `z2ui5_cgui_lay`, the default stores
@@ -376,7 +386,18 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
   the lint a real project runs, read from the template checkout or its
   mirror (`REMOTE_TOOLS.deploy_app` hydrates the template for that one
   read). Measured with a checkout: 2.6 s for a lint, 9 s for the
-  incremental transpile, 1.4 s for the class's unit tests. Deploying into
+  incremental transpile, 1.4 s for the class's unit tests. The incremental
+  build has the same "nothing changed" answer as the npm one:
+  `checkoutFingerprint` hashes the sandbox by content, the transpiler
+  version, the transpile config and `node/downport` by every file's name,
+  size and mtime (the dev copies among them - `syncDevCopies` leaves a copy
+  that already holds the sandbox's bytes untouched for exactly this reason,
+  and reports what it wrote under `changed`), and a successful transpile
+  records it in `node/output/.abap2ui5-mcp-build.json` with the `init.mjs`
+  it wrote (mtime and size: a prebuilt download or a full build replaces
+  that file, and the record is stale however the fingerprint reads). A
+  build whose fingerprint and init.mjs are the record's answers
+  `unchanged: true`, transpiles nothing and leaves the backend running. Deploying into
   the framework sandbox is also what found that `deploy_app`'s sidecar had
   no BOM: the template config enables `xml_bom`, the corpus config never
   asked.
@@ -932,6 +953,10 @@ agent) find these artifacts in a dirty sibling worktree, mcp-server caused them:
   ever removed — once their sandbox source is gone, by the next incremental
   build or by `remove_app` — because the framework keeps its own sources in
   that directory too.
+- `<abap2UI5>/node/output/.abap2ui5-mcp-build.json` — the last incremental
+  build's record (its fingerprint and the `init.mjs` it wrote), what the
+  next `build_backend` compares against to answer `unchanged`. Deleting it
+  costs one transpile.
 - `<abap2UI5>/node/zz_dev/*.clas.abap` + `.clas.xml` (+ `.clas.testclasses.abap`)
   — the dev sandbox when there is no corpus checkout (gitignored there;
   `remove_app` deletes them again), and `<abap2UI5>/.abaplint-mcp-dev.jsonc`
@@ -1083,7 +1108,9 @@ framework); the incremental path is ~1–2 minutes. On the npm backend the
 first build installs the release (about 10 s here with a cold npm cache) and
 fetches open-abap-core (about 1 s), and every build is 7-8 s - the transpile
 of the dependency graph the transpiler cannot be told to skip; its output is
-thrown away, but the parse and the type check of the dev apps need it. Set tool/agent timeouts
+thrown away, but the parse and the type check of the dev apps need it. A
+build nothing changed for (the fingerprint above) costs a read of the
+sandbox and answers `unchanged: true` at once, on either backend. Set tool/agent timeouts
 accordingly — a "hung" build is usually just a slow transpile. Every spawned
 child carries its own hard timeout (`spawnWithTimeout` in `lib/spawn.mjs`
 kills the whole process tree on expiry): lint and scope default to 5 minutes

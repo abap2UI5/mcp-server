@@ -11,7 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   sandbox, deployApp, removeApp, readAppSource, listDevApps, frameworkLintConfig, corpusLintConfig,
-  FRAMEWORK_SANDBOX, frameworkCloneDir, setupStatus, syncDevCopies, buildBackend, DEV_COPIES,
+  FRAMEWORK_SANDBOX, frameworkCloneDir, setupStatus, syncDevCopies, buildBackend, DEV_COPIES, CHECKOUT_BUILD_RECORD,
 } from '../lib/runtime.mjs';
 import { workspaceRoot, resolveA2UI5 } from '../lib/repos.mjs';
 
@@ -387,6 +387,52 @@ test('an incremental build after remove_app no longer transpiles the removed cla
   assert.match(two.tail, /INPUT zcl_keep\.clas\.abap,zcl_keep\.clas\.xml$/m);
   assert.ok(!fs.existsSync(path.join(a2, 'e2e-transpile.json')), 'the temporary config is gone');
   assert.ok(fs.existsSync(path.join(root, 'shots', 'last-build.json')), 'the build log stays in the test\'s own dir');
+
+  /* nothing changed since: the record in node/output carries this
+   * fingerprint, the transpiler is not run, the backend is not stopped */
+  assert.ok(fs.existsSync(path.join(a2, 'node/output', CHECKOUT_BUILD_RECORD)), 'the build is recorded');
+  let stops = 0;
+  const three = await buildBackend({ mode: 'incremental', beforeBuild: async () => { stops += 1; } });
+  assert.equal(three.ok, true, three.tail);
+  assert.equal(three.unchanged, true);
+  assert.doesNotMatch(three.tail, /INPUT /, 'the transpiler did not run');
+  assert.equal(stops, 0);
+  // the framework's sources moved (a pull): built again
+  fs.writeFileSync(path.join(a2, 'node/downport/z2ui5_cl_new.clas.abap'), 'CLASS z2ui5_cl_new DEFINITION.');
+  const four = await buildBackend({ mode: 'incremental', beforeBuild: async () => { stops += 1; } });
+  assert.equal(four.ok, true, four.tail);
+  assert.equal(four.unchanged, undefined);
+  assert.match(four.tail, /INPUT /);
+  assert.equal(stops, 1);
+  // and a redeployed class is a change of the sandbox
+  deployApp({ className: 'zcl_keep', source: `${appNamed('zcl_keep')}\n* edited` });
+  const five = await buildBackend({ mode: 'incremental', beforeBuild: async () => { stops += 1; } });
+  assert.equal(five.unchanged, undefined);
+  assert.equal(stops, 2);
+  // node/output replaced behind the record's back (a prebuilt download): the record is stale
+  const later = new Date(Date.now() + 5000);
+  fs.utimesSync(path.join(a2, 'node/output/init.mjs'), later, later);
+  const six = await buildBackend({ mode: 'incremental', beforeBuild: async () => { stops += 1; } });
+  assert.equal(six.unchanged, undefined, 'another init.mjs than the record names is not this build');
+  assert.equal(stops, 3);
+}));
+
+test('syncDevCopies leaves a copy that already holds the sandbox\'s bytes untouched', withFakeFramework(async (t, { a2 }) => {
+  const down = path.join(a2, 'node', 'downport');
+  fs.mkdirSync(down, { recursive: true });
+  deployApp({ className: 'zcl_a', source: appNamed('zcl_a') });
+  const first = syncDevCopies(a2);
+  assert.deepEqual(first.changed.sort(), ['zcl_a.clas.abap', 'zcl_a.clas.xml']);
+  const copy = path.join(down, 'zcl_a.clas.abap');
+  const old = new Date(Date.now() - 60_000);
+  fs.utimesSync(copy, old, old);
+  const second = syncDevCopies(a2);
+  assert.deepEqual(second.changed, [], 'identical bytes: nothing written');
+  assert.ok(second.copied.includes('zcl_a.clas.abap'), 'still synced, still owned');
+  assert.ok(Math.abs(fs.statSync(copy).mtimeMs - old.getTime()) < 10, 'the copy keeps its mtime');
+  deployApp({ className: 'zcl_a', source: `${appNamed('zcl_a')}\n* edited` });
+  const third = syncDevCopies(a2);
+  assert.deepEqual(third.changed, ['zcl_a.clas.abap'], 'a changed source is written, its unchanged sidecar is not');
 }));
 
 /* The first build on a checkout downloads the framework's prebuilt backend,

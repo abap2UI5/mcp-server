@@ -259,6 +259,29 @@ test('build_backend on the package: the sandbox transpiled, the dev tests run al
   assert.deepEqual([...new Set(all.tests.map((x) => x.object))].sort(), ['ZCL_NPM_A', 'ZCL_NPM_B']);
   assert.ok(!fs.readdirSync(appsDir(dir)).some((f) => f.startsWith('index-mcp-')), 'the filtered runner copy is removed');
 
+  /* nothing changed since that build: no transpile, the stop the server
+   * hands in as beforeBuild is never called (the backend and the app
+   * sessions on it stand), apps/ is not swapped, and the answer says so */
+  const initBefore = fs.statSync(path.join(appsDir(dir), 'init.mjs'));
+  let stops = 0;
+  const quiet = [];
+  const same = await buildBackend({ mode: 'auto', onLine: (l) => quiet.push(l), beforeBuild: async () => { stops += 1; } });
+  assert.equal(same.ok, true, same.tail);
+  assert.equal(same.unchanged, true, 'the same sandbox against the same release is the build that is there');
+  assert.equal(same.runtime, VERSION);
+  assert.equal(stops, 0, 'the backend is not stopped for a build that does not happen');
+  assert.ok(!quiet.some((l) => /objects written to disk/.test(l)), 'the transpiler did not run');
+  assert.ok(quiet.some((l) => /nothing changed since the last build/.test(l)), quiet.join('\n'));
+  const initAfter = fs.statSync(path.join(appsDir(dir), 'init.mjs'));
+  assert.deepEqual([initAfter.mtimeMs, initAfter.ino], [initBefore.mtimeMs, initBefore.ino], 'apps/ was not swapped');
+  // a changed class is a change: the backend is stopped and the sandbox transpiled again
+  deployApp({ className: 'zcl_npm_a', source: `${APP('zcl_npm_a')}\n* edited`, testclasses: TESTS() });
+  const edited = await buildBackend({ mode: 'auto', beforeBuild: async () => { stops += 1; } });
+  assert.equal(edited.ok, true, edited.tail);
+  assert.equal(edited.unchanged, undefined, 'an edit is built');
+  assert.equal(stops, 1, 'and the backend stopped once for it');
+  assert.ok(fs.statSync(path.join(appsDir(dir), 'init.mjs')).ino !== initBefore.ino, 'a fresh apps/');
+
   // incremental is the npm build too; a removed app leaves apps/
   removeApp('zcl_npm_b');
   const again = await buildBackend({ mode: 'incremental' });

@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+- **A build nothing changed for is not made.** `build_backend` (and the
+  build stage of `verify_app` and `migrate_report { deploy: true }`)
+  always stopped the backend and transpiled the sandbox - 7-8 s on the npm
+  backend, 1-2 min on a checkout - and every app session on the backend
+  died with the stop. The build record now carries a fingerprint of what
+  the build was made from (the sandbox's files by name and bytes, the
+  release, the transpiler version, the open-abap-core commit; on a
+  checkout the transpile config and `node/downport` by name, size and
+  mtime, recorded with the `init.mjs` the transpile wrote), and a build
+  with the same fingerprint answers `built: true, unchanged: true` at once:
+  nothing transpiled, the backend not stopped, its sessions intact. The
+  stop (`beforeBuild`) moved into the build, called only when one really
+  starts; `syncDevCopies` leaves a copy that already holds the sandbox's
+  bytes untouched (its mtime is part of the fingerprint) and reports what it
+  wrote under `changed`.
+- **Less work per call across the cheap half.** The repository resolvers'
+  identify check parses `catalogue.json` once per version of the file
+  (`readCached`, with a `scope` that keeps two parses of one file apart);
+  `examples` computes each entry's haystack, missing terms and keyword score
+  once before ranking instead of on every comparison; `docs_search` reads
+  lowercased copies cached with the page slices instead of lowercasing the
+  corpus per query; `app_list` reads the transpiled class modules once per
+  build (memoised on the output folder's `init.mjs`); `spawnWithTimeout`
+  accumulates a child's output in chunks and cuts the kept tail once at
+  close instead of flattening it per chunk (quadratic at the lint's 64 MiB
+  cap); `validate_view`'s warm render gate keeps two pages, and
+  `A2UI5_MCP_RENDER_PAGES` (1 to 8) sets it.
+
 - **The npm backend builds on the transpiler 2.14 layout.** abap2UI5's
   next release moves to @abaplint/transpiler-cli and @abaplint/runtime
   2.14.2 (abap2UI5/abap2UI5#2864), which writes no flat output folder any
