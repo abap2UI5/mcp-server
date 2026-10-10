@@ -45,6 +45,11 @@ if (K.SAY_LISTENING_AND_EXIT) {
   if (K.EXIT_AFTER_MS) setTimeout(() => process.exit(0), Number(K.EXIT_AFTER_MS));
   else process.exit(0);
 }
+if (K.FAIL_EADDRINUSE) {
+  // the framework's express.mjs over a port in use: one line, exit 1
+  console.error('Failed to start server: listen EADDRINUSE: address already in use 127.0.0.1:' + process.env.PORT);
+  process.exit(1);
+}
 setTimeout(listen, Number(K.LISTEN_DELAY_MS || 0));
 process.on('SIGTERM', () => {
   stopping = true;
@@ -251,6 +256,20 @@ test('a backend that exits right after "Listening on" fails the start; the port\
   } finally {
     clearKnob('SAY_LISTENING_AND_EXIT');
     await new Promise((r) => blocker.close(r));
+  }
+});
+
+/* The framework checkout's own express server reports a port in use as a
+ * bare EADDRINUSE line and exits 1; the answer has to name the way out, as
+ * the npm host's and the listening-then-exit path's already do. */
+test('a backend that cannot bind says which port is taken and how to move', async () => {
+  setKnob('FAIL_EADDRINUSE', '1');
+  try {
+    await assert.rejects(startBackend(),
+      new RegExp(`backend exited \\(1\\) before listening:[\\s\\S]*EADDRINUSE[\\s\\S]*port ${PORT} is taken by another process: stop it, or start the server with another A2UI5_MCP_PORT`));
+    assert.equal(backendStatus().running, false);
+  } finally {
+    clearKnob('FAIL_EADDRINUSE');
   }
 });
 
