@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **`abap2ui5-unit` refuses a path without classes before it installs
+  anything.** A typo in the path (or a run from the wrong directory) was
+  found out only after the framework install and the backend build - a
+  minute or more of a CI job, tens of minutes on a checkout's full build -
+  and then ended with the same `no *.clas.abap under ...` and exit 2. The
+  classes (and `--class` names) are read first now.
 - **A backend that cannot bind its port says how to move it.** With the
   framework checkout's own express server, a port already in use (3000 is
   every dev server's default) ended `run_app`, `app_start` and

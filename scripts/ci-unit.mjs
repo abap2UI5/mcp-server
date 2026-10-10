@@ -270,6 +270,22 @@ async function main(argv) {
     console.log(pin || '');
     return 0;
   }
+  /* What the run is about, read before anything is installed: a path with
+   * no class in it (a typo, the wrong working directory) used to be found
+   * out only after the framework install and the backend build - a minute
+   * or more of a CI job, and the tens of minutes of a full build on a
+   * checkout - to end with the same exit 2. */
+  const objects = collectObjects(opts.paths);
+  const classes = objects.filter((o) => o.type === 'clas');
+  if (!classes.length) {
+    log(`no *.clas.abap under ${opts.paths.join(', ')}`);
+    return 2;
+  }
+  const unknown = opts.classes.filter((n) => !classes.some((c) => c.name === n));
+  if (unknown.length) {
+    log(`--class ${unknown.join(', ')}: no such class under ${opts.paths.join(', ')}`);
+    return 2;
+  }
   if (opts.home) process.env.A2UI5_HOME = path.resolve(opts.home);
   let requested = opts.backend || backendPreference();
   /* The npm package has releases only; a branch (`--framework main`) can
@@ -346,17 +362,6 @@ async function main(argv) {
   }
 
   // 3. deploy, transpile, run
-  const objects = collectObjects(opts.paths);
-  const classes = objects.filter((o) => o.type === 'clas');
-  if (!classes.length) {
-    log(`no *.clas.abap under ${opts.paths.join(', ')}`);
-    return 2;
-  }
-  const unknown = opts.classes.filter((n) => !classes.some((c) => c.name === n));
-  if (unknown.length) {
-    log(`--class ${unknown.join(', ')}: no such class under ${opts.paths.join(', ')}`);
-    return 2;
-  }
   /* Every object is deployed - a class under test may use any of them;
    * --class narrows the tests that RUN. On the npm backend into a sandbox
    * and a build of this run's own; on a checkout into its dev sandbox. */
