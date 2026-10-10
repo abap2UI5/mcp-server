@@ -23,6 +23,13 @@
   `A2UI5_MCP_LINT_IDLE_MS` (default 10 minutes; 0 keeps it) without a
   request it exits, and the next lint starts a fresh worker (the cold
   parse once more); a lint that arrives while it exits starts one at once.
+- **The GitHub mirror backs off exponentially.** A failed download was
+  tried again every 3 minutes, and a machine that is offline without
+  `A2UI5_MCP_OFFLINE` stalled every mirrored tool call the 20 s fetch
+  timeout that often, for as long as the server ran. The wait now doubles
+  with each failure in a row per repository (3, 6, 12 min ... up to the
+  mirror TTL) and starts over at a success; the hydrate answer carries
+  `failures` and `backoffMs`.
 - **A build nothing changed for is not made.** `build_backend` (and the
   build stage of `verify_app` and `migrate_report { deploy: true }`)
   always stopped the backend and transpiled the sandbox - 7-8 s on the npm

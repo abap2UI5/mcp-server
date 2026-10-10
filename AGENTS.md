@@ -161,7 +161,17 @@ Four rules, each pinned by `test/remote.test.mjs` and
   them are written, then the marker. A failure is the answer for
   `FAILURE_BACKOFF_MS` (3 min) before the download is tried again - every
   tool call hydrates, and a network that swallows requests cost each call
-  the 20 s fetch timeout once more.
+  the 20 s fetch timeout once more - and the wait doubles with each
+  failure in a row, per key (`failureBackoffMs`: 3, 6, 12 min ... capped
+  at the mirror TTL, never under the first step), a success starting it
+  over. The backoff used to be a fixed 3 min, deliberately: a user who
+  fixes the network should see the mirror within minutes. That still holds
+  for the first hour (3 + 6 + 12 + 24 min), but a machine that is simply
+  offline without `A2UI5_MCP_OFFLINE` stalled the 20 s timeout every
+  three minutes per mirror for a whole day of calls; now it stalls a
+  handful of times and then once per TTL. `hydrate`'s answer carries
+  `failures` and `backoffMs`, `remoteStatus` says when the next try is,
+  and `test/remote.test.mjs` walks the doubling on a fake clock.
 
 `read_example` is the tool that made the mirror worth having: an `examples`
 hit is a class name and a path, and an agent without the checkout could not
