@@ -13,9 +13,64 @@ import path from 'node:path';
 import http from 'node:http';
 import { execFileSync } from 'node:child_process';
 import { parseActions, cssAttr, ACTIONS, MAX_ACTIONS, STEP_KEYS } from '../lib/interact.mjs';
-import { parseUnitOutput, downloadPrebuilt, prebuiltUrl, prebuiltManifest, RUNNER_LOOP, runUnitTests, backendBuilt, PREBUILT_MAX_BYTES } from '../lib/runtime.mjs';
+import { parseUnitOutput, downloadPrebuilt, prebuiltUrl, prebuiltManifest, RUNNER_LOOP, runUnitTests, backendBuilt, PREBUILT_MAX_BYTES, quietAfter } from '../lib/runtime.mjs';
 import { resolveA2UI5 } from '../lib/repos.mjs';
 import { TOOLS } from '../lib/tools.mjs';
+
+// ------------------------------------------------------------ quietAfter ----
+
+/* A fake clock: `sleep` advances it, and a script of events (a request
+ * going out, an answer coming back) runs at the times it names. */
+function fakeClock(events = []) {
+  let t = 0;
+  const inflight = { n: 0, last: 0 };
+  const sleeps = [];
+  const fire = (until) => {
+    while (events.length && events[0].at <= until) {
+      const e = events.shift();
+      inflight.n = Math.max(0, inflight.n + e.d);
+      inflight.last = e.at;
+    }
+  };
+  return {
+    inflight,
+    sleeps,
+    now: () => t,
+    sleep: async (ms) => { sleeps.push(ms); t += ms; fire(t); },
+  };
+}
+
+test('quietAfter returns as soon as the backend has been quiet for quietMs', async () => {
+  // quiet already, nothing in flight, no minimum: no sleep at all
+  const idle = fakeClock();
+  idle.inflight.last = -1000;
+  assert.equal(await quietAfter(idle.inflight, { quietMs: 250, minMs: 0, maxMs: 600, now: idle.now, sleep: idle.sleep }), true);
+  assert.deepEqual(idle.sleeps, []);
+  assert.equal(idle.now(), 0);
+
+  // the minimum is kept even when quiet: the render needs it
+  const min = fakeClock();
+  min.inflight.last = -1000;
+  assert.equal(await quietAfter(min.inflight, { quietMs: 250, minMs: 250, maxMs: 600, now: min.now, sleep: min.sleep }), true);
+  assert.equal(min.now(), 250, 'minMs, not the ceiling');
+
+  // a request answered at 120 ms: quiet from 370 ms on, well under the 600 ms the wait used to be
+  const busy = fakeClock([{ at: 0, d: 1 }, { at: 120, d: -1 }]);
+  assert.equal(await quietAfter(busy.inflight, { quietMs: 250, minMs: 250, maxMs: 600, now: busy.now, sleep: busy.sleep }), true);
+  assert.ok(busy.now() >= 370 && busy.now() < 600, `answered at 120, quiet 250 later: ${busy.now()}`);
+
+  // a second request during the quiet window starts it over
+  const twice = fakeClock([{ at: 0, d: 1 }, { at: 100, d: -1 }, { at: 200, d: 1 }, { at: 300, d: -1 }]);
+  assert.equal(await quietAfter(twice.inflight, { quietMs: 250, minMs: 0, maxMs: 5000, now: twice.now, sleep: twice.sleep }), true);
+  assert.ok(twice.now() >= 550 && twice.now() < 650, `the last answer at 300, quiet 250 later: ${twice.now()}`);
+});
+
+test('quietAfter gives a busy backend the ceiling it always had, and says it was still busy', async () => {
+  const stuck = fakeClock([{ at: 0, d: 1 }]); // a request that never answers
+  assert.equal(await quietAfter(stuck.inflight, { quietMs: 250, minMs: 250, maxMs: 600, now: stuck.now, sleep: stuck.sleep }), false);
+  assert.equal(stuck.now(), 600, 'exactly the old fixed wait, never more');
+  assert.ok(stuck.sleeps.every((ms) => ms >= 1 && ms <= 50), 'polled, not slept through');
+});
 
 // ---------------------------------------------------------- parseActions ----
 

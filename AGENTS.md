@@ -704,6 +704,16 @@ contract: the action's inputs (`paths`, `framework`, `backend`,
 collector, the argument parser, the backend choice, the summary,
 `filteredRunner`).
 
+The browser tools wait on the backend, not on the clock: `trackRequests`
+counts the backend requests of the page in flight, `quietAfter` (the one
+wait helper, with an injectable clock for its test in
+`test/interact.test.mjs`) ends a wait once they are all answered and none
+went out for 250 ms - the tail after the boot and after an action script
+takes at least 250 ms (late render errors surface then) and at most the
+600 ms it used to be fixed at; an action's `settle` is the same helper
+behind a 100 ms grace for the roundtrip the event starts. A busy backend is
+given the ceiling and reported as still busy, never waited on longer.
+
 `interact_app`'s hands are proven without UI5: `test/interact-browser.test.mjs`
 serves a static page with a wrapper-plus-inner input, two buttons and a
 delayed answer, and drives `performAction` through the four actions in the

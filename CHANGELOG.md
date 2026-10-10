@@ -29,6 +29,13 @@
   close instead of flattening it per chunk (quadratic at the lint's 64 MiB
   cap); `validate_view`'s warm render gate keeps two pages, and
   `A2UI5_MCP_RENDER_PAGES` (1 to 8) sets it.
+- **`run_app` and `interact_app` wait for the backend to be quiet, not for
+  a fixed 600 ms.** The tail after the boot and after the action script
+  (`quietAfter` in lib/runtime.mjs, on the in-flight count `trackRequests`
+  keeps) ends once every backend request has answered and none went out
+  for 250 ms - at least 250 ms for the render to settle, at most the 600 ms
+  it always was; the wait after an action (`settle`) is the same helper
+  behind its 100 ms grace. Unit-tested on a fake clock.
 
 - **The npm backend builds on the transpiler 2.14 layout.** abap2UI5's
   next release moves to @abaplint/transpiler-cli and @abaplint/runtime
