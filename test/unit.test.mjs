@@ -350,6 +350,23 @@ test('readCached parses once per file version and re-parses on change', () => {
   }
 });
 
+/* Two readers that parse ONE file differently must not share a cache slot:
+ * the identify check reads a catalogue as plain JSON, the examples search as
+ * entries, and the second used to be handed the first one's value. */
+test('readCached keeps a scoped parse apart from the default one', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-cache-'));
+  const file = path.join(dir, 'c.json');
+  try {
+    fs.writeFileSync(file, '{"n":1}');
+    assert.deepEqual(readCached(file, (t) => JSON.parse(t), 'plain'), { n: 1 });
+    assert.equal(readCached(file, (t) => t.length), 7, 'the default scope parses by itself');
+    assert.deepEqual(readCached(file, () => 'never', 'plain'), { n: 1 }, 'the scoped value stays cached');
+    assert.equal(readCached(file, () => 'never'), 7);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // ------------------------------------------------------- BENIGN filter ----
 
 test('the vendored BENIGN patterns match known console noise and not real errors', () => {
@@ -515,6 +532,58 @@ test('a linter checkout is identified by its exports map, not by having a packag
       'and neither is a package.json with no exports map at all');
   } finally {
     for (const d of [linter, notTheLinter, noExports]) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+/* The identify file is parsed once per version of it (lib/cache.mjs): a
+ * resolver runs several times per tool call, and samples-controls'
+ * catalogue.json is the largest file a checkout carries. A changed file is
+ * read again - the cache key is the file's own identity - and a file that is
+ * not JSON still skips the check, uncached. */
+test('identified() parses the identify file once per version of it', async () => {
+  const { resolveSamples } = await import('../lib/repos.mjs');
+  const dir = fakeCheckout({
+    'SAMPLES.md': '# samples',
+    'catalogue.json': { repository: 'abap2UI5/samples', samples: [] },
+  });
+  const catalogue = path.join(dir, 'catalogue.json');
+  const saved = { SAMPLES_HOME: process.env.SAMPLES_HOME };
+  const realRead = fs.readFileSync;
+  const reads = () => {
+    let n = 0;
+    fs.readFileSync = function (file, ...rest) {
+      if (String(file) === catalogue) n += 1;
+      return realRead.call(fs, file, ...rest);
+    };
+    return () => n;
+  };
+  try {
+    process.env.SAMPLES_HOME = dir;
+    const count = reads();
+    assert.equal(resolveSamples(), dir);
+    assert.equal(resolveSamples(), dir);
+    assert.equal(resolveSamples(), dir);
+    assert.equal(count(), 1, 'three resolves, one read of the unchanged identify file');
+
+    // a changed file is read again, and a wrong repository rules the checkout out
+    fs.writeFileSync(catalogue, JSON.stringify({ repository: 'abap2UI5/samples-stack', samples: [] }));
+    const later = new Date(Date.now() + 5000);
+    fs.utimesSync(catalogue, later, later);
+    assert.equal(resolveSamples(), null, 'the rewritten file says samples-stack: ruled out');
+    assert.equal(count(), 2, 'the changed file was parsed again');
+
+    // a file that is not JSON cannot tell, and is not cached as an answer
+    fs.writeFileSync(catalogue, 'not json');
+    const evenLater = new Date(Date.now() + 10000);
+    fs.utimesSync(catalogue, evenLater, evenLater);
+    assert.equal(resolveSamples(), dir, 'a file that is not JSON skips the check');
+    assert.equal(resolveSamples(), dir);
+    assert.equal(count(), 4, 'an unparseable file is read on every resolve, never cached');
+  } finally {
+    fs.readFileSync = realRead;
+    if (saved.SAMPLES_HOME === undefined) delete process.env.SAMPLES_HOME;
+    else process.env.SAMPLES_HOME = saved.SAMPLES_HOME;
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
