@@ -618,6 +618,8 @@ duplicates none of their content:
   reads too) names the executable; otherwise the Playwright-managed browser
   (`npx playwright install chromium`); otherwise a system chromium.
   `setup_status` says which one it found and where it came from.
+  `validate_view`'s warm render gate keeps 2 pages of that browser, which
+  concurrent calls queue on; `A2UI5_MCP_RENDER_PAGES` (1 to 8) sets it.
 - **Screenshots:** `run_app` and `interact_app` write their PNG to
   `<tmp>/abap2ui5-mcp-screenshots/<class>-<stamp>.png` (the newest 50 are
   kept, older ones of that pattern removed) and return the path beside the

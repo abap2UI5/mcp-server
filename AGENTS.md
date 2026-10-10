@@ -66,7 +66,9 @@ a maintainer setting a machine up does not look.
 Also: `A2UI5_MCP_PORT`, `A2UI5_MCP_OFFLINE=1` (no CDN fallback for UI5, and
 no GitHub mirror either), `A2UI5_MCP_CHROMIUM` (browser path; `CHROMIUM_BIN`,
 the linter's variable, is read after it — then Playwright's managed browser,
-then a system binary, `resolveChromium`),
+then a system binary, `resolveChromium`), `A2UI5_MCP_RENDER_PAGES` (the
+pages of `validate_view`'s warm render gate - concurrent calls queue on the
+pool; default 2, 1 to 8, `renderPages` in `lib/renderer.mjs`),
 `A2UI5_MCP_SCREENSHOT_DIR` (where `run_app` and `interact_app` write their
 PNGs - the newest `SHOTS_KEPT` (50) of them, older ones of that name
 pattern are removed after each picture, no other file ever is; default

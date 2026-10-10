@@ -148,3 +148,20 @@ test('rendererLooksDead spots a dead browser and leaves view errors alone', () =
   assert.equal(rendererLooksDead([]), false);
   assert.equal(rendererLooksDead(undefined), false);
 });
+
+/* The gate pool's size: 2 by default, A2UI5_MCP_RENDER_PAGES within 1..8,
+ * anything unusable is the default - a misconfigured number must not open a
+ * browser with no page, or with a thousand. */
+test('renderPages reads A2UI5_MCP_RENDER_PAGES, bounded, default 2', async () => {
+  const { renderPages, RENDER_PAGES_DEFAULT, RENDER_PAGES_MAX } = await import('../lib/renderer.mjs');
+  assert.equal(RENDER_PAGES_DEFAULT, 2);
+  assert.equal(renderPages({}), 2);
+  assert.equal(renderPages({ A2UI5_MCP_RENDER_PAGES: '' }), 2);
+  assert.equal(renderPages({ A2UI5_MCP_RENDER_PAGES: '1' }), 1);
+  assert.equal(renderPages({ A2UI5_MCP_RENDER_PAGES: '4' }), 4);
+  assert.equal(renderPages({ A2UI5_MCP_RENDER_PAGES: '0' }), 2);
+  assert.equal(renderPages({ A2UI5_MCP_RENDER_PAGES: '-3' }), 2);
+  assert.equal(renderPages({ A2UI5_MCP_RENDER_PAGES: '2.5' }), 2);
+  assert.equal(renderPages({ A2UI5_MCP_RENDER_PAGES: 'many' }), 2);
+  assert.equal(renderPages({ A2UI5_MCP_RENDER_PAGES: '1000' }), RENDER_PAGES_MAX);
+});

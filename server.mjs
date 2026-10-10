@@ -60,7 +60,7 @@ import { fixSource } from './lib/fixview.mjs';
 import { lintOptionsFor } from './lib/lintopts.mjs';
 import { withRenderFallback, renderSkippedNote, warmThenCold, validateHint, bySeverity } from './lib/validate.mjs';
 import { ANSWER_BUDGET, sizeOf, takeWithin, takeSmallestWithin, fitSnapshot, fitUnitResult, fitFindings, fitRules, fitObject, fitVerifyStages, guardAnswer, IMAGE_BUDGET } from './lib/budget.mjs';
-import { getRenderer, dropRenderer, closeRenderers, rendererLooksDead } from './lib/renderer.mjs';
+import { getRenderer, dropRenderer, closeRenderers, rendererLooksDead, renderPages } from './lib/renderer.mjs';
 import { TOOLS } from './lib/tools.mjs';
 import { RESOURCES, RESOURCE_TEMPLATES, GUIDE_CHAPTER_TEMPLATE, readResource } from './lib/resources.mjs';
 import { PROMPTS, getPrompt } from './lib/prompts.mjs';
@@ -1132,8 +1132,9 @@ async function handle(name, args = {}, ctx = {}) {
        * render gate's Chromium cold start dominates this call, and one warm
        * browser serves every call (concurrent ones queue on its page pool).
        * An older linter gets exactly the cold path it always had; a warm
-       * browser that died mid-call is dropped and the call retried cold. */
-      const GATE_POOL = { pages: 1 };
+       * browser that died mid-call is dropped and the call retried cold.
+       * The pool's size is `renderPages` (A2UI5_MCP_RENDER_PAGES, default 2). */
+      const GATE_POOL = { pages: renderPages() };
       const checkWithRender = async () => {
         const renderer = opt.render === false ? null : await getRenderer(GATE_POOL);
         if (!renderer) return check(opt);
