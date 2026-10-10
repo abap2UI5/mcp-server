@@ -72,6 +72,18 @@ test('quietAfter gives a busy backend the ceiling it always had, and says it was
   assert.ok(stuck.sleeps.every((ms) => ms >= 1 && ms <= 50), 'polled, not slept through');
 });
 
+/* The browser tools wait on the backend and nothing else: interact_app used
+ * to wait for Playwright's `networkidle` (no request of ANY kind for 500 ms,
+ * up to 10 s) before the quiet-backend tail, and a page with a long poll or
+ * a slow theme download spent the whole 10 s there on every call, after the
+ * actions had already settled. The one wait helper is quietAfter. */
+test('the browser tools never wait for networkidle', () => {
+  const src = fs.readFileSync(new URL('../lib/runtime.mjs', import.meta.url), 'utf8');
+  const code = src.split('\n').filter((l) => !/^\s*(\/\/|\/?\*)/.test(l));
+  const hit = code.findIndex((l) => /networkidle|waitForLoadState/.test(l));
+  assert.equal(hit, -1, `lib/runtime.mjs waits on the network, not the backend: ${code[hit]}`);
+});
+
 // ---------------------------------------------------------- parseActions ----
 
 test('parseActions normalises a valid script and refuses every malformed one with a sentence', () => {

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **`interact_app` no longer waits for `networkidle`.** After the actions
+  (each of which waits for its own roundtrip) it asked Playwright for no
+  request of any kind for 500 ms, up to 10 s, before the quiet-backend
+  tail - and a page with a long poll or a slow CDN download spent the
+  whole 10 s there on every call. The tail is the backend-quiet wait alone.
 - **A build nothing changed for is not made.** `build_backend` (and the
   build stage of `verify_app` and `migrate_report { deploy: true }`)
   always stopped the backend and transpiled the sandbox - 7-8 s on the npm

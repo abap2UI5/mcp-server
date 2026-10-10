@@ -744,6 +744,12 @@ takes at least 250 ms (late render errors surface then) and at most the
 600 ms it used to be fixed at; an action's `settle` is the same helper
 behind a 100 ms grace for the roundtrip the event starts. A busy backend is
 given the ceiling and reported as still busy, never waited on longer.
+Nothing waits on the NETWORK: `interact_app` used to ask Playwright for
+`networkidle` (no request of any kind for 500 ms, up to 10 s) before that
+tail, and a page with a long poll or a slow CDN download spent the whole
+10 s there on every call, after its actions had long settled -
+`test/interact.test.mjs` fails on a `networkidle` / `waitForLoadState` in
+`lib/runtime.mjs`.
 
 `interact_app`'s hands are proven without UI5: `test/interact-browser.test.mjs`
 serves a static page with a wrapper-plus-inner input, two buttons and a
