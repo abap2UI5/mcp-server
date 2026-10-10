@@ -927,6 +927,10 @@
   that declares more is refused unread, one that streams more is cut at the
   cap, and the tool says so by URL. A prebuilt download cut before its file
   was open no longer raises an uncaught ENOENT from the cleanup.
+- **Dependencies:** `@modelcontextprotocol/sdk` ^1.32.1 and `playwright`
+  ^1.64.0. abap2UI5-bench keeps its gate versions (`@abap2ui5/linter`
+  0.8.3, `@abaplint/cli` 2.120.60): they follow the app-template commit
+  `bench.config.json` pins, and moving them starts a new series.
 
 ## 1.0.0 - 2026-10-03
 
