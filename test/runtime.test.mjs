@@ -156,6 +156,32 @@ test('spawnWithTimeout surfaces a spawn failure instead of rejecting', async () 
   assert.match(res.stderr, /ENOENT/);
 });
 
+/* The kept tail of a stream is accumulated in chunks and cut once at the end;
+ * it used to be flattened per chunk. The answer is held to the flattening's,
+ * across chunk boundaries, for a cap smaller than a chunk, larger than the
+ * whole output, and the 0 that kept everything. */
+test('outputTail answers what the per-chunk flattening answered', async () => {
+  const { outputTail } = await import('../lib/spawn.mjs');
+  const chunks = ['abc', 'defgh', '', 'ij', 'klmnopqrstu', 'v', 'wxyz0123456789'];
+  for (const keepChars of [0, 1, 2, 3, 5, 7, 8, 13, 20, 1000]) {
+    const tail = outputTail(keepChars);
+    let flat = '';
+    for (const c of chunks) {
+      tail.push(c);
+      flat = (flat + c).slice(-keepChars);
+      assert.equal(tail.text(), flat, `keepChars ${keepChars} after ${JSON.stringify(c)}`);
+    }
+  }
+});
+
+test('spawnWithTimeout keeps the last keepChars of a long output', async () => {
+  const script = 'for (let i = 0; i < 2000; i++) process.stdout.write(`line ${String(i).padStart(5, "0")}\\n`);';
+  const res = await spawnWithTimeout(process.execPath, ['-e', script], { timeoutMs: 30000, keepChars: 100 });
+  assert.equal(res.code, 0);
+  assert.equal(res.stdout.length, 100);
+  assert.ok(res.stdout.endsWith('line 01999\n'), JSON.stringify(res.stdout));
+});
+
 // ---------------------------------------------------------- buildBackend ----
 
 // fake sibling checkouts carrying just the resolver probes and a scripted
