@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **`abap2ui5-unit` refuses a path without classes before it installs
+  anything.** A typo in the path (or a run from the wrong directory) was
+  found out only after the framework install and the backend build - a
+  minute or more of a CI job, tens of minutes on a checkout's full build -
+  and then ended with the same `no *.clas.abap under ...` and exit 2. The
+  classes (and `--class` names) are read first now.
+- **A backend that cannot bind its port says how to move it.** With the
+  framework checkout's own express server, a port already in use (3000 is
+  every dev server's default) ended `run_app`, `app_start` and
+  `backend start` with the bare `listen EADDRINUSE` line. The answer now
+  adds which port is taken and that `A2UI5_MCP_PORT` moves it, as the npm
+  backend's host already did.
+- **`validate_view` and `fix_view` refuse a `min_ui5` that is no version.**
+  Any string went through and was compared as if it were a floor:
+  `min_ui5: "abc"` answered "newer than the abc floor", and a typo such as
+  `"1,120"` judged the view against a floor nobody meant. The argument is
+  checked the way the linter's CLI checks `--ui5` (`1.71`, `1.120.0`), and
+  anything else is an error naming the value.
 - **The npm backend builds on the transpiler 2.14 layout.** abap2UI5's
   next release moves to @abaplint/transpiler-cli and @abaplint/runtime
   2.14.2 (abap2UI5/abap2UI5#2864), which writes no flat output folder any
@@ -927,6 +945,10 @@
   that declares more is refused unread, one that streams more is cut at the
   cap, and the tool says so by URL. A prebuilt download cut before its file
   was open no longer raises an uncaught ENOENT from the cleanup.
+- **Dependencies:** `@modelcontextprotocol/sdk` ^1.32.1 and `playwright`
+  ^1.64.0. abap2UI5-bench keeps its gate versions (`@abap2ui5/linter`
+  0.8.3, `@abaplint/cli` 2.120.60): they follow the app-template commit
+  `bench.config.json` pins, and moving them starts a new series.
 
 ## 1.0.0 - 2026-10-03
 
