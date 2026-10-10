@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **`validate_view` and `fix_view` refuse a `min_ui5` that is no version.**
+  Any string went through and was compared as if it were a floor:
+  `min_ui5: "abc"` answered "newer than the abc floor", and a typo such as
+  `"1,120"` judged the view against a floor nobody meant. The argument is
+  checked the way the linter's CLI checks `--ui5` (`1.71`, `1.120.0`), and
+  anything else is an error naming the value.
 - **The npm backend builds on the transpiler 2.14 layout.** abap2UI5's
   next release moves to @abaplint/transpiler-cli and @abaplint/runtime
   2.14.2 (abap2UI5/abap2UI5#2864), which writes no flat output folder any
