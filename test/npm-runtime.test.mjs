@@ -296,6 +296,28 @@ test('a folder-layout release (transpiler 2.14): apps/ flat, imports on the pack
   assert.doesNotMatch(runner, /\.\/project\//);
   assert.match(fs.readFileSync(path.join(appsDir(dir), 'init.mjs'), 'utf8'), /await import\("\.\/zcl_npm_a\.clas\.mjs"\);\nawait import\("\.\/zcl_npm_b\.clas\.mjs"\);/, 'the boot order out of init.mjs\'s ./project/ imports');
   assert.ok(builtAppClasses().some((a) => a.app === 'Z2UI5_CL_POP_FAKE' && a.source === 'framework'), 'app_list finds the framework\'s apps in output/project/');
+  /* and answers the next call from memory: the class modules are read once
+   * per build (apps/init.mjs is the key), not on every app_list */
+  const before = builtAppClasses();
+  const realRead = fs.readFileSync;
+  const modulesRead = [];
+  fs.readFileSync = function (file, ...rest) {
+    if (String(file).endsWith('.clas.mjs')) modulesRead.push(String(file));
+    return realRead.call(fs, file, ...rest);
+  };
+  try {
+    assert.deepEqual(builtAppClasses(), before);
+    assert.deepEqual(modulesRead, [], 'an unchanged build reads no class module');
+    // a new build (apps/ swapped in whole: a new init.mjs) is scanned again
+    const init = path.join(appsDir(dir), 'init.mjs');
+    const later = new Date(Date.now() + 5000);
+    fs.utimesSync(init, later, later);
+    assert.deepEqual(builtAppClasses(), before);
+    assert.ok(modulesRead.some((f) => f.endsWith('zcl_npm_a.clas.mjs')), 'a changed build record re-reads the dev modules');
+    assert.ok(!modulesRead.some((f) => f.includes(`${path.sep}output${path.sep}`)), 'and only them - the package\'s output/ did not change');
+  } finally {
+    fs.readFileSync = realRead;
+  }
 
   const one = await runUnitTests({ className: 'zcl_npm_a' });
   assert.equal(one.ok, true, JSON.stringify(one));
