@@ -169,6 +169,12 @@
           "isRequired": false
         },
         {
+          "name": "A2UI5_MCP_LINT_WORKER",
+          "description": "Set to 0 to run every lint as a fresh abaplint process. Default: a long-lived worker keeps @abaplint/core with the framework parsed and lints a deploy in milliseconds (the CLI runs whenever the worker cannot stand in for it).",
+          "format": "string",
+          "isRequired": false
+        },
+        {
           "name": "A2UI5_MCP_LINT_TIMEOUT_MS",
           "description": "Hard timeout of the abaplint run, in milliseconds. Default: 5 minutes.",
           "format": "number",

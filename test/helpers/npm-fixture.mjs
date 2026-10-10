@@ -193,6 +193,12 @@ export function fakeRelease(workspace, { version = VERSION, accelerate = true, c
   const lint = path.join(nm, '@abaplint', 'cli');
   write(path.join(lint, 'package.json'), JSON.stringify({ name: '@abaplint/cli', version: '2.120.60', bin: { abaplint: './abaplint' } }));
   write(path.join(lint, 'abaplint'), ABAPLINT);
+  /* @abaplint/core at the cli's version, as the install puts it there - but
+   * with nothing to load (no main): the warm lint worker (lib/lint-host.mjs)
+   * answers "cannot be used" and the lint runs the recording CLI stand-in
+   * above, which is what these tests read. The worker itself is tested with
+   * a working fake core in test/lint-worker.test.mjs. */
+  write(path.join(nm, '@abaplint', 'core', 'package.json'), JSON.stringify({ name: '@abaplint/core', version: '2.120.60' }));
   // express: the real one this repository has installed (the compress path imports it)
   const express = path.dirname(createRequire(import.meta.url).resolve('express/package.json'));
   fs.mkdirSync(nm, { recursive: true });
@@ -204,7 +210,7 @@ export function fakeRelease(workspace, { version = VERSION, accelerate = true, c
   write(path.join(dir, '.abap2ui5-mcp-runtime.json'), JSON.stringify({
     version,
     installedAt: new Date().toISOString(),
-    dependencies: { '@abap2ui5/node-runtime': version, '@abaplint/transpiler-cli': '2.13.91', express: '5.2.1', '@abaplint/cli': '2.120.60' },
+    dependencies: { '@abap2ui5/node-runtime': version, '@abaplint/transpiler-cli': '2.13.91', express: '5.2.1', '@abaplint/cli': '2.120.60', '@abaplint/core': '2.120.60' },
   }));
   const core = path.join(workspace, 'open-abap-core', CORE_SHA);
   write(path.join(core, 'src', 'cl_abap_unit_assert.clas.abap'), '* fake\n');

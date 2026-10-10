@@ -61,6 +61,7 @@ import { lintOptionsFor } from './lib/lintopts.mjs';
 import { withRenderFallback, renderSkippedNote, warmThenCold, validateHint, bySeverity } from './lib/validate.mjs';
 import { ANSWER_BUDGET, sizeOf, takeWithin, takeSmallestWithin, fitSnapshot, fitUnitResult, fitFindings, fitRules, fitObject, fitVerifyStages, guardAnswer, IMAGE_BUDGET } from './lib/budget.mjs';
 import { getRenderer, dropRenderer, closeRenderers, rendererLooksDead, renderPages } from './lib/renderer.mjs';
+import { closeLintWorker } from './lib/lint-host.mjs';
 import { TOOLS } from './lib/tools.mjs';
 import { RESOURCES, RESOURCE_TEMPLATES, GUIDE_CHAPTER_TEMPLATE, readResource } from './lib/resources.mjs';
 import { PROMPTS, getPrompt } from './lib/prompts.mjs';
@@ -1853,6 +1854,7 @@ function shutdown(reason) {
   const hardStop = setTimeout(() => process.exit(0), 5000);
   shuttingDown = (async () => {
     try {
+      await closeLintWorker().catch(() => {});
       killChildren();
       await Promise.all([stopBackend().catch(() => {}), closeRenderers().catch(() => {})]);
     } catch (e) {

@@ -547,19 +547,26 @@ test('setup_status names the lint\'s abaplint install the next build makes', wit
   const markerFile = path.join(dir, '.abap2ui5-mcp-runtime.json');
   const marker = JSON.parse(fs.readFileSync(markerFile, 'utf8'));
   delete marker.dependencies['@abaplint/cli'];
+  delete marker.dependencies['@abaplint/core'];
   fs.writeFileSync(markerFile, JSON.stringify(marker));
   fs.rmSync(path.join(dir, 'node_modules', '@abaplint', 'cli'), { recursive: true });
   let steps = setupStatus().backend.npm.nextBuild;
-  assert.ok(steps.some((s) => /install the lint's @abaplint\/cli 2\.120\.60/.test(s)), steps.join('\n'));
+  assert.ok(steps.some((s) => /install the lint's @abaplint\/cli and @abaplint\/core 2\.120\.60/.test(s)), steps.join('\n'));
   // installed, but app-template pins another version now
   marker.dependencies['@abaplint/cli'] = '2.120.59';
+  marker.dependencies['@abaplint/core'] = '2.120.59';
   fs.writeFileSync(markerFile, JSON.stringify(marker));
   steps = setupStatus().backend.npm.nextBuild;
-  assert.ok(steps.some((s) => /@abaplint\/cli 2\.120\.60.*2\.120\.59 is installed/.test(s)), steps.join('\n'));
+  assert.ok(steps.some((s) => /@abaplint\/cli and @abaplint\/core 2\.120\.60.*2\.120\.59 is installed/.test(s)), steps.join('\n'));
   // at the pin: nothing to install
   marker.dependencies['@abaplint/cli'] = '2.120.60';
+  marker.dependencies['@abaplint/core'] = '2.120.60';
   fs.writeFileSync(markerFile, JSON.stringify(marker));
   assert.ok(!setupStatus().backend.npm.nextBuild.some((s) => /abaplint/.test(s)));
+  // the warm worker's core alone missing (an install from before it): installed with the cli
+  delete marker.dependencies['@abaplint/core'];
+  fs.writeFileSync(markerFile, JSON.stringify(marker));
+  assert.ok(setupStatus().backend.npm.nextBuild.some((s) => /@abaplint\/core 2\.120\.60/.test(s)));
 }));
 
 /* run_unit_tests answered a class whose class_setup threw - no test line,

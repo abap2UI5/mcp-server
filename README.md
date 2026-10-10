@@ -595,6 +595,14 @@ duplicates none of their content:
   framework clone as the default. Everything it installs lives in
   `~/.abap2ui5-mcp` and is safe to delete.
 - **Port:** the backend listens on 3000 (`A2UI5_MCP_PORT` overrides).
+- **The lint:** `deploy_app` lints with app-template's abaplint config.
+  On the npm backend a long-lived worker keeps `@abaplint/core` (installed
+  beside `@abaplint/cli` at the same version) with the framework parsed, so
+  a deploy's lint takes milliseconds instead of a fresh abaplint process
+  (2-3 s, mostly the framework's parse); whenever the worker cannot stand
+  in for the CLI - a checkout without that core, a config it does not
+  mirror - the CLI runs as before. `A2UI5_MCP_LINT_WORKER=0` switches the
+  worker off.
 - **Timeouts:** every spawned child is killed (whole process tree) when it
   exceeds its limit — lint/scope 5 min, unit tests 10 min, build (with the
   prebuilt download and the npm install) 30 min by default;

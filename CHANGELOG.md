@@ -17,6 +17,19 @@
   starts; `syncDevCopies` leaves a copy that already holds the sandbox's
   bytes untouched (its mtime is part of the fingerprint) and reports what it
   wrote under `changed`.
+- **The lint runs warm.** Every deploy spawned a fresh `abaplint --format
+  json` over the sandbox and the whole framework, 2.6 s of which was the
+  framework's parse, the same each time. One long-lived worker
+  (`lib/lint-worker.mjs`, driven by `lib/lint-host.mjs`) now keeps an
+  `@abaplint/core` Registry with the dependency folder parsed and lints a
+  deploy by replacing the sandbox's changed files in it (900 ms cold, 9 ms
+  warm against the real core); the npm backend installs `@abaplint/core` at
+  `@abaplint/cli`'s version beside it for exactly that. The answer is the
+  CLI's JSON shape, byte for byte; the CLI runs whenever the worker cannot
+  stand in for it (no core of the CLI's version - a framework checkout -,
+  a config it does not mirror, a worker that died) and under
+  `A2UI5_MCP_LINT_WORKER=0`. The timeout and the client's cancel kill the
+  worker and read as before.
 - **Less work per call across the cheap half.** The repository resolvers'
   identify check parses `catalogue.json` once per version of the file
   (`readCached`, with a `scope` that keeps two parses of one file apart);

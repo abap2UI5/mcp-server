@@ -101,13 +101,13 @@ test('the lint\'s abaplint is app-template\'s pin: its lockfile, its package.jso
 test('an install asks only for what package.json does not already record', () => {
   const desired = desiredDeps({ version: '1.145.0', meta: META_145, cli: '2.120.60' });
   assert.deepEqual(desired, {
-    [RUNTIME_PKG]: '1.145.0', '@abaplint/transpiler-cli': '2.13.91', express: '^5.0.0', '@abaplint/cli': '2.120.60',
+    [RUNTIME_PKG]: '1.145.0', '@abaplint/transpiler-cli': '2.13.91', express: '^5.0.0', '@abaplint/cli': '2.120.60', '@abaplint/core': '2.120.60',
   });
   assert.deepEqual(installSpecs(desired, {}), [
-    `${RUNTIME_PKG}@1.145.0`, '@abaplint/transpiler-cli@2.13.91', 'express@^5.0.0', '@abaplint/cli@2.120.60',
+    `${RUNTIME_PKG}@1.145.0`, '@abaplint/transpiler-cli@2.13.91', 'express@^5.0.0', '@abaplint/cli@2.120.60', '@abaplint/core@2.120.60',
   ]);
-  // express recorded exact by the first install stays; a new template pin is the one spec
-  assert.deepEqual(installSpecs(desired, { [RUNTIME_PKG]: '1.145.0', '@abaplint/transpiler-cli': '2.13.91', express: '5.2.1', '@abaplint/cli': '2.120.59' }), ['@abaplint/cli@2.120.60']);
+  // express recorded exact by the first install stays; a new template pin is the pair of specs (the warm lint's core at the cli's version)
+  assert.deepEqual(installSpecs(desired, { [RUNTIME_PKG]: '1.145.0', '@abaplint/transpiler-cli': '2.13.91', express: '5.2.1', '@abaplint/cli': '2.120.59', '@abaplint/core': '2.120.59' }), ['@abaplint/cli@2.120.60', '@abaplint/core@2.120.60']);
   assert.throws(() => desiredDeps({ version: '1.145.0', meta: {} }), /names no transpiler/);
   assert.equal(desiredDeps({ version: '1.145.0', meta: META_145 })['@abaplint/cli'], undefined, 'no lint, no abaplint');
 });
@@ -431,7 +431,7 @@ test('the install: exact versions, --ignore-scripts, a lockfile, and nothing twi
   assert.equal(calls[0].cwd, fs.realpathSync(runtimeDir('1.145.0')));
   for (const flag of ['install', '--ignore-scripts', '--save-exact']) assert.ok(calls[0].args.includes(flag), flag);
   assert.deepEqual(calls[0].args.filter((a) => a.includes('@')).sort(), [
-    '@abap2ui5/node-runtime@1.145.0', '@abaplint/cli@2.120.60', '@abaplint/transpiler-cli@2.13.91', 'express@^5.0.0',
+    '@abap2ui5/node-runtime@1.145.0', '@abaplint/cli@2.120.60', '@abaplint/core@2.120.60', '@abaplint/transpiler-cli@2.13.91', 'express@^5.0.0',
   ]);
   assert.ok(fs.existsSync(path.join(runtimeDir('1.145.0'), RUNTIME_MARKER)), 'a complete install is marked');
   assert.deepEqual(installedRuntimes(), ['1.145.0']);
@@ -448,7 +448,7 @@ test('the install: exact versions, --ignore-scripts, a lockfile, and nothing twi
   const bumped = await ensureRuntime({ version: '1.145.0', meta: META_145 });
   assert.equal(bumped.ok, true, bumped.reason);
   const last = fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).pop();
-  assert.deepEqual(last.args.filter((a) => a.includes('@')), ['@abaplint/cli@2.120.61']);
+  assert.deepEqual(last.args.filter((a) => a.includes('@')), ['@abaplint/cli@2.120.61', '@abaplint/core@2.120.61']);
 
   // two callers at once: one npm after the other, never two over one node_modules
   fs.rmSync(path.join(runtimeDir('1.145.0'), RUNTIME_MARKER));

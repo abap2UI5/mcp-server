@@ -94,7 +94,8 @@ X.Y.Z; default the registry's latest - `A2UI5_MCP_OFFLINE` also stops that
 question), `A2UI5_MCP_SKIP_NETWORK_TESTS` (the three `npm test` files that
 reach the registry - npm-integration, agent-integration and migrate's
 deploy test - skip themselves), and the child-process timeouts `A2UI5_MCP_LINT_TIMEOUT_MS` /
-`A2UI5_MCP_SCOPE_TIMEOUT_MS` (default 5 min), `A2UI5_MCP_UI` (`auto`/`on`/`off`:
+`A2UI5_MCP_SCOPE_TIMEOUT_MS` (default 5 min), `A2UI5_MCP_LINT_WORKER=0`
+(every lint a fresh abaplint process instead of the warm worker, below), `A2UI5_MCP_UI` (`auto`/`on`/`off`:
 whether the app tools declare their MCP Apps screen, below),
 `A2UI5_MCP_APP_FORMAT` (`snapshot`/`adaptive-card`: the app tools' default
 answer format, below), the system mode's `A2UI5_MCP_SYSTEM_URL` / `_USER` /
@@ -242,10 +243,14 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
   `abap2ui5.transpiler` (else the package's `@abaplint/runtime` pin - the two
   are released in lockstep) and, for the lint, `@abaplint/cli` at
   app-template's pin (its lockfile, its package.json, then
-  `ABAPLINT_CLI_FALLBACK`, said in `setup_status`). Queued per directory, so
+  `ABAPLINT_CLI_FALLBACK`, said in `setup_status`) with `@abaplint/core` at
+  the SAME version beside it - what the warm lint worker parses with (the
+  CLI bundles its own core, and only the matching version may stand in for
+  it; an install from before the pair gets the core added by the next lint
+  or build). Queued per directory, so
   a lint and a build never run two npm processes over one node_modules; a
   complete directory costs two file reads. `abap2ui5-unit`, which does not
-  lint, leaves abaplint out.
+  lint, leaves both out.
 - **open-abap-core** at the release's commit: `abap2ui5.openAbapCore`, else
   `KNOWN_OPEN_ABAP_CORE` (1.145.0: b2d219df, abap2UI5's `fetch-deps.mjs` at
   tag 1.145.0 = the package's `abap2ui5.commit`), else HEAD resolved to a sha
@@ -363,7 +368,30 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
   (`frameworkLintConfig(text, npmLintTarget(...))`): the sandbox as the
   files, the release's `downport/` as the framework dependency; the config
   at the workspace root, abaplint from the runtime directory. The first lint
-  on a bare machine installs the runtime.
+  on a bare machine installs the runtime. **The lint runs warm**
+  (`lib/lint-host.mjs`, the child `lib/lint-worker.mjs`): one long-lived
+  worker keeps an `@abaplint/core` Registry with the dependency folder
+  parsed - the 2.6 s a fresh `abaplint --format json` spent mostly on the
+  framework's parse, once - and a lint since then replaces the sandbox's
+  changed files in it and runs `findIssues()` (milliseconds; the smoke
+  against the real core: 900 ms cold, 9 ms warm). The worker answers the
+  CLI's `--format json` shape exactly (lint-host serializes the issues the
+  way the CLI's Json formatter does), and `lintOnce` consumes either the
+  same way. The CLI stays the fallback, and `lintWarm` says why it ran:
+  no `@abaplint/core` of the CLI's version beside it (a framework checkout
+  usually has the CLI alone), a config the worker does not mirror (the
+  corpus' own - its `global.files` is the whole corpus; the worker mirrors
+  one `<sandbox>/**/*.*` glob of the sandbox, no exclude list, dependency
+  folders only), a worker that died, `A2UI5_MCP_LINT_WORKER=0`. The
+  dependency parse is keyed on the config, the folders' files by name,
+  size and mtime, and the core version, so a new release, a pulled checkout
+  or a changed config parse again by themselves. The timeout
+  (`A2UI5_MCP_LINT_TIMEOUT_MS`) and the client's cancel kill the worker's
+  tree and answer `timedOut` / `aborted` exactly as the CLI path does; the
+  next lint starts a fresh worker. The worker is unreferenced while idle
+  (it must not keep the server, or a test file, alive), ends with the
+  parent's IPC channel, and is closed by the shutdown. `test/lint-worker.test.mjs`
+  runs it against a fake core that counts the dependency parses.
 - **Measured** (this container, cold npm cache): install 10 s, open-abap-core
   1 s, a build 7-8 s (the transpile of the dependency graph - see above - is
   all of it), unit tests 1 s, backend start 1 s.
@@ -385,7 +413,10 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
   template asks abaplint for, the customer namespace as the naming rule) -
   the lint a real project runs, read from the template checkout or its
   mirror (`REMOTE_TOOLS.deploy_app` hydrates the template for that one
-  read). Measured with a checkout: 2.6 s for a lint, 9 s for the
+  read). Measured with a checkout: 2.6 s for a lint through the CLI (the
+  warm worker above needs `@abaplint/core` at the CLI's version in the
+  checkout's node_modules, which the framework does not install - the CLI
+  is the lint there unless somebody adds it), 9 s for the
   incremental transpile, 1.4 s for the class's unit tests. The incremental
   build has the same "nothing changed" answer as the npm one:
   `checkoutFingerprint` hashes the sandbox by content, the transpiler
