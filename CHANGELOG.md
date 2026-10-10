@@ -100,6 +100,12 @@
   it always was; the wait after an action (`settle`) is the same helper
   behind its 100 ms grace. Unit-tested on a fake clock.
 
+- **A backend that cannot bind its port says how to move it.** With the
+  framework checkout's own express server, a port already in use (3000 is
+  every dev server's default) ended `run_app`, `app_start` and
+  `backend start` with the bare `listen EADDRINUSE` line. The answer now
+  adds which port is taken and that `A2UI5_MCP_PORT` moves it, as the npm
+  backend's host already did.
 - **`validate_view` and `fix_view` refuse a `min_ui5` that is no version.**
   Any string went through and was compared as if it were a floor:
   `min_ui5: "abc"` answered "newer than the abc floor", and a typo such as
