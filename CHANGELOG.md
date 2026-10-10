@@ -268,6 +268,13 @@ What 1.0 contains:
 Merged between 2026-10-03, when the section above was prepared, and the
 release:
 
+- **The linter's 0.9 line is admitted.** The peer ranges on
+  `@abap2ui5/linter` and `@abap2ui5/linter-render` are `>=0.8.0 <0.10.0`
+  (were `<0.9.0`), so a project on linter 0.9.0 installs this server
+  without an ERESOLVE, and `npx -p @abap2ui5/mcp-server` brings 0.9.0
+  along. The exports the server imports (`.`, `./findings`, `./config`,
+  `./rule-docs` and the shapes behind them) are unchanged in 0.9.0 - the
+  linter's own downstream job runs this server's smoke against it.
 - **`abap2ui5-unit` refuses a path without classes before it installs
   anything.** A typo in the path (or a run from the wrong directory) was
   found out only after the framework install and the backend build - a

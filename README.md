@@ -83,7 +83,7 @@ is missing.
 Level 1 — `validate_view`, `fix_view` and `screenshot_view`, the tools most
 work happens at. They need the [linter](https://github.com/abap2UI5/linter),
 which the server declares as a **peer dependency** (`@abap2ui5/linter`,
-`>=0.8.0 <0.9.0` — the range this server is built against). npm 7+ installs a
+`>=0.8.0 <0.10.0` — the range this server is built against). npm 7+ installs a
 non-optional peer by itself, so the one-liner below brings the linter along
 and `validate_view`/`fix_view` work out of the box. The render gate behind
 `screenshot_view` needs the UI5 libraries and Playwright on top
