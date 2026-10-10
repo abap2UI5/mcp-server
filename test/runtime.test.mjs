@@ -601,6 +601,70 @@ test('a failed open-abap-core clone in the incremental build is a reported, logg
   }
 });
 
+// --------------------------------------------------------------- libRoots ----
+
+/* A boot asks for hundreds of UI5 modules, and the route handler read the
+ * corpus' @openui5 directory and stat'ed every package for each of them,
+ * then existsSync + statSync'ed the file. The roots are memoised on the
+ * directory (its mtime moves with an install), and a file costs one stat. */
+test('libRoots reads the @openui5 directory once per version of it; resolveLocal stats a file once', async () => {
+  const { libRoots, resolveLocal } = await import('../lib/runtime.mjs');
+  const { clearCache } = await import('../lib/cache.mjs');
+  const saved = { SAMPLES_CONTROLS_HOME: process.env.SAMPLES_CONTROLS_HOME, AI_DEMOKIT_HOME: process.env.AI_DEMOKIT_HOME };
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-libroots-'));
+  const corpus = path.join(root, 'samples-controls');
+  const ui5 = path.join(corpus, 'node_modules', '@openui5');
+  fs.mkdirSync(path.join(corpus, 'scripts'), { recursive: true });
+  fs.writeFileSync(path.join(corpus, 'scripts', 'e2e-build.mjs'), '');
+  fs.mkdirSync(path.join(ui5, 'sap.m', 'src', 'sap', 'm'), { recursive: true });
+  fs.writeFileSync(path.join(ui5, 'sap.m', 'src', 'sap', 'm', 'Button.js'), 'button');
+  fs.mkdirSync(path.join(ui5, 'no-src'), { recursive: true }); // a package without src is no root
+  const realReaddir = fs.readdirSync;
+  const realStat = fs.statSync;
+  const counts = { readdir: 0, stat: 0 };
+  fs.readdirSync = (...a) => { if (String(a[0]) === ui5) counts.readdir += 1; return realReaddir(...a); };
+  fs.statSync = (...a) => { if (String(a[0]).startsWith(ui5 + path.sep)) counts.stat += 1; return realStat(...a); };
+  try {
+    process.env.SAMPLES_CONTROLS_HOME = corpus;
+    delete process.env.AI_DEMOKIT_HOME;
+    clearCache();
+    assert.deepEqual(libRoots(), [path.join(ui5, 'sap.m', 'src')]);
+    for (let i = 0; i < 5; i += 1) libRoots();
+    assert.equal(counts.readdir, 1, 'the directory is read once, not per call');
+    counts.stat = 0;
+    const hit = resolveLocal('/resources/sap/m/Button.js');
+    assert.equal(hit.body.toString(), 'button');
+    assert.equal(hit.type, 'text/javascript');
+    assert.equal(counts.stat, 1, 'one stat for the file');
+    counts.stat = 0;
+    assert.equal(resolveLocal('/resources/sap-ui-cachebuster/sap/m/Nope.js'), null);
+    assert.equal(counts.stat, 1, 'a missing file costs one stat, not an existsSync first');
+    assert.equal(resolveLocal('/resources/sap/m'), null, 'a directory is not a file');
+    assert.equal(resolveLocal('/resources/../../package.json'), null, 'nothing outside the root');
+    assert.equal(counts.readdir, 1, 'resolveLocal reads the directory through the memo');
+    // an install adds a package: the directory's mtime moves, the memo with it
+    await new Promise((r) => setTimeout(r, 20));
+    fs.mkdirSync(path.join(ui5, 'sap.ui.core', 'src'), { recursive: true });
+    const now = realStat(ui5).mtimeMs;
+    fs.utimesSync(ui5, new Date(now + 2000), new Date(now + 2000)); // a coarse file system may not have moved it yet
+    assert.deepEqual(libRoots().sort(), [path.join(ui5, 'sap.m', 'src'), path.join(ui5, 'sap.ui.core', 'src')]);
+    assert.equal(counts.readdir, 2);
+    // no install at all: an empty list, and nothing cached for a directory that is not there
+    fs.rmSync(path.join(corpus, 'node_modules'), { recursive: true, force: true });
+    assert.deepEqual(libRoots(), []);
+    assert.equal(resolveLocal('/resources/sap/m/Button.js'), null);
+  } finally {
+    fs.readdirSync = realReaddir;
+    fs.statSync = realStat;
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    clearCache();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // ------------------------------------------------------------- getBrowser ----
 
 /* run_app's Chromium was cached for the server's life: one that crashed was

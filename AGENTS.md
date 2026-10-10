@@ -445,7 +445,11 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
   means the npm backend.
 - **`run_app` serves UI5 from the CDN** when no corpus is there to serve the
   local `@openui5` packages (`libRoots` answers an empty list; `A2UI5_MCP_OFFLINE`
-  keeps the hermetic 404) - on either backend.
+  keeps the hermetic 404) - on either backend. `libRoots` is memoised on
+  the `@openui5` directory (`fileKeyed`: an install moves its mtime), and
+  `resolveLocal` costs one non-throwing stat per root - a boot asks for
+  hundreds of modules, and each used to read the directory, stat every
+  package and then exists+stat the file (`test/runtime.test.mjs` counts).
 - **`setup_status`** is the read that says which of the above applies right
   now: per repository local / mirror / missing (with the env var or clone
   that fixes it), the sandbox and what is deployed there, the backend kind

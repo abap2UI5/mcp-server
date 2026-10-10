@@ -7,6 +7,12 @@
   request of any kind for 500 ms, up to 10 s, before the quiet-backend
   tail - and a page with a long poll or a slow CDN download spent the
   whole 10 s there on every call. The tail is the backend-quiet wait alone.
+- **The local UI5 lookup reads the `@openui5` directory once.** Every UI5
+  request of a boot (hundreds) re-read the corpus' `node_modules/@openui5`,
+  stat'ed each package's `src` and then exists+stat'ed the file;
+  `libRoots` is memoised on the directory (an install moves its mtime) and
+  a file costs one stat per root (0.07 to 0.04 ms a request on ten roots,
+  the directory read 0.04 to 0.008 ms).
 - **A build nothing changed for is not made.** `build_backend` (and the
   build stage of `verify_app` and `migrate_report { deploy: true }`)
   always stopped the backend and transpiled the sandbox - 7-8 s on the npm
