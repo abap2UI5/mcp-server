@@ -698,6 +698,40 @@ test('getBrowser launches afresh after a failed launch and after a disconnect', 
   assert.equal(second.connected, false);
 });
 
+/* Every build (beforeBuild) and every stop closed the Chromium, and the next
+ * run_app paid its launch again - the browser does not depend on the
+ * backend. A stop closes the contexts open on it (a page on a backend that
+ * is going away shows a dead app) and keeps the browser. */
+test('stopBackend closes the app contexts and keeps the browser; closeBrowser is the shutdown\'s', async () => {
+  const { getBrowser, closeBrowser, closeAppContexts, stopBackend } = await import('../lib/runtime.mjs');
+  const { EventEmitter } = await import('node:events');
+  await closeBrowser();
+  const b = new EventEmitter();
+  b.connected = true;
+  b.isConnected = () => b.connected;
+  b.close = async () => { b.connected = false; b.emit('disconnected'); };
+  const open = [];
+  b.contexts = () => open.slice();
+  const context = () => {
+    const c = { closed: false, close: async () => { c.closed = true; open.splice(open.indexOf(c), 1); } };
+    open.push(c);
+    return c;
+  };
+  let launches = 0;
+  const launch = async () => { launches += 1; return b; };
+  assert.equal(await getBrowser({ launch }), b);
+  const [c1, c2] = [context(), context()];
+  await stopBackend();
+  assert.deepEqual([c1.closed, c2.closed, open.length], [true, true, 0], 'the pages on the backend are closed');
+  assert.equal(b.connected, true, 'the browser stays');
+  assert.equal(await getBrowser({ launch }), b, 'the next run_app finds it');
+  assert.equal(launches, 1);
+  await closeAppContexts(); // nothing open: nothing to do
+  await closeBrowser();
+  assert.equal(b.connected, false);
+  await closeAppContexts(); // no browser: nothing to do, no throw
+});
+
 /* The backend binds 127.0.0.1, and its clients asked for the NAME localhost:
  * run_app's page.goto, the start's port wait (http.get's default host) and
  * the check that picks the backend's responses out of the page's. Where

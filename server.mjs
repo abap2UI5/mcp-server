@@ -84,6 +84,7 @@ import {
   backendStatus,
   startBackend,
   stopBackend,
+  closeBrowser,
   runApp,
   interactApp,
   runUnitTests,
@@ -1856,7 +1857,8 @@ function shutdown(reason) {
     try {
       await closeLintWorker().catch(() => {});
       killChildren();
-      await Promise.all([stopBackend().catch(() => {}), closeRenderers().catch(() => {})]);
+      // the browser is the shutdown's to close - a stop keeps it for the next run_app
+      await Promise.all([stopBackend().catch(() => {}), closeBrowser().catch(() => {}), closeRenderers().catch(() => {})]);
     } catch (e) {
       console.error(`abap2ui5 MCP server: shutdown (${reason}) - ${(e && e.message) || e}`);
     }

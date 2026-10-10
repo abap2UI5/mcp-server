@@ -13,6 +13,11 @@
   `libRoots` is memoised on the directory (an install moves its mtime) and
   a file costs one stat per root (0.07 to 0.04 ms a request on ten roots,
   the directory read 0.04 to 0.008 ms).
+- **A build or a `backend stop` keeps the Chromium.** `stopBackend` closed
+  the browser `run_app`/`interact_app` share, so every real build and every
+  stop cost the next call a browser launch. It now closes the contexts open
+  on the backend (their pages show a dead app) and leaves the browser to
+  the shutdown (`closeBrowser`).
 - **A build nothing changed for is not made.** `build_backend` (and the
   build stage of `verify_app` and `migrate_report { deploy: true }`)
   always stopped the backend and transpiled the sandbox - 7-8 s on the npm

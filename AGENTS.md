@@ -755,6 +755,14 @@ tail, and a page with a long poll or a slow CDN download spent the whole
 `test/interact.test.mjs` fails on a `networkidle` / `waitForLoadState` in
 `lib/runtime.mjs`.
 
+The Chromium `run_app` and `interact_app` boot in (`getBrowser`, one for the
+server's life) does not depend on the backend: `stopBackend` - every
+`backend stop`, and the `beforeBuild` of a build that really starts - closes
+the CONTEXTS open on it (`closeAppContexts`: a page on a backend that is
+going away shows a dead app) and keeps the browser, so the next call does
+not pay the launch again; `closeBrowser` is the shutdown's alone
+(`test/runtime.test.mjs` pins the split on a fake browser).
+
 `interact_app`'s hands are proven without UI5: `test/interact-browser.test.mjs`
 serves a static page with a wrapper-plus-inner input, two buttons and a
 delayed answer, and drives `performAction` through the four actions in the
