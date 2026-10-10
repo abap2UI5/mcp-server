@@ -619,8 +619,9 @@ duplicates none of their content:
   so by URL; a cached mirror or the previous build stays in place.
 - **UI5 sources** are served from the samples-controls checkout's `@openui5`
   packages when that checkout is there, so booting needs no network; without
-  it `run_app` and `interact_app` load UI5 from the CDN (and say so when it
-  cannot be reached). The built theme CSS is not in those packages — with
+  it `run_app` and `interact_app` load UI5 from the CDN (and say so at once
+  when it cannot be reached, instead of waiting out the boot timeout). The
+  built theme CSS is not in those packages — with
   network access it loads from the CDN (styled screenshots); without, apps
   render unstyled but structurally complete. `A2UI5_MCP_OFFLINE=1` forces the
   hermetic behaviour.

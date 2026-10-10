@@ -10,7 +10,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import http from 'node:http';
-import { locate, performAction, settle, trackRequests, watchUi5, ui5LoadReport } from '../lib/runtime.mjs';
+import { locate, performAction, settle, trackRequests, watchUi5, ui5LoadReport, bootOrUi5Failure } from '../lib/runtime.mjs';
 import { parseActions } from '../lib/interact.mjs';
 
 const PAGE = `<!doctype html><html><body>
@@ -194,6 +194,83 @@ test('a UI5 bootstrap or theme that does not load is named, with what to do', as
     await page.close().catch(() => {});
     await browser.close().catch(() => {});
     srv.close();
+  }
+});
+
+/* The boot wait used to run its whole timeout (60 s) after the bootstrap
+ * request had already failed within milliseconds - every run_app on a
+ * machine without the CDN cost a minute for an answer that was known at
+ * once. bootOrUi5Failure races the wait against watchUi5's fatal. */
+test('a failed UI5 bootstrap ends the boot wait at once; a failed theme or a booting page does not', async (t) => {
+  const browser = await browserOrNull();
+  if (!browser) {
+    t.skip('no Chromium for Playwright on this machine');
+    return;
+  }
+  // /core/: the bootstrap loads and "boots" (sap.ui plus four controls); /nocore/: 404 for it; /theme/: only the theme fails
+  const BOOT = 'window.sap = { ui: {} }; for (let i = 0; i < 4; i++) { const d = document.createElement("div"); d.setAttribute("data-sap-ui", ""); document.documentElement.appendChild(d); }';
+  const srv = http.createServer((req, res) => {
+    if (req.url === '/core/' || req.url === '/theme/') {
+      res.writeHead(200, { 'content-type': 'text/html' }).end('<!doctype html><html><head>'
+        + `<link rel="stylesheet" href="/${req.url === '/theme/' ? 'missing' : 'ok'}/resources/sap/m/themes/sap_horizon/library.css">`
+        + '<script src="/ok/resources/sap-ui-core.js"></script></head><body>app</body></html>');
+      return;
+    }
+    if (req.url === '/nocore/') {
+      res.writeHead(200, { 'content-type': 'text/html' }).end('<!doctype html><html><head>'
+        + '<script src="/missing/resources/sap-ui-cachebuster/sap-ui-core.js?x=1"></script></head><body>app</body></html>');
+      return;
+    }
+    if (req.url === '/ok/resources/sap-ui-core.js') {
+      res.writeHead(200, { 'content-type': 'text/javascript' }).end(BOOT);
+      return;
+    }
+    if (req.url === '/ok/resources/sap/m/themes/sap_horizon/library.css') {
+      res.writeHead(200, { 'content-type': 'text/css' }).end('body{}');
+      return;
+    }
+    res.writeHead(404).end('nope');
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${srv.address().port}`;
+  const run = async (route) => {
+    const page = await browser.newPage();
+    try {
+      const ui5 = watchUi5(page);
+      const t0 = Date.now();
+      await page.goto(`${base}/${route}/`, { waitUntil: 'domcontentloaded' });
+      let error = null;
+      try {
+        await bootOrUi5Failure(page, ui5, 60000);
+      } catch (e) {
+        error = e;
+      }
+      return { ms: Date.now() - t0, error, failed: ui5.failed };
+    } finally {
+      await page.close().catch(() => {});
+    }
+  };
+  try {
+    const missing = await run('nocore');
+    assert.ok(missing.error, 'the boot wait ended with the bootstrap failure');
+    assert.equal(missing.error.ui5Fatal, true);
+    assert.match(missing.error.message, /^the UI5 bootstrap did not load: http:\/\/127\.0\.0\.1:\d+\/missing\/resources\/sap-ui-cachebuster\/sap-ui-core\.js\?x=1 - HTTP 404$/);
+    assert.ok(missing.ms < 2000, `answered in ${missing.ms} ms, not at the 60 s timeout`);
+    assert.equal(missing.failed.length, 1, 'and recorded for the report');
+    const booted = await run('core');
+    assert.equal(booted.error, null, 'a page that boots resolves the wait');
+    assert.deepEqual(booted.failed, []);
+    const theme = await run('theme');
+    assert.equal(theme.error, null, 'a theme that fails is a note, not the end of the wait');
+    assert.deepEqual(theme.failed.map((f) => f.reason), ['HTTP 404']);
+    // an unraced fatal is never an unhandled rejection: the first page closed with its promise pending
+    await page_settle();
+  } finally {
+    await browser.close().catch(() => {});
+    srv.close();
+  }
+  async function page_settle() {
+    await new Promise((r) => setTimeout(r, 50));
   }
 });
 

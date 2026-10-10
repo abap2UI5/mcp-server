@@ -471,6 +471,19 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
   `resolveLocal` costs one non-throwing stat per root - a boot asks for
   hundreds of modules, and each used to read the directory, stat every
   package and then exists+stat the file (`test/runtime.test.mjs` counts).
+  **A boot that cannot start is not waited for**: `watchUi5` records every
+  failed `/resources/` request of the page for `ui5LoadReport` (the
+  sentence the report carries), and the moment the one for the BOOTSTRAP
+  (`sap-ui-core.js`) fails it rejects `fatal`, which `bootOrUi5Failure`
+  races against `waitForBoot` - the page used to sit out the whole 60 s
+  timeout for a 404 or a refused tunnel answered within milliseconds
+  (measured here with the CDN unreachable: 64 s to 2.8 s). A failed
+  library or theme after the bootstrap is a note, never the end of the
+  wait. And with `A2UI5_MCP_OFFLINE` set and no local packages the
+  answer is known before anything runs: `openApp` returns the report
+  without starting the backend or a browser (`early`, 2 ms;
+  `test/backend.test.mjs` pins it, `test/interact-browser.test.mjs` the
+  race on a fake page).
 - **`setup_status`** is the read that says which of the above applies right
   now: per repository local / mirror / missing (with the env var or clone
   that fixes it), the sandbox and what is deployed there, the backend kind

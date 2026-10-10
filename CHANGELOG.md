@@ -37,6 +37,13 @@
   wait for the port and the child's exit instead of sleeping 1.4 s after
   every stop, and turn the start's liveness wait and port poll down
   (`backendTiming`, a test hook, not an environment variable).
+- **`run_app` / `interact_app` answer a failed UI5 bootstrap at once.**
+  With the CDN unreachable (and no local `@openui5` packages) the boot
+  waited its whole timeout - 60 s - although the bootstrap request had
+  failed within milliseconds; the wait now ends the moment `sap-ui-core.js`
+  fails (64 s to 2.8 s measured), with the same report. Under
+  `A2UI5_MCP_OFFLINE` with nothing local to serve, the report is the
+  answer before a backend or a browser is started.
 - **A build nothing changed for is not made.** `build_backend` (and the
   build stage of `verify_app` and `migrate_report { deploy: true }`)
   always stopped the backend and transpiled the sandbox - 7-8 s on the npm

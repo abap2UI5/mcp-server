@@ -77,7 +77,7 @@ const clearKnob = (k) => {
 };
 setKnob('BOOT_MARKER', marker);
 
-const { startBackend, stopBackend, backendStatus, backendEnv, backendTiming } = await import('../lib/runtime.mjs');
+const { startBackend, stopBackend, backendStatus, backendEnv, backendTiming, runApp, interactApp, browserOpen } = await import('../lib/runtime.mjs');
 
 /* Turned down for the dozen fake backends this file starts: the liveness
  * wait (500 ms a start) and the port poll (300 ms a miss) are the start's,
@@ -323,6 +323,43 @@ test('a stop kills a backend that has not listened yet, and the start says so', 
   } finally {
     clearKnob('LISTEN_DELAY_MS');
     await stopBackend();
+  }
+});
+
+/* A2UI5_MCP_OFFLINE with no local @openui5 packages: every CDN request would
+ * be the hermetic 404, and run_app launched a browser, booted the backend
+ * and waited its whole timeout (60 s) to say so. The answer is given at
+ * once, with the report's words, before either. */
+test('run_app and interact_app answer at once offline without UI5 to serve, before any browser or backend', async () => {
+  const saved = { OFFLINE: process.env.A2UI5_MCP_OFFLINE, CORPUS: process.env.SAMPLES_CONTROLS_HOME, DEMOKIT: process.env.AI_DEMOKIT_HOME };
+  process.env.A2UI5_MCP_OFFLINE = '1';
+  process.env.SAMPLES_CONTROLS_HOME = path.join(base, 'no-corpus');
+  delete process.env.AI_DEMOKIT_HOME;
+  try {
+    const t0 = Date.now();
+    const res = await runApp({ className: 'zcl_offline', timeoutMs: 60000 });
+    assert.ok(Date.now() - t0 < 2000, `answered in ${Date.now() - t0} ms`);
+    assert.equal(res.booted, false);
+    assert.equal(res.ok, false);
+    assert.equal(res.errors.length, 1);
+    assert.match(res.errors[0], /^UI5 did not load, so no app could boot: https:\/\/sdk\.openui5\.org\/resources\/sap-ui-core\.js - would be answered HTTP 404 \(A2UI5_MCP_OFFLINE is set and there are no local @openui5 packages\), so it was not requested\./);
+    assert.match(res.errors[0], /A2UI5_MCP_OFFLINE is set, which answers every CDN request with a 404 - unset it, or run npm ci in samples-controls/);
+    assert.equal(res.base64, null);
+    assert.equal(res.screenshotPath, null);
+    assert.equal(browserOpen(), false, 'no browser launched');
+    assert.equal(backendStatus().running, false, 'no backend started');
+    const it = await interactApp({ className: 'zcl_offline', actions: [{ action: 'click', id: 'go' }] });
+    assert.equal(it.ok, false);
+    assert.deepEqual(it.actions, []);
+    assert.equal(it.notPerformed, 1);
+    assert.equal(it.errors[0], res.errors[0]);
+    assert.equal(browserOpen(), false);
+  } finally {
+    if (saved.OFFLINE === undefined) delete process.env.A2UI5_MCP_OFFLINE;
+    else process.env.A2UI5_MCP_OFFLINE = saved.OFFLINE;
+    if (saved.CORPUS === undefined) delete process.env.SAMPLES_CONTROLS_HOME;
+    else process.env.SAMPLES_CONTROLS_HOME = saved.CORPUS;
+    if (saved.DEMOKIT !== undefined) process.env.AI_DEMOKIT_HOME = saved.DEMOKIT;
   }
 });
 
