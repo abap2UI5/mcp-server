@@ -1437,6 +1437,51 @@ test('a docs checkout is found through DOCS_HOME and its probe', () => {
   }
 });
 
+/* The lowercased copies a search reads are cached with the page (one per
+ * version of the file), so a query lowercases its own terms and the page
+ * paths and nothing else - the whole corpus used to be lowercased per query,
+ * and every section twice. */
+test('readPages caches the lowercased copies and searchDocs reads them', async () => {
+  const { readPages } = await import('../lib/docs.mjs');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-docs-lower-'));
+  const saved = process.env.DOCS_HOME;
+  const realLower = String.prototype.toLowerCase;
+  try {
+    fs.mkdirSync(path.join(home, 'docs', 'cookbook'), { recursive: true });
+    fs.writeFileSync(path.join(home, 'docs', 'index.md'), '# docs');
+    for (const p of DOC_PAGES) {
+      fs.mkdirSync(path.dirname(path.join(home, 'docs', `${p.path}.md`)), { recursive: true });
+      fs.writeFileSync(path.join(home, 'docs', `${p.path}.md`), p.text);
+    }
+    process.env.DOCS_HOME = home;
+    const first = readPages();
+    const again = readPages();
+    assert.equal(first.length, DOC_PAGES.length + 1);
+    for (const page of first) {
+      assert.ok(page.lower && typeof page.lower.text === 'string', `${page.path} carries its lowercased text`);
+      assert.equal(page.lower.sections.length, page.sliced.sections.length);
+      const same = again.find((q) => q.path === page.path);
+      assert.equal(same.lower, page.lower, `${page.path}: the second read answers the cached copies`);
+    }
+    // the same answer as a search over bare pages (which lowers on the spot)
+    const bare = first.map(({ path: p, text }) => ({ path: p, text }));
+    for (const query of ['value help', 'value help suggestion', 'f4 dialog', 'docs']) {
+      assert.deepEqual(searchDocs({ query, pages: first }), searchDocs({ query, pages: bare }), query);
+    }
+    // and a search over the cached pages lowercases nothing of the corpus:
+    // the query, one path per page and the quoted section of each hit
+    let calls = 0;
+    String.prototype.toLowerCase = function () { calls += 1; return realLower.call(this); };
+    const hits = searchDocs({ query: 'value help', pages: first });
+    String.prototype.toLowerCase = realLower;
+    assert.ok(calls <= 1 + first.length + hits.length, `${calls} toLowerCase calls for ${first.length} cached pages, ${hits.length} hits`);
+  } finally {
+    String.prototype.toLowerCase = realLower;
+    if (saved === undefined) delete process.env.DOCS_HOME; else process.env.DOCS_HOME = saved;
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 /* One dangling symbolic link anywhere under docs/ threw out of the tree walk
  * (statSync on its target), and every docs_search failed with ENOENT. */
 test('a dangling symbolic link in the docs tree is skipped, not the whole search', { skip: process.platform === 'win32' && 'symbolic links need privileges there' }, () => {
