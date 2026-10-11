@@ -323,6 +323,11 @@ test('pitfalls pages its sections and every section arrives once', async () => {
     assert.equal(seen.length, total);
     assert.equal(new Set(seen).size, total, 'no section twice');
     assert.ok(seen.includes('abap:Case 40') && seen.includes('view:View case'));
+    // a miss names the catalogue it searched - "the all catalogue" is none
+    const miss = await call('pitfalls', { query: 'zzzz' });
+    assert.match(miss.hint, /^nothing in either catalogue matches "zzzz"/);
+    const viewMiss = await call('pitfalls', { query: 'zzzz', area: 'view' });
+    assert.match(viewMiss.hint, /^nothing in the view catalogue matches "zzzz"/);
   });
 });
 
@@ -379,6 +384,9 @@ test('docs_search counts every matching page and pages the rest', async () => {
     const last = await call('docs_search', { query: 'binding', offset: 20 });
     assert.equal(last.returned, 5);
     assert.equal(last.more, undefined);
+    // blanks are no query: refused like a missing one, not searched for
+    const blank = await call('docs_search', { query: '   ' }, { error: true });
+    assert.match(blank, /^pass `query`/);
   });
 });
 

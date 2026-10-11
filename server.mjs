@@ -965,7 +965,8 @@ async function handle(name, args = {}, ctx = {}) {
     case 'docs_search': {
       const miss = missingSibling('docs');
       if (miss) return miss;
-      if (!args.query) return toolError('pass `query` — keywords to search the documentation for, e.g. "value help" or "launchpad"');
+      // a blank query is no query: it searched for nothing and answered a hint about its terms
+      if (!String(args.query ?? '').trim()) return toolError('pass `query` — keywords to search the documentation for, e.g. "value help" or "launchpad"');
       const limit = boundedInt(args.limit, { name: 'limit', dflt: 10, min: 1, max: 50 });
       const offset = boundedInt(args.offset, { name: 'offset', dflt: 0, min: 0 });
       /* Every hit, then the page: `matches` said how many were RETURNED - 10
@@ -1010,7 +1011,7 @@ async function handle(name, args = {}, ctx = {}) {
       if (args.query && !total) {
         return text({
           matches: 0,
-          hint: `nothing in the ${area} catalogue matches "${args.query}" — `
+          hint: `nothing in ${area === 'all' ? 'either catalogue' : `the ${area} catalogue`} matches "${args.query}" — `
             + 'call it without a query to read the whole thing (it is meant to be read once per task)',
         });
       }

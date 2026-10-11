@@ -428,6 +428,11 @@ release:
   end answered an empty `source` under a `pastEnd` that promised the file's
   last line. The break after the last line now opens no line; the page that
   ends the file carries it, so the pages still join to the exact text.
+- **`docs_search` refuses a blank query, and a `pitfalls` miss names its
+  catalogue.** A query of spaces searched for no term and answered a hint
+  about its terms; it is now the same error as a missing `query`. A
+  `pitfalls` query that matched nothing said "nothing in the all
+  catalogue"; it says "either catalogue" for the default `area`.
 - **The answer guard shrinks in near-linear time.** `guardAnswer` (and
   `fitObject`) halved the largest array or string of an over-budget JSON
   answer in a loop that re-serialised the whole value twice per cut, and a
