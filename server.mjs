@@ -60,7 +60,8 @@ import { fixSource } from './lib/fixview.mjs';
 import { lintOptionsFor } from './lib/lintopts.mjs';
 import { withRenderFallback, renderSkippedNote, warmThenCold, validateHint, bySeverity } from './lib/validate.mjs';
 import { ANSWER_BUDGET, sizeOf, takeWithin, takeSmallestWithin, fitSnapshot, fitUnitResult, fitFindings, fitRules, fitObject, fitVerifyStages, guardAnswer, IMAGE_BUDGET } from './lib/budget.mjs';
-import { getRenderer, dropRenderer, closeRenderers, rendererLooksDead } from './lib/renderer.mjs';
+import { getRenderer, dropRenderer, closeRenderers, rendererLooksDead, renderPages } from './lib/renderer.mjs';
+import { closeLintWorker } from './lib/lint-host.mjs';
 import { TOOLS } from './lib/tools.mjs';
 import { RESOURCES, RESOURCE_TEMPLATES, GUIDE_CHAPTER_TEMPLATE, readResource } from './lib/resources.mjs';
 import { PROMPTS, getPrompt } from './lib/prompts.mjs';
@@ -83,6 +84,7 @@ import {
   backendStatus,
   startBackend,
   stopBackend,
+  closeBrowser,
   runApp,
   interactApp,
   runUnitTests,
@@ -1132,8 +1134,9 @@ async function handle(name, args = {}, ctx = {}) {
        * render gate's Chromium cold start dominates this call, and one warm
        * browser serves every call (concurrent ones queue on its page pool).
        * An older linter gets exactly the cold path it always had; a warm
-       * browser that died mid-call is dropped and the call retried cold. */
-      const GATE_POOL = { pages: 1 };
+       * browser that died mid-call is dropped and the call retried cold.
+       * The pool's size is `renderPages` (A2UI5_MCP_RENDER_PAGES, default 2). */
+      const GATE_POOL = { pages: renderPages() };
       const checkWithRender = async () => {
         const renderer = opt.render === false ? null : await getRenderer(GATE_POOL);
         if (!renderer) return check(opt);
@@ -1398,12 +1401,17 @@ async function handle(name, args = {}, ctx = {}) {
         built: true,
         mode: res.mode,
         ...(res.runtime ? { runtime: `@abap2ui5/node-runtime ${res.runtime}` } : {}),
+        /* nothing changed since the last build: nothing was transpiled, the
+         * running backend was not stopped, its app sessions still stand */
+        ...(res.unchanged ? { unchanged: true } : {}),
         /* an explicit prebuilt/transpile builds the framework alone; auto
          * goes on into the dev apps' incremental build by itself */
         ...(res.devAppsNotBuilt ? { devAppsNotBuilt: res.devAppsNotBuilt } : {}),
         next: res.devAppsNotBuilt
           ? `the deployed dev app(s) ${res.devAppsNotBuilt.join(', ')} are not in this ${res.mode} build - build_backend (mode auto or incremental) transpiles them into it; then run_app { class_name }`
-          : 'run_app { class_name } to boot and screenshot the app',
+          : res.unchanged
+            ? 'nothing changed since the last build - that build still stands and a running backend was left running; run_app { class_name } to boot and screenshot the app'
+            : 'run_app { class_name } to boot and screenshot the app',
         tail: res.tail.split('\n').slice(-5).join('\n'),
       });
     }
@@ -1847,8 +1855,10 @@ function shutdown(reason) {
   const hardStop = setTimeout(() => process.exit(0), 5000);
   shuttingDown = (async () => {
     try {
+      await closeLintWorker().catch(() => {});
       killChildren();
-      await Promise.all([stopBackend().catch(() => {}), closeRenderers().catch(() => {})]);
+      // the browser is the shutdown's to close - a stop keeps it for the next run_app
+      await Promise.all([stopBackend().catch(() => {}), closeBrowser().catch(() => {}), closeRenderers().catch(() => {})]);
     } catch (e) {
       console.error(`abap2ui5 MCP server: shutdown (${reason}) - ${(e && e.message) || e}`);
     }

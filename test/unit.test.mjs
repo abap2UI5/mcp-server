@@ -350,6 +350,23 @@ test('readCached parses once per file version and re-parses on change', () => {
   }
 });
 
+/* Two readers that parse ONE file differently must not share a cache slot:
+ * the identify check reads a catalogue as plain JSON, the examples search as
+ * entries, and the second used to be handed the first one's value. */
+test('readCached keeps a scoped parse apart from the default one', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-cache-'));
+  const file = path.join(dir, 'c.json');
+  try {
+    fs.writeFileSync(file, '{"n":1}');
+    assert.deepEqual(readCached(file, (t) => JSON.parse(t), 'plain'), { n: 1 });
+    assert.equal(readCached(file, (t) => t.length), 7, 'the default scope parses by itself');
+    assert.deepEqual(readCached(file, () => 'never', 'plain'), { n: 1 }, 'the scoped value stays cached');
+    assert.equal(readCached(file, () => 'never'), 7);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // ------------------------------------------------------- BENIGN filter ----
 
 test('the vendored BENIGN patterns match known console noise and not real errors', () => {
@@ -515,6 +532,58 @@ test('a linter checkout is identified by its exports map, not by having a packag
       'and neither is a package.json with no exports map at all');
   } finally {
     for (const d of [linter, notTheLinter, noExports]) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+/* The identify file is parsed once per version of it (lib/cache.mjs): a
+ * resolver runs several times per tool call, and samples-controls'
+ * catalogue.json is the largest file a checkout carries. A changed file is
+ * read again - the cache key is the file's own identity - and a file that is
+ * not JSON still skips the check, uncached. */
+test('identified() parses the identify file once per version of it', async () => {
+  const { resolveSamples } = await import('../lib/repos.mjs');
+  const dir = fakeCheckout({
+    'SAMPLES.md': '# samples',
+    'catalogue.json': { repository: 'abap2UI5/samples', samples: [] },
+  });
+  const catalogue = path.join(dir, 'catalogue.json');
+  const saved = { SAMPLES_HOME: process.env.SAMPLES_HOME };
+  const realRead = fs.readFileSync;
+  const reads = () => {
+    let n = 0;
+    fs.readFileSync = function (file, ...rest) {
+      if (String(file) === catalogue) n += 1;
+      return realRead.call(fs, file, ...rest);
+    };
+    return () => n;
+  };
+  try {
+    process.env.SAMPLES_HOME = dir;
+    const count = reads();
+    assert.equal(resolveSamples(), dir);
+    assert.equal(resolveSamples(), dir);
+    assert.equal(resolveSamples(), dir);
+    assert.equal(count(), 1, 'three resolves, one read of the unchanged identify file');
+
+    // a changed file is read again, and a wrong repository rules the checkout out
+    fs.writeFileSync(catalogue, JSON.stringify({ repository: 'abap2UI5/samples-stack', samples: [] }));
+    const later = new Date(Date.now() + 5000);
+    fs.utimesSync(catalogue, later, later);
+    assert.equal(resolveSamples(), null, 'the rewritten file says samples-stack: ruled out');
+    assert.equal(count(), 2, 'the changed file was parsed again');
+
+    // a file that is not JSON cannot tell, and is not cached as an answer
+    fs.writeFileSync(catalogue, 'not json');
+    const evenLater = new Date(Date.now() + 10000);
+    fs.utimesSync(catalogue, evenLater, evenLater);
+    assert.equal(resolveSamples(), dir, 'a file that is not JSON skips the check');
+    assert.equal(resolveSamples(), dir);
+    assert.equal(count(), 4, 'an unparseable file is read on every resolve, never cached');
+  } finally {
+    fs.readFileSync = realRead;
+    if (saved.SAMPLES_HOME === undefined) delete process.env.SAMPLES_HOME;
+    else process.env.SAMPLES_HOME = saved.SAMPLES_HOME;
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
@@ -1364,6 +1433,51 @@ test('a docs checkout is found through DOCS_HOME and its probe', () => {
     assert.equal(miss, 'null', 'a set env var pointing at a non-checkout must resolve to null, not fall through');
     fs.rmSync(empty, { recursive: true, force: true });
   } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+/* The lowercased copies a search reads are cached with the page (one per
+ * version of the file), so a query lowercases its own terms and the page
+ * paths and nothing else - the whole corpus used to be lowercased per query,
+ * and every section twice. */
+test('readPages caches the lowercased copies and searchDocs reads them', async () => {
+  const { readPages } = await import('../lib/docs.mjs');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-docs-lower-'));
+  const saved = process.env.DOCS_HOME;
+  const realLower = String.prototype.toLowerCase;
+  try {
+    fs.mkdirSync(path.join(home, 'docs', 'cookbook'), { recursive: true });
+    fs.writeFileSync(path.join(home, 'docs', 'index.md'), '# docs');
+    for (const p of DOC_PAGES) {
+      fs.mkdirSync(path.dirname(path.join(home, 'docs', `${p.path}.md`)), { recursive: true });
+      fs.writeFileSync(path.join(home, 'docs', `${p.path}.md`), p.text);
+    }
+    process.env.DOCS_HOME = home;
+    const first = readPages();
+    const again = readPages();
+    assert.equal(first.length, DOC_PAGES.length + 1);
+    for (const page of first) {
+      assert.ok(page.lower && typeof page.lower.text === 'string', `${page.path} carries its lowercased text`);
+      assert.equal(page.lower.sections.length, page.sliced.sections.length);
+      const same = again.find((q) => q.path === page.path);
+      assert.equal(same.lower, page.lower, `${page.path}: the second read answers the cached copies`);
+    }
+    // the same answer as a search over bare pages (which lowers on the spot)
+    const bare = first.map(({ path: p, text }) => ({ path: p, text }));
+    for (const query of ['value help', 'value help suggestion', 'f4 dialog', 'docs']) {
+      assert.deepEqual(searchDocs({ query, pages: first }), searchDocs({ query, pages: bare }), query);
+    }
+    // and a search over the cached pages lowercases nothing of the corpus:
+    // the query, one path per page and the quoted section of each hit
+    let calls = 0;
+    String.prototype.toLowerCase = function () { calls += 1; return realLower.call(this); };
+    const hits = searchDocs({ query: 'value help', pages: first });
+    String.prototype.toLowerCase = realLower;
+    assert.ok(calls <= 1 + first.length + hits.length, `${calls} toLowerCase calls for ${first.length} cached pages, ${hits.length} hits`);
+  } finally {
+    String.prototype.toLowerCase = realLower;
+    if (saved === undefined) delete process.env.DOCS_HOME; else process.env.DOCS_HOME = saved;
     fs.rmSync(home, { recursive: true, force: true });
   }
 });

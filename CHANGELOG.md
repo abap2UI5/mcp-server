@@ -2,6 +2,104 @@
 
 ## Unreleased
 
+- **`interact_app` no longer waits for `networkidle`.** After the actions
+  (each of which waits for its own roundtrip) it asked Playwright for no
+  request of any kind for 500 ms, up to 10 s, before the quiet-backend
+  tail - and a page with a long poll or a slow CDN download spent the
+  whole 10 s there on every call. The tail is the backend-quiet wait alone.
+- **The local UI5 lookup reads the `@openui5` directory once.** Every UI5
+  request of a boot (hundreds) re-read the corpus' `node_modules/@openui5`,
+  stat'ed each package's `src` and then exists+stat'ed the file;
+  `libRoots` is memoised on the directory (an install moves its mtime) and
+  a file costs one stat per root (0.07 to 0.04 ms a request on ten roots,
+  the directory read 0.04 to 0.008 ms).
+- **A build or a `backend stop` keeps the Chromium.** `stopBackend` closed
+  the browser `run_app`/`interact_app` share, so every real build and every
+  stop cost the next call a browser launch. It now closes the contexts open
+  on the backend (their pages show a dead app) and leaves the browser to
+  the shutdown (`closeBrowser`).
+- **The warm lint worker exits when idle.** With the framework parsed it
+  holds about 300 MB, and it held them for the server's life. After
+  `A2UI5_MCP_LINT_IDLE_MS` (default 10 minutes; 0 keeps it) without a
+  request it exits, and the next lint starts a fresh worker (the cold
+  parse once more); a lint that arrives while it exits starts one at once.
+- **The GitHub mirror backs off exponentially.** A failed download was
+  tried again every 3 minutes, and a machine that is offline without
+  `A2UI5_MCP_OFFLINE` stalled every mirrored tool call the 20 s fetch
+  timeout that often, for as long as the server ran. The wait now doubles
+  with each failure in a row per repository (3, 6, 12 min ... up to the
+  mirror TTL) and starts over at a success; the hydrate answer carries
+  `failures` and `backoffMs`.
+- **`npm test` in well under a minute.** The three tests that install the
+  published runtime from the registry (npm-integration's loop and sandbox
+  table, agent-integration's app tools, migrate's deploy) are opt-in under
+  `A2UI5_MCP_NETWORK_TESTS=1`, which CI sets; the backend lifecycle tests
+  wait for the port and the child's exit instead of sleeping 1.4 s after
+  every stop, and turn the start's liveness wait and port poll down
+  (`backendTiming`, a test hook, not an environment variable).
+- **`run_app` / `interact_app` answer a failed UI5 bootstrap at once.**
+  With the CDN unreachable (and no local `@openui5` packages) the boot
+  waited its whole timeout - 60 s - although the bootstrap request had
+  failed within milliseconds; the wait now ends the moment `sap-ui-core.js`
+  fails (64 s to 2.8 s measured), with the same report. Under
+  `A2UI5_MCP_OFFLINE` with nothing local to serve, the report is the
+  answer before a backend or a browser is started.
+- **UI5 from the CDN is downloaded once, not per call.** Each
+  `run_app`/`interact_app` boots in a browser context of its own, whose
+  HTTP cache is empty, so every call fetched the bootstrap and a few
+  hundred modules from sdk.openui5.org again. The CDN route now keeps its
+  successful answers in memory across calls, bounded by
+  `A2UI5_MCP_UI5_CACHE_MB` (default 64; 0 switches it off), the oldest
+  evicted first; the local `@openui5` packages and the offline 404 come
+  before it, and the per-call context isolation stays.
+- **A build nothing changed for is not made.** `build_backend` (and the
+  build stage of `verify_app` and `migrate_report { deploy: true }`)
+  always stopped the backend and transpiled the sandbox - 7-8 s on the npm
+  backend, 1-2 min on a checkout - and every app session on the backend
+  died with the stop. The build record now carries a fingerprint of what
+  the build was made from (the sandbox's files by name and bytes, the
+  release, the transpiler version, the open-abap-core commit; on a
+  checkout the transpile config and `node/downport` by name, size and
+  mtime, recorded with the `init.mjs` the transpile wrote), and a build
+  with the same fingerprint answers `built: true, unchanged: true` at once:
+  nothing transpiled, the backend not stopped, its sessions intact. The
+  stop (`beforeBuild`) moved into the build, called only when one really
+  starts; `syncDevCopies` leaves a copy that already holds the sandbox's
+  bytes untouched (its mtime is part of the fingerprint) and reports what it
+  wrote under `changed`.
+- **The lint runs warm.** Every deploy spawned a fresh `abaplint --format
+  json` over the sandbox and the whole framework, 2.6 s of which was the
+  framework's parse, the same each time. One long-lived worker
+  (`lib/lint-worker.mjs`, driven by `lib/lint-host.mjs`) now keeps an
+  `@abaplint/core` Registry with the dependency folder parsed and lints a
+  deploy by replacing the sandbox's changed files in it (900 ms cold, 9 ms
+  warm against the real core); the npm backend installs `@abaplint/core` at
+  `@abaplint/cli`'s version beside it for exactly that. The answer is the
+  CLI's JSON shape, byte for byte; the CLI runs whenever the worker cannot
+  stand in for it (no core of the CLI's version - a framework checkout -,
+  a config it does not mirror, a worker that died) and under
+  `A2UI5_MCP_LINT_WORKER=0`. The timeout and the client's cancel kill the
+  worker and read as before.
+- **Less work per call across the cheap half.** The repository resolvers'
+  identify check parses `catalogue.json` once per version of the file
+  (`readCached`, with a `scope` that keeps two parses of one file apart);
+  `examples` computes each entry's haystack, missing terms and keyword score
+  once before ranking instead of on every comparison; `docs_search` reads
+  lowercased copies cached with the page slices instead of lowercasing the
+  corpus per query; `app_list` reads the transpiled class modules once per
+  build (memoised on the output folder's `init.mjs`); `spawnWithTimeout`
+  accumulates a child's output in chunks and cuts the kept tail once at
+  close instead of flattening it per chunk (quadratic at the lint's 64 MiB
+  cap); `validate_view`'s warm render gate keeps two pages, and
+  `A2UI5_MCP_RENDER_PAGES` (1 to 8) sets it.
+- **`run_app` and `interact_app` wait for the backend to be quiet, not for
+  a fixed 600 ms.** The tail after the boot and after the action script
+  (`quietAfter` in lib/runtime.mjs, on the in-flight count `trackRequests`
+  keeps) ends once every backend request has answered and none went out
+  for 250 ms - at least 250 ms for the render to settle, at most the 600 ms
+  it always was; the wait after an action (`settle`) is the same helper
+  behind its 100 ms grace. Unit-tested on a fake clock.
+
 - **The npm backend builds on the transpiler 2.14 layout.** abap2UI5's
   next release moves to @abaplint/transpiler-cli and @abaplint/runtime
   2.14.2 (abap2UI5/abap2UI5#2864), which writes no flat output folder any

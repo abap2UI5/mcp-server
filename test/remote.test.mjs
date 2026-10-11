@@ -2,14 +2,14 @@
 // tools have when no checkout resolves and nothing is configured. Sibling-free
 // and NETWORK-FREE - every fetch here is a fake handed in through `fetchImpl`,
 // and the mirror lives in a temp dir named by A2UI5_MCP_REMOTE_DIR.
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
   hydrate, fetchRemoteFile, safeRelPath, isRemoteCheckout, readMarker, remoteRoot, remoteEnabled,
-  mirrorFresh, remoteStatus, lastHydrate, resetRemote, FAILURE_BACKOFF_MS, REMOTE_FILES, REMOTE_OPTIONAL, REMOTE_TOOLS, resourceRepos, MARKER, TEXT_MAX_BYTES,
+  mirrorFresh, remoteStatus, lastHydrate, resetRemote, FAILURE_BACKOFF_MS, failureBackoffMs, REMOTE_FILES, REMOTE_OPTIONAL, REMOTE_TOOLS, resourceRepos, MARKER, TEXT_MAX_BYTES,
 } from '../lib/remote.mjs';
 import { resolveKey, REPO_DIRS } from '../lib/repos.mjs';
 import { privateDirProblem } from '../lib/private-dir.mjs';
@@ -198,6 +198,71 @@ test('a failed download is not tried again for FAILURE_BACKOFF_MS - with or with
   lastHydrate('corpus').failedAt -= FAILURE_BACKOFF_MS;
   await hydrate('corpus', { local: null, fetchImpl: dead });
   assert.ok(dead.calls.length > n);
+}));
+
+/* A fixed 3 min meant a machine that is simply offline (without
+ * A2UI5_MCP_OFFLINE) stalled the 20 s fetch timeout every three minutes,
+ * per mirror, for as long as the server ran. The wait doubles per failure
+ * in a row, up to the TTL, and a success starts it over. On a fake clock. */
+test('the failure backoff doubles per failure in a row, stops at the TTL, and a success resets it', withEnv(async () => {
+  const MIN = 60_000;
+  assert.deepEqual([1, 2, 3, 4].map((n) => failureBackoffMs(n, 24 * 60 * MIN)), [3 * MIN, 6 * MIN, 12 * MIN, 24 * MIN]);
+  assert.equal(failureBackoffMs(9, 24 * 60 * MIN), 768 * MIN, 'doubled up to the TTL (3 * 2^8 min)');
+  assert.equal(failureBackoffMs(10, 24 * 60 * MIN), 24 * 60 * MIN, 'and never past it (1536 min would be)');
+  assert.equal(failureBackoffMs(40, 24 * 60 * MIN), 24 * 60 * MIN, 'however many failures');
+  assert.equal(failureBackoffMs(3, 5 * MIN), 5 * MIN, 'a short TTL is the cap');
+  assert.equal(failureBackoffMs(1, 1), FAILURE_BACKOFF_MS, 'and never under the first step');
+  assert.equal(failureBackoffMs(0), FAILURE_BACKOFF_MS);
+  process.env.A2UI5_MCP_REMOTE_TTL_MS = String(10 * MIN);
+  mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  try {
+    const dead = fakeFetch({});
+    const tried = () => dead.calls.length;
+    const first = await hydrate('corpus', { local: null, fetchImpl: dead });
+    assert.equal(first.failures, 1);
+    assert.equal(first.backoffMs, 3 * MIN);
+    let n = tried();
+    mock.timers.tick(3 * MIN - 1);
+    assert.equal((await hydrate('corpus', { local: null, fetchImpl: dead })).backoff, 'not retried for 1 s');
+    assert.equal(tried(), n, 'nothing tried inside the first 3 min');
+    mock.timers.tick(1);
+    const second = await hydrate('corpus', { local: null, fetchImpl: dead });
+    assert.ok(tried() > n, 'tried again after 3 min');
+    assert.deepEqual([second.failures, second.backoffMs], [2, 6 * MIN], 'the second failure in a row waits 6 min');
+    n = tried();
+    mock.timers.tick(6 * MIN - 1);
+    assert.equal((await hydrate('corpus', { local: null, fetchImpl: dead })).failures, 2);
+    assert.equal(tried(), n, 'not inside the 6 min');
+    assert.match(remoteStatus('corpus'), /not tried again for another 1 s\)$/);
+    mock.timers.tick(1);
+    const third = await hydrate('corpus', { local: null, fetchImpl: dead });
+    assert.ok(tried() > n);
+    assert.deepEqual([third.failures, third.backoffMs], [3, 10 * MIN], '12 min would be past the 10 min TTL');
+    mock.timers.tick(10 * MIN);
+    const fourth = await hydrate('corpus', { local: null, fetchImpl: dead });
+    assert.deepEqual([fourth.failures, fourth.backoffMs], [4, 10 * MIN], 'stays at the TTL');
+    // the network comes back: a success resets the run
+    const full = fakeFetch(Object.fromEntries(REMOTE_FILES.corpus.map((f) => [`/${f}`, `v1 ${f}`])));
+    mock.timers.tick(10 * MIN);
+    assert.equal((await hydrate('corpus', { local: null, fetchImpl: full })).fetched, true);
+    assert.equal(lastHydrate('corpus').failures, undefined);
+    mock.timers.tick(10 * MIN + 1); // the mirror is stale again
+    const afterSuccess = await hydrate('corpus', { local: null, fetchImpl: dead });
+    assert.equal(afterSuccess.stale, true, 'the copy stands in');
+    assert.deepEqual([afterSuccess.failures, afterSuccess.backoffMs], [1, 3 * MIN], 'back to the first step');
+    n = tried();
+    mock.timers.tick(3 * MIN - 1);
+    assert.equal((await hydrate('corpus', { local: null, fetchImpl: dead })).failures, 1);
+    assert.equal(tried(), n, 'the stale copy, without a fetch, for 3 min');
+    mock.timers.tick(1);
+    assert.equal((await hydrate('corpus', { local: null, fetchImpl: dead })).failures, 2);
+    assert.ok(tried() > n);
+    // force tries regardless of the wait, and counts
+    const forced = await hydrate('corpus', { local: null, fetchImpl: dead, force: true });
+    assert.equal(forced.failures, 3);
+  } finally {
+    mock.timers.reset();
+  }
 }));
 
 test('the template mirror follows template.json, the docs mirror the repository tree', withEnv(async () => {

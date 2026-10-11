@@ -595,6 +595,16 @@ duplicates none of their content:
   framework clone as the default. Everything it installs lives in
   `~/.abap2ui5-mcp` and is safe to delete.
 - **Port:** the backend listens on 3000 (`A2UI5_MCP_PORT` overrides).
+- **The lint:** `deploy_app` lints with app-template's abaplint config.
+  On the npm backend a long-lived worker keeps `@abaplint/core` (installed
+  beside `@abaplint/cli` at the same version) with the framework parsed, so
+  a deploy's lint takes milliseconds instead of a fresh abaplint process
+  (2-3 s, mostly the framework's parse); whenever the worker cannot stand
+  in for the CLI - a checkout without that core, a config it does not
+  mirror - the CLI runs as before. `A2UI5_MCP_LINT_WORKER=0` switches the
+  worker off; `A2UI5_MCP_LINT_IDLE_MS` (default 10 minutes, 0 = never) is
+  how long it is kept without a request - with the framework parsed it
+  holds about 300 MB - before it exits and the next lint starts a fresh one.
 - **Timeouts:** every spawned child is killed (whole process tree) when it
   exceeds its limit — lint/scope 5 min, unit tests 10 min, build (with the
   prebuilt download and the npm install) 30 min by default;
@@ -609,15 +619,20 @@ duplicates none of their content:
   so by URL; a cached mirror or the previous build stays in place.
 - **UI5 sources** are served from the samples-controls checkout's `@openui5`
   packages when that checkout is there, so booting needs no network; without
-  it `run_app` and `interact_app` load UI5 from the CDN (and say so when it
-  cannot be reached). The built theme CSS is not in those packages — with
+  it `run_app` and `interact_app` load UI5 from the CDN (and say so at once
+  when it cannot be reached, instead of waiting out the boot timeout). The
+  built theme CSS is not in those packages — with
   network access it loads from the CDN (styled screenshots); without, apps
-  render unstyled but structurally complete. `A2UI5_MCP_OFFLINE=1` forces the
-  hermetic behaviour.
+  render unstyled but structurally complete. What the CDN answers is kept
+  in memory across calls (`A2UI5_MCP_UI5_CACHE_MB`, default 64; 0 switches
+  it off), so a second boot does not download UI5 again.
+  `A2UI5_MCP_OFFLINE=1` forces the hermetic behaviour.
 - **Chromium:** `A2UI5_MCP_CHROMIUM` (or `CHROMIUM_BIN`, which the linter
   reads too) names the executable; otherwise the Playwright-managed browser
   (`npx playwright install chromium`); otherwise a system chromium.
   `setup_status` says which one it found and where it came from.
+  `validate_view`'s warm render gate keeps 2 pages of that browser, which
+  concurrent calls queue on; `A2UI5_MCP_RENDER_PAGES` (1 to 8) sets it.
 - **Screenshots:** `run_app` and `interact_app` write their PNG to
   `<tmp>/abap2ui5-mcp-screenshots/<class>-<stamp>.png` (the newest 50 are
   kept, older ones of that pattern removed) and return the path beside the

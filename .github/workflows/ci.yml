@@ -16,12 +16,13 @@
 #           the job that catches a sibling drifting away from what this server
 #           consumes.
 #
-# The backend half of the expensive loop IS covered, by `npm test` itself:
-# test/npm-integration.test.mjs installs @abap2ui5/node-runtime from the
-# registry and runs deploy, build, unit tests, boot and an HTTP roundtrip
-# (about 30 s; it skips itself without registry or GitHub access), and
-# test/agent-integration.test.mjs operates an app through the app_* tools on
-# the same published package, behind the same gate. What
+# The backend half of the expensive loop IS covered, by `npm test` under
+# A2UI5_MCP_NETWORK_TESTS=1 (set for both jobs; the registry tests are opt-in
+# so a local run stays fast): test/npm-integration.test.mjs installs
+# @abap2ui5/node-runtime from the registry and runs deploy, build, unit tests,
+# boot and an HTTP roundtrip (about 30 s; it skips itself without registry or
+# GitHub access), and test/agent-integration.test.mjs operates an app through
+# the app_* tools on the same published package, behind the same gate. What
 # neither job covers, and should be said rather than assumed: the BROWSER half
 # of run_app/interact_app and the render half of validate_view. They need UI5
 # (the CDN, or a corpus' @openui5 packages) and a Chromium; the screenshot
@@ -52,6 +53,8 @@ jobs:
       - run: npm ci
       - run: npm run check:server-json
       - run: npm test
+        env:
+          A2UI5_MCP_NETWORK_TESTS: '1'
 
   # A job of its own rather than a step in `test`: an advisory published
   # overnight is not a defect in this tree, and a red check that says `audit`
@@ -107,3 +110,5 @@ jobs:
         working-directory: mcp-server
       - run: npm test
         working-directory: mcp-server
+        env:
+          A2UI5_MCP_NETWORK_TESTS: '1'

@@ -156,6 +156,32 @@ test('spawnWithTimeout surfaces a spawn failure instead of rejecting', async () 
   assert.match(res.stderr, /ENOENT/);
 });
 
+/* The kept tail of a stream is accumulated in chunks and cut once at the end;
+ * it used to be flattened per chunk. The answer is held to the flattening's,
+ * across chunk boundaries, for a cap smaller than a chunk, larger than the
+ * whole output, and the 0 that kept everything. */
+test('outputTail answers what the per-chunk flattening answered', async () => {
+  const { outputTail } = await import('../lib/spawn.mjs');
+  const chunks = ['abc', 'defgh', '', 'ij', 'klmnopqrstu', 'v', 'wxyz0123456789'];
+  for (const keepChars of [0, 1, 2, 3, 5, 7, 8, 13, 20, 1000]) {
+    const tail = outputTail(keepChars);
+    let flat = '';
+    for (const c of chunks) {
+      tail.push(c);
+      flat = (flat + c).slice(-keepChars);
+      assert.equal(tail.text(), flat, `keepChars ${keepChars} after ${JSON.stringify(c)}`);
+    }
+  }
+});
+
+test('spawnWithTimeout keeps the last keepChars of a long output', async () => {
+  const script = 'for (let i = 0; i < 2000; i++) process.stdout.write(`line ${String(i).padStart(5, "0")}\\n`);';
+  const res = await spawnWithTimeout(process.execPath, ['-e', script], { timeoutMs: 30000, keepChars: 100 });
+  assert.equal(res.code, 0);
+  assert.equal(res.stdout.length, 100);
+  assert.ok(res.stdout.endsWith('line 01999\n'), JSON.stringify(res.stdout));
+});
+
 // ---------------------------------------------------------- buildBackend ----
 
 // fake sibling checkouts carrying just the resolver probes and a scripted
@@ -575,6 +601,160 @@ test('a failed open-abap-core clone in the incremental build is a reported, logg
   }
 });
 
+// --------------------------------------------------------------- libRoots ----
+
+/* A boot asks for hundreds of UI5 modules, and the route handler read the
+ * corpus' @openui5 directory and stat'ed every package for each of them,
+ * then existsSync + statSync'ed the file. The roots are memoised on the
+ * directory (its mtime moves with an install), and a file costs one stat. */
+test('libRoots reads the @openui5 directory once per version of it; resolveLocal stats a file once', async () => {
+  const { libRoots, resolveLocal } = await import('../lib/runtime.mjs');
+  const { clearCache } = await import('../lib/cache.mjs');
+  const saved = { SAMPLES_CONTROLS_HOME: process.env.SAMPLES_CONTROLS_HOME, AI_DEMOKIT_HOME: process.env.AI_DEMOKIT_HOME };
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-libroots-'));
+  const corpus = path.join(root, 'samples-controls');
+  const ui5 = path.join(corpus, 'node_modules', '@openui5');
+  fs.mkdirSync(path.join(corpus, 'scripts'), { recursive: true });
+  fs.writeFileSync(path.join(corpus, 'scripts', 'e2e-build.mjs'), '');
+  fs.mkdirSync(path.join(ui5, 'sap.m', 'src', 'sap', 'm'), { recursive: true });
+  fs.writeFileSync(path.join(ui5, 'sap.m', 'src', 'sap', 'm', 'Button.js'), 'button');
+  fs.mkdirSync(path.join(ui5, 'no-src'), { recursive: true }); // a package without src is no root
+  const realReaddir = fs.readdirSync;
+  const realStat = fs.statSync;
+  const counts = { readdir: 0, stat: 0 };
+  fs.readdirSync = (...a) => { if (String(a[0]) === ui5) counts.readdir += 1; return realReaddir(...a); };
+  fs.statSync = (...a) => { if (String(a[0]).startsWith(ui5 + path.sep)) counts.stat += 1; return realStat(...a); };
+  try {
+    process.env.SAMPLES_CONTROLS_HOME = corpus;
+    delete process.env.AI_DEMOKIT_HOME;
+    clearCache();
+    assert.deepEqual(libRoots(), [path.join(ui5, 'sap.m', 'src')]);
+    for (let i = 0; i < 5; i += 1) libRoots();
+    assert.equal(counts.readdir, 1, 'the directory is read once, not per call');
+    counts.stat = 0;
+    const hit = resolveLocal('/resources/sap/m/Button.js');
+    assert.equal(hit.body.toString(), 'button');
+    assert.equal(hit.type, 'text/javascript');
+    assert.equal(counts.stat, 1, 'one stat for the file');
+    counts.stat = 0;
+    assert.equal(resolveLocal('/resources/sap-ui-cachebuster/sap/m/Nope.js'), null);
+    assert.equal(counts.stat, 1, 'a missing file costs one stat, not an existsSync first');
+    assert.equal(resolveLocal('/resources/sap/m'), null, 'a directory is not a file');
+    assert.equal(resolveLocal('/resources/../../package.json'), null, 'nothing outside the root');
+    assert.equal(counts.readdir, 1, 'resolveLocal reads the directory through the memo');
+    // an install adds a package: the directory's mtime moves, the memo with it
+    await new Promise((r) => setTimeout(r, 20));
+    fs.mkdirSync(path.join(ui5, 'sap.ui.core', 'src'), { recursive: true });
+    const now = realStat(ui5).mtimeMs;
+    fs.utimesSync(ui5, new Date(now + 2000), new Date(now + 2000)); // a coarse file system may not have moved it yet
+    assert.deepEqual(libRoots().sort(), [path.join(ui5, 'sap.m', 'src'), path.join(ui5, 'sap.ui.core', 'src')]);
+    assert.equal(counts.readdir, 2);
+    // no install at all: an empty list, and nothing cached for a directory that is not there
+    fs.rmSync(path.join(corpus, 'node_modules'), { recursive: true, force: true });
+    assert.deepEqual(libRoots(), []);
+    assert.equal(resolveLocal('/resources/sap/m/Button.js'), null);
+  } finally {
+    fs.readdirSync = realReaddir;
+    fs.statSync = realStat;
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    clearCache();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// -------------------------------------------------------------- UI5 cache ----
+
+/* Every run_app / interact_app opens a context of its own, whose HTTP cache
+ * is empty, so every call downloaded UI5 from the CDN again. The route
+ * handler keeps the CDN's successful GET answers across calls, bounded by
+ * bytes, behind the local packages and the offline 404. On a fake route. */
+test('the UI5 route answers a second call from the cache: no upstream fetch; bounded, offline and local untouched', async () => {
+  const { ui5RouteHandler, ui5CacheStore, ui5CacheGet, ui5CacheStats, clearUi5Cache, ui5CacheBytes, DEFAULT_UI5_CACHE_MB } = await import('../lib/runtime.mjs');
+  assert.equal(ui5CacheBytes({}), DEFAULT_UI5_CACHE_MB * 1048576);
+  assert.equal(ui5CacheBytes({ A2UI5_MCP_UI5_CACHE_MB: '0' }), 0);
+  assert.equal(ui5CacheBytes({ A2UI5_MCP_UI5_CACHE_MB: '1.5' }), 1.5 * 1048576);
+  assert.equal(ui5CacheBytes({ A2UI5_MCP_UI5_CACHE_MB: 'big' }), DEFAULT_UI5_CACHE_MB * 1048576, 'nonsense is the default');
+  clearUi5Cache();
+  const upstream = { fetches: 0, status: 200 };
+  const fakeRoute = (url, method = 'GET') => {
+    const r = { done: null };
+    r.request = () => ({ url: () => url, method: () => method });
+    r.fulfill = async (o) => { r.done = { fulfill: o }; };
+    r.continue = async () => { r.done = { continue: true }; };
+    r.fetch = async () => {
+      upstream.fetches += 1;
+      if (upstream.status === 'throw') throw new Error('net::ERR_TUNNEL_CONNECTION_FAILED');
+      const res = {
+        status: () => upstream.status,
+        headers: () => ({ 'Content-Type': 'text/javascript', 'content-encoding': 'gzip', 'content-length': '12', 'Access-Control-Allow-Origin': '*', 'x-served-by': 'cdn' }),
+        body: async () => Buffer.from(`body of ${url}`),
+      };
+      return res;
+    };
+    return r;
+  };
+  const CORE = 'https://sdk.openui5.org/resources/sap-ui-core.js';
+  const handler = ui5RouteHandler({ env: {}, cap: 1048576 });
+  // first call: fetched upstream, served from that response, kept
+  const first = fakeRoute(CORE);
+  await handler(first);
+  assert.equal(upstream.fetches, 1);
+  assert.ok(first.done.fulfill.response, 'served from the upstream response');
+  assert.equal(ui5CacheStats().entries, 1);
+  // second call (a new context in the real thing): from the cache, no upstream fetch
+  const second = fakeRoute(CORE);
+  await handler(second);
+  assert.equal(upstream.fetches, 1, 'no second download');
+  assert.deepEqual(second.done.fulfill, {
+    status: 200,
+    headers: { 'content-type': 'text/javascript', 'access-control-allow-origin': '*' },
+    body: Buffer.from(`body of ${CORE}`),
+  }, 'the type and the CORS headers, never the transfer\'s own');
+  // a POST and a non-200 are passed through unkept
+  const post = fakeRoute(CORE + '?x', 'POST');
+  await handler(post);
+  assert.deepEqual(post.done, { continue: true });
+  upstream.status = 404;
+  const missing = fakeRoute('https://sdk.openui5.org/resources/sap/m/Nope.js');
+  await handler(missing);
+  assert.equal(upstream.fetches, 2);
+  assert.ok(missing.done.fulfill.response);
+  assert.equal(ui5CacheGet(missing.request().url()), null, 'a 404 is not kept');
+  // a fetch that fails is the browser's to report (net::ERR_...), in its words
+  upstream.status = 'throw';
+  const dead = fakeRoute('https://sdk.openui5.org/resources/sap/m/Dead.js');
+  await handler(dead);
+  assert.deepEqual(dead.done, { continue: true });
+  // offline: the hermetic 404, nothing fetched or kept; and off with a cap of 0
+  upstream.status = 200;
+  const n = upstream.fetches;
+  const offline = fakeRoute(CORE + '?offline');
+  await ui5RouteHandler({ env: { A2UI5_MCP_OFFLINE: '1' } })(offline);
+  assert.deepEqual(offline.done, { fulfill: { status: 404, body: '' } });
+  const off = fakeRoute(CORE + '?off');
+  await ui5RouteHandler({ env: {}, cap: 0 })(off);
+  assert.deepEqual(off.done, { continue: true });
+  assert.equal(upstream.fetches, n);
+  // the cap: the oldest entries go first, and an entry past the cap is not kept
+  clearUi5Cache();
+  const KB = 1024;
+  assert.equal(ui5CacheStore('a', { status: 200, body: Buffer.alloc(40 * KB) }, 100 * KB), true);
+  assert.equal(ui5CacheStore('b', { status: 200, body: Buffer.alloc(40 * KB) }, 100 * KB), true);
+  assert.equal(ui5CacheStore('c', { status: 200, body: Buffer.alloc(40 * KB) }, 100 * KB), true);
+  assert.deepEqual(ui5CacheStats(), { entries: 2, bytes: 80 * KB }, 'a went to make room');
+  assert.equal(ui5CacheGet('a'), null);
+  assert.ok(ui5CacheGet('b') && ui5CacheGet('c'));
+  assert.equal(ui5CacheStore('huge', { status: 200, body: Buffer.alloc(101 * KB) }, 100 * KB), false);
+  assert.equal(ui5CacheStore('b', { status: 200, body: Buffer.alloc(10 * KB) }, 100 * KB), true, 'a URL stored again replaces its entry');
+  assert.deepEqual(ui5CacheStats(), { entries: 2, bytes: 50 * KB });
+  assert.equal(ui5CacheStore('x', { status: 500, body: 'error' }, 100 * KB), false);
+  clearUi5Cache();
+  assert.deepEqual(ui5CacheStats(), { entries: 0, bytes: 0 });
+});
+
 // ------------------------------------------------------------- getBrowser ----
 
 /* run_app's Chromium was cached for the server's life: one that crashed was
@@ -606,6 +786,40 @@ test('getBrowser launches afresh after a failed launch and after a disconnect', 
   assert.equal(launches, 3);
   await closeBrowser();
   assert.equal(second.connected, false);
+});
+
+/* Every build (beforeBuild) and every stop closed the Chromium, and the next
+ * run_app paid its launch again - the browser does not depend on the
+ * backend. A stop closes the contexts open on it (a page on a backend that
+ * is going away shows a dead app) and keeps the browser. */
+test('stopBackend closes the app contexts and keeps the browser; closeBrowser is the shutdown\'s', async () => {
+  const { getBrowser, closeBrowser, closeAppContexts, stopBackend } = await import('../lib/runtime.mjs');
+  const { EventEmitter } = await import('node:events');
+  await closeBrowser();
+  const b = new EventEmitter();
+  b.connected = true;
+  b.isConnected = () => b.connected;
+  b.close = async () => { b.connected = false; b.emit('disconnected'); };
+  const open = [];
+  b.contexts = () => open.slice();
+  const context = () => {
+    const c = { closed: false, close: async () => { c.closed = true; open.splice(open.indexOf(c), 1); } };
+    open.push(c);
+    return c;
+  };
+  let launches = 0;
+  const launch = async () => { launches += 1; return b; };
+  assert.equal(await getBrowser({ launch }), b);
+  const [c1, c2] = [context(), context()];
+  await stopBackend();
+  assert.deepEqual([c1.closed, c2.closed, open.length], [true, true, 0], 'the pages on the backend are closed');
+  assert.equal(b.connected, true, 'the browser stays');
+  assert.equal(await getBrowser({ launch }), b, 'the next run_app finds it');
+  assert.equal(launches, 1);
+  await closeAppContexts(); // nothing open: nothing to do
+  await closeBrowser();
+  assert.equal(b.connected, false);
+  await closeAppContexts(); // no browser: nothing to do, no throw
 });
 
 /* The backend binds 127.0.0.1, and its clients asked for the NAME localhost:

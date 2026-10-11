@@ -259,6 +259,29 @@ test('build_backend on the package: the sandbox transpiled, the dev tests run al
   assert.deepEqual([...new Set(all.tests.map((x) => x.object))].sort(), ['ZCL_NPM_A', 'ZCL_NPM_B']);
   assert.ok(!fs.readdirSync(appsDir(dir)).some((f) => f.startsWith('index-mcp-')), 'the filtered runner copy is removed');
 
+  /* nothing changed since that build: no transpile, the stop the server
+   * hands in as beforeBuild is never called (the backend and the app
+   * sessions on it stand), apps/ is not swapped, and the answer says so */
+  const initBefore = fs.statSync(path.join(appsDir(dir), 'init.mjs'));
+  let stops = 0;
+  const quiet = [];
+  const same = await buildBackend({ mode: 'auto', onLine: (l) => quiet.push(l), beforeBuild: async () => { stops += 1; } });
+  assert.equal(same.ok, true, same.tail);
+  assert.equal(same.unchanged, true, 'the same sandbox against the same release is the build that is there');
+  assert.equal(same.runtime, VERSION);
+  assert.equal(stops, 0, 'the backend is not stopped for a build that does not happen');
+  assert.ok(!quiet.some((l) => /objects written to disk/.test(l)), 'the transpiler did not run');
+  assert.ok(quiet.some((l) => /nothing changed since the last build/.test(l)), quiet.join('\n'));
+  const initAfter = fs.statSync(path.join(appsDir(dir), 'init.mjs'));
+  assert.deepEqual([initAfter.mtimeMs, initAfter.ino], [initBefore.mtimeMs, initBefore.ino], 'apps/ was not swapped');
+  // a changed class is a change: the backend is stopped and the sandbox transpiled again
+  deployApp({ className: 'zcl_npm_a', source: `${APP('zcl_npm_a')}\n* edited`, testclasses: TESTS() });
+  const edited = await buildBackend({ mode: 'auto', beforeBuild: async () => { stops += 1; } });
+  assert.equal(edited.ok, true, edited.tail);
+  assert.equal(edited.unchanged, undefined, 'an edit is built');
+  assert.equal(stops, 1, 'and the backend stopped once for it');
+  assert.ok(fs.statSync(path.join(appsDir(dir), 'init.mjs')).ino !== initBefore.ino, 'a fresh apps/');
+
   // incremental is the npm build too; a removed app leaves apps/
   removeApp('zcl_npm_b');
   const again = await buildBackend({ mode: 'incremental' });
@@ -296,6 +319,28 @@ test('a folder-layout release (transpiler 2.14): apps/ flat, imports on the pack
   assert.doesNotMatch(runner, /\.\/project\//);
   assert.match(fs.readFileSync(path.join(appsDir(dir), 'init.mjs'), 'utf8'), /await import\("\.\/zcl_npm_a\.clas\.mjs"\);\nawait import\("\.\/zcl_npm_b\.clas\.mjs"\);/, 'the boot order out of init.mjs\'s ./project/ imports');
   assert.ok(builtAppClasses().some((a) => a.app === 'Z2UI5_CL_POP_FAKE' && a.source === 'framework'), 'app_list finds the framework\'s apps in output/project/');
+  /* and answers the next call from memory: the class modules are read once
+   * per build (apps/init.mjs is the key), not on every app_list */
+  const before = builtAppClasses();
+  const realRead = fs.readFileSync;
+  const modulesRead = [];
+  fs.readFileSync = function (file, ...rest) {
+    if (String(file).endsWith('.clas.mjs')) modulesRead.push(String(file));
+    return realRead.call(fs, file, ...rest);
+  };
+  try {
+    assert.deepEqual(builtAppClasses(), before);
+    assert.deepEqual(modulesRead, [], 'an unchanged build reads no class module');
+    // a new build (apps/ swapped in whole: a new init.mjs) is scanned again
+    const init = path.join(appsDir(dir), 'init.mjs');
+    const later = new Date(Date.now() + 5000);
+    fs.utimesSync(init, later, later);
+    assert.deepEqual(builtAppClasses(), before);
+    assert.ok(modulesRead.some((f) => f.endsWith('zcl_npm_a.clas.mjs')), 'a changed build record re-reads the dev modules');
+    assert.ok(!modulesRead.some((f) => f.includes(`${path.sep}output${path.sep}`)), 'and only them - the package\'s output/ did not change');
+  } finally {
+    fs.readFileSync = realRead;
+  }
 
   const one = await runUnitTests({ className: 'zcl_npm_a' });
   assert.equal(one.ok, true, JSON.stringify(one));
@@ -502,19 +547,26 @@ test('setup_status names the lint\'s abaplint install the next build makes', wit
   const markerFile = path.join(dir, '.abap2ui5-mcp-runtime.json');
   const marker = JSON.parse(fs.readFileSync(markerFile, 'utf8'));
   delete marker.dependencies['@abaplint/cli'];
+  delete marker.dependencies['@abaplint/core'];
   fs.writeFileSync(markerFile, JSON.stringify(marker));
   fs.rmSync(path.join(dir, 'node_modules', '@abaplint', 'cli'), { recursive: true });
   let steps = setupStatus().backend.npm.nextBuild;
-  assert.ok(steps.some((s) => /install the lint's @abaplint\/cli 2\.120\.60/.test(s)), steps.join('\n'));
+  assert.ok(steps.some((s) => /install the lint's @abaplint\/cli and @abaplint\/core 2\.120\.60/.test(s)), steps.join('\n'));
   // installed, but app-template pins another version now
   marker.dependencies['@abaplint/cli'] = '2.120.59';
+  marker.dependencies['@abaplint/core'] = '2.120.59';
   fs.writeFileSync(markerFile, JSON.stringify(marker));
   steps = setupStatus().backend.npm.nextBuild;
-  assert.ok(steps.some((s) => /@abaplint\/cli 2\.120\.60.*2\.120\.59 is installed/.test(s)), steps.join('\n'));
+  assert.ok(steps.some((s) => /@abaplint\/cli and @abaplint\/core 2\.120\.60.*2\.120\.59 is installed/.test(s)), steps.join('\n'));
   // at the pin: nothing to install
   marker.dependencies['@abaplint/cli'] = '2.120.60';
+  marker.dependencies['@abaplint/core'] = '2.120.60';
   fs.writeFileSync(markerFile, JSON.stringify(marker));
   assert.ok(!setupStatus().backend.npm.nextBuild.some((s) => /abaplint/.test(s)));
+  // the warm worker's core alone missing (an install from before it): installed with the cli
+  delete marker.dependencies['@abaplint/core'];
+  fs.writeFileSync(markerFile, JSON.stringify(marker));
+  assert.ok(setupStatus().backend.npm.nextBuild.some((s) => /@abaplint\/core 2\.120\.60/.test(s)));
 }));
 
 /* run_unit_tests answered a class whose class_setup threw - no test line,

@@ -66,7 +66,11 @@ a maintainer setting a machine up does not look.
 Also: `A2UI5_MCP_PORT`, `A2UI5_MCP_OFFLINE=1` (no CDN fallback for UI5, and
 no GitHub mirror either), `A2UI5_MCP_CHROMIUM` (browser path; `CHROMIUM_BIN`,
 the linter's variable, is read after it — then Playwright's managed browser,
-then a system binary, `resolveChromium`),
+then a system binary, `resolveChromium`), `A2UI5_MCP_UI5_CACHE_MB` (how many MB of the
+CDN's UI5 answers `run_app`/`interact_app` keep in memory across calls;
+default 64, 0 = off, `ui5RouteHandler` below), `A2UI5_MCP_RENDER_PAGES` (the
+pages of `validate_view`'s warm render gate - concurrent calls queue on the
+pool; default 2, 1 to 8, `renderPages` in `lib/renderer.mjs`),
 `A2UI5_MCP_SCREENSHOT_DIR` (where `run_app` and `interact_app` write their
 PNGs - the newest `SHOTS_KEPT` (50) of them, older ones of that name
 pattern are removed after each picture, no other file ever is; default
@@ -89,10 +93,15 @@ because the backend hands its paths to children running elsewhere), `A2UI5_MCP_B
 framework clone as the answer to "no checkout", the default before the npm
 backend), `A2UI5_MCP_RUNTIME_VERSION` (the `@abap2ui5/node-runtime` release,
 X.Y.Z; default the registry's latest - `A2UI5_MCP_OFFLINE` also stops that
-question), `A2UI5_MCP_SKIP_NETWORK_TESTS` (the three `npm test` files that
+question), `A2UI5_MCP_NETWORK_TESTS=1` (the three `npm test` files that
 reach the registry - npm-integration, agent-integration and migrate's
-deploy test - skip themselves), and the child-process timeouts `A2UI5_MCP_LINT_TIMEOUT_MS` /
-`A2UI5_MCP_SCOPE_TIMEOUT_MS` (default 5 min), `A2UI5_MCP_UI` (`auto`/`on`/`off`:
+deploy test - run; they are opt-in, half a minute and more each, and
+`ci.yml` sets it) and `A2UI5_MCP_SKIP_NETWORK_TESTS` (they skip even then),
+and the child-process timeouts `A2UI5_MCP_LINT_TIMEOUT_MS` /
+`A2UI5_MCP_SCOPE_TIMEOUT_MS` (default 5 min), `A2UI5_MCP_LINT_WORKER=0`
+(every lint a fresh abaplint process instead of the warm worker, below),
+`A2UI5_MCP_LINT_IDLE_MS` (how long that worker is kept without a request
+before it exits; default 10 min, 0 = never), `A2UI5_MCP_UI` (`auto`/`on`/`off`:
 whether the app tools declare their MCP Apps screen, below),
 `A2UI5_MCP_APP_FORMAT` (`snapshot`/`adaptive-card`: the app tools' default
 answer format, below), the system mode's `A2UI5_MCP_SYSTEM_URL` / `_USER` /
@@ -156,7 +165,17 @@ Four rules, each pinned by `test/remote.test.mjs` and
   them are written, then the marker. A failure is the answer for
   `FAILURE_BACKOFF_MS` (3 min) before the download is tried again - every
   tool call hydrates, and a network that swallows requests cost each call
-  the 20 s fetch timeout once more.
+  the 20 s fetch timeout once more - and the wait doubles with each
+  failure in a row, per key (`failureBackoffMs`: 3, 6, 12 min ... capped
+  at the mirror TTL, never under the first step), a success starting it
+  over. The backoff used to be a fixed 3 min, deliberately: a user who
+  fixes the network should see the mirror within minutes. That still holds
+  for the first hour (3 + 6 + 12 + 24 min), but a machine that is simply
+  offline without `A2UI5_MCP_OFFLINE` stalled the 20 s timeout every
+  three minutes per mirror for a whole day of calls; now it stalls a
+  handful of times and then once per TTL. `hydrate`'s answer carries
+  `failures` and `backoffMs`, `remoteStatus` says when the next try is,
+  and `test/remote.test.mjs` walks the doubling on a fake clock.
 
 `read_example` is the tool that made the mirror worth having: an `examples`
 hit is a class name and a path, and an agent without the checkout could not
@@ -240,10 +259,14 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
   `abap2ui5.transpiler` (else the package's `@abaplint/runtime` pin - the two
   are released in lockstep) and, for the lint, `@abaplint/cli` at
   app-template's pin (its lockfile, its package.json, then
-  `ABAPLINT_CLI_FALLBACK`, said in `setup_status`). Queued per directory, so
+  `ABAPLINT_CLI_FALLBACK`, said in `setup_status`) with `@abaplint/core` at
+  the SAME version beside it - what the warm lint worker parses with (the
+  CLI bundles its own core, and only the matching version may stand in for
+  it; an install from before the pair gets the core added by the next lint
+  or build). Queued per directory, so
   a lint and a build never run two npm processes over one node_modules; a
   complete directory costs two file reads. `abap2ui5-unit`, which does not
-  lint, leaves abaplint out.
+  lint, leaves both out.
 - **open-abap-core** at the release's commit: `abap2ui5.openAbapCore`, else
   `KNOWN_OPEN_ABAP_CORE` (1.145.0: b2d219df, abap2UI5's `fetch-deps.mjs` at
   tag 1.145.0 = the package's `abap2ui5.commit`), else HEAD resolved to a sha
@@ -283,7 +306,17 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
   (`initialize()`, `accelerate()` when the release exports it, the dev
   modules in the transpiler's own order) that the runner and the host both
   import. apps/ is swapped in whole, which is what prunes a removed app, and
-  a failed build leaves the last good one served.
+  a failed build leaves the last good one served. **A build nothing changed
+  for is not made**: the record `apps/.abap2ui5-mcp-build.json` carries a
+  `fingerprint` (`buildFingerprint`: the sandbox's file names and bytes,
+  the release, the transpiler version, the open-abap-core commit), and a
+  `buildApps` whose fingerprint is the record's answers `unchanged: true`
+  without transpiling - and without the stop: `beforeBuild` (the server's
+  `stopBackend`) is called by the build only when one really starts, so the
+  backend and the app tools' sessions on it (their generation is its pid)
+  stay. `build_backend`, and `verify_app`'s and `migrate_report`'s build
+  stages through it, say `unchanged: true` then; a changed byte, a new
+  release or another transpiler builds as before.
 - **Database tables** (TABL, with their DTELs): a sandbox may hold them -
   `migrate_report { deploy: true }` brings abap-cloud-gui's variant and
   layout stores (`z2ui5_cgui_var`, `z2ui5_cgui_lay`, the default stores
@@ -351,7 +384,37 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
   (`frameworkLintConfig(text, npmLintTarget(...))`): the sandbox as the
   files, the release's `downport/` as the framework dependency; the config
   at the workspace root, abaplint from the runtime directory. The first lint
-  on a bare machine installs the runtime.
+  on a bare machine installs the runtime. **The lint runs warm**
+  (`lib/lint-host.mjs`, the child `lib/lint-worker.mjs`): one long-lived
+  worker keeps an `@abaplint/core` Registry with the dependency folder
+  parsed - the 2.6 s a fresh `abaplint --format json` spent mostly on the
+  framework's parse, once - and a lint since then replaces the sandbox's
+  changed files in it and runs `findIssues()` (milliseconds; the smoke
+  against the real core: 900 ms cold, 9 ms warm). The worker answers the
+  CLI's `--format json` shape exactly (lint-host serializes the issues the
+  way the CLI's Json formatter does), and `lintOnce` consumes either the
+  same way. The CLI stays the fallback, and `lintWarm` says why it ran:
+  no `@abaplint/core` of the CLI's version beside it (a framework checkout
+  usually has the CLI alone), a config the worker does not mirror (the
+  corpus' own - its `global.files` is the whole corpus; the worker mirrors
+  one `<sandbox>/**/*.*` glob of the sandbox, no exclude list, dependency
+  folders only), a worker that died, `A2UI5_MCP_LINT_WORKER=0`. The
+  dependency parse is keyed on the config, the folders' files by name,
+  size and mtime, and the core version, so a new release, a pulled checkout
+  or a changed config parse again by themselves. The timeout
+  (`A2UI5_MCP_LINT_TIMEOUT_MS`) and the client's cancel kill the worker's
+  tree and answer `timedOut` / `aborted` exactly as the CLI path does; the
+  next lint starts a fresh worker. The worker is unreferenced while idle
+  (it must not keep the server, or a test file, alive), ends with the
+  parent's IPC channel, and is closed by the shutdown. **It is retired
+  when idle**: a parsed framework is about 300 MB of RSS, and the worker
+  held it for the server's life - after `A2UI5_MCP_LINT_IDLE_MS` (default
+  10 min; 0 keeps it) without a request it is asked to exit (killed a
+  second later if it does not), the slot cleared first so a lint that
+  arrives while it exits starts a fresh worker at once and pays the cold
+  parse once more (`retireWorker`). `test/lint-worker.test.mjs`
+  runs it against a fake core that counts the dependency parses, the
+  retirement on a fake clock.
 - **Measured** (this container, cold npm cache): install 10 s, open-abap-core
   1 s, a build 7-8 s (the transpile of the dependency graph - see above - is
   all of it), unit tests 1 s, backend start 1 s.
@@ -373,8 +436,22 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
   template asks abaplint for, the customer namespace as the naming rule) -
   the lint a real project runs, read from the template checkout or its
   mirror (`REMOTE_TOOLS.deploy_app` hydrates the template for that one
-  read). Measured with a checkout: 2.6 s for a lint, 9 s for the
-  incremental transpile, 1.4 s for the class's unit tests. Deploying into
+  read). Measured with a checkout: 2.6 s for a lint through the CLI (the
+  warm worker above needs `@abaplint/core` at the CLI's version in the
+  checkout's node_modules, which the framework does not install - the CLI
+  is the lint there unless somebody adds it), 9 s for the
+  incremental transpile, 1.4 s for the class's unit tests. The incremental
+  build has the same "nothing changed" answer as the npm one:
+  `checkoutFingerprint` hashes the sandbox by content, the transpiler
+  version, the transpile config and `node/downport` by every file's name,
+  size and mtime (the dev copies among them - `syncDevCopies` leaves a copy
+  that already holds the sandbox's bytes untouched for exactly this reason,
+  and reports what it wrote under `changed`), and a successful transpile
+  records it in `node/output/.abap2ui5-mcp-build.json` with the `init.mjs`
+  it wrote (mtime and size: a prebuilt download or a full build replaces
+  that file, and the record is stale however the fingerprint reads). A
+  build whose fingerprint and init.mjs are the record's answers
+  `unchanged: true`, transpiles nothing and leaves the backend running. Deploying into
   the framework sandbox is also what found that `deploy_app`'s sidecar had
   no BOM: the template config enables `xml_bom`, the corpus config never
   asked.
@@ -391,7 +468,39 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
   means the npm backend.
 - **`run_app` serves UI5 from the CDN** when no corpus is there to serve the
   local `@openui5` packages (`libRoots` answers an empty list; `A2UI5_MCP_OFFLINE`
-  keeps the hermetic 404) - on either backend.
+  keeps the hermetic 404) - on either backend. `libRoots` is memoised on
+  the `@openui5` directory (`fileKeyed`: an install moves its mtime), and
+  `resolveLocal` costs one non-throwing stat per root - a boot asks for
+  hundreds of modules, and each used to read the directory, stat every
+  package and then exists+stat the file (`test/runtime.test.mjs` counts).
+  **What the CDN answered is kept across calls** (`ui5RouteHandler`): each
+  call opens a browser context of its own - nothing of one page may reach
+  the next - and a fresh context has an empty HTTP cache, so every
+  run_app downloaded the bootstrap and a few hundred modules (several MB)
+  again. The route for `sdk.openui5.org` serves the local packages first,
+  then the hermetic 404 of `A2UI5_MCP_OFFLINE`, then a GET it has seen
+  from a module-level map keyed by URL, else fetches the miss itself
+  (`route.fetch`), keeps a 200 and answers from that response; a fetch
+  that fails is handed back to the browser (`route.continue`) so the
+  report carries its `net::ERR_...`. Bounded by `A2UI5_MCP_UI5_CACHE_MB`
+  (default 64; 0 = off), the oldest entries evicted first; a cached
+  answer carries the content type and the `access-control-*` headers only
+  (the body kept is the decoded one). `test/runtime.test.mjs` drives the
+  handler on a fake route and counts the upstream fetches: the second call
+  makes none.
+  **A boot that cannot start is not waited for**: `watchUi5` records every
+  failed `/resources/` request of the page for `ui5LoadReport` (the
+  sentence the report carries), and the moment the one for the BOOTSTRAP
+  (`sap-ui-core.js`) fails it rejects `fatal`, which `bootOrUi5Failure`
+  races against `waitForBoot` - the page used to sit out the whole 60 s
+  timeout for a 404 or a refused tunnel answered within milliseconds
+  (measured here with the CDN unreachable: 64 s to 2.8 s). A failed
+  library or theme after the bootstrap is a note, never the end of the
+  wait. And with `A2UI5_MCP_OFFLINE` set and no local packages the
+  answer is known before anything runs: `openApp` returns the report
+  without starting the backend or a browser (`early`, 2 ms;
+  `test/backend.test.mjs` pins it, `test/interact-browser.test.mjs` the
+  race on a fake page).
 - **`setup_status`** is the read that says which of the above applies right
   now: per repository local / mirror / missing (with the env var or clone
   that fixes it), the sandbox and what is deployed there, the backend kind
@@ -681,6 +790,30 @@ contract: the action's inputs (`paths`, `framework`, `backend`,
 collector, the argument parser, the backend choice, the summary,
 `filteredRunner`).
 
+The browser tools wait on the backend, not on the clock: `trackRequests`
+counts the backend requests of the page in flight, `quietAfter` (the one
+wait helper, with an injectable clock for its test in
+`test/interact.test.mjs`) ends a wait once they are all answered and none
+went out for 250 ms - the tail after the boot and after an action script
+takes at least 250 ms (late render errors surface then) and at most the
+600 ms it used to be fixed at; an action's `settle` is the same helper
+behind a 100 ms grace for the roundtrip the event starts. A busy backend is
+given the ceiling and reported as still busy, never waited on longer.
+Nothing waits on the NETWORK: `interact_app` used to ask Playwright for
+`networkidle` (no request of any kind for 500 ms, up to 10 s) before that
+tail, and a page with a long poll or a slow CDN download spent the whole
+10 s there on every call, after its actions had long settled -
+`test/interact.test.mjs` fails on a `networkidle` / `waitForLoadState` in
+`lib/runtime.mjs`.
+
+The Chromium `run_app` and `interact_app` boot in (`getBrowser`, one for the
+server's life) does not depend on the backend: `stopBackend` - every
+`backend stop`, and the `beforeBuild` of a build that really starts - closes
+the CONTEXTS open on it (`closeAppContexts`: a page on a backend that is
+going away shows a dead app) and keeps the browser, so the next call does
+not pay the launch again; `closeBrowser` is the shutdown's alone
+(`test/runtime.test.mjs` pins the split on a fake browser).
+
 `interact_app`'s hands are proven without UI5: `test/interact-browser.test.mjs`
 serves a static page with a wrapper-plus-inner input, two buttons and a
 delayed answer, and drives `performAction` through the four actions in the
@@ -930,6 +1063,10 @@ agent) find these artifacts in a dirty sibling worktree, mcp-server caused them:
   ever removed — once their sandbox source is gone, by the next incremental
   build or by `remove_app` — because the framework keeps its own sources in
   that directory too.
+- `<abap2UI5>/node/output/.abap2ui5-mcp-build.json` — the last incremental
+  build's record (its fingerprint and the `init.mjs` it wrote), what the
+  next `build_backend` compares against to answer `unchanged`. Deleting it
+  costs one transpile.
 - `<abap2UI5>/node/zz_dev/*.clas.abap` + `.clas.xml` (+ `.clas.testclasses.abap`)
   — the dev sandbox when there is no corpus checkout (gitignored there;
   `remove_app` deletes them again), and `<abap2UI5>/.abaplint-mcp-dev.jsonc`
@@ -1038,10 +1175,12 @@ build/unit/status - against the fake workspace of `test/helpers/npm-fixture.mjs`
 compress detected, and the server's gates over stdio; ports 4431-4432) and
 `test/npm-integration.test.mjs` - the test that reaches the network: the
 whole loop against the published package (install, open-abap-core, lint,
-build, unit tests, boot, GET and a POST roundtrip), about 30 s cold, skipped
-by itself when the registry or GitHub cannot be reached and with
-`A2UI5_MCP_SKIP_NETWORK_TESTS=1`. `test/agent-integration.test.mjs` sits
-behind the same gate: it builds `test/fixtures/agent-app/zcl_agent_mcp`
+build, unit tests, boot, GET and a POST roundtrip), about 30 s cold, OPT-IN
+under `A2UI5_MCP_NETWORK_TESTS=1` (`ci.yml` sets it for both jobs, so the
+coverage stays; a local `npm test` is the sibling-free suite in well under
+a minute) and skipped by itself even then when the registry or GitHub
+cannot be reached and with `A2UI5_MCP_SKIP_NETWORK_TESTS=1`.
+`test/agent-integration.test.mjs` sits behind the same gate: it builds `test/fixtures/agent-app/zcl_agent_mcp`
 (a form, a table with a row action and selection, a popup) and
 `zcl_agent_mcp_pick` (a SelectDialog value help, a MessagePopover) on the published
 package and operates it through `lib/appclient.mjs` and through the server's
@@ -1081,7 +1220,9 @@ framework); the incremental path is ~1–2 minutes. On the npm backend the
 first build installs the release (about 10 s here with a cold npm cache) and
 fetches open-abap-core (about 1 s), and every build is 7-8 s - the transpile
 of the dependency graph the transpiler cannot be told to skip; its output is
-thrown away, but the parse and the type check of the dev apps need it. Set tool/agent timeouts
+thrown away, but the parse and the type check of the dev apps need it. A
+build nothing changed for (the fingerprint above) costs a read of the
+sandbox and answers `unchanged: true` at once, on either backend. Set tool/agent timeouts
 accordingly — a "hung" build is usually just a slow transpile. Every spawned
 child carries its own hard timeout (`spawnWithTimeout` in `lib/spawn.mjs`
 kills the whole process tree on expiry): lint and scope default to 5 minutes
