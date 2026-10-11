@@ -433,6 +433,13 @@ release:
   about its terms; it is now the same error as a missing `query`. A
   `pitfalls` query that matched nothing said "nothing in the all
   catalogue"; it says "either catalogue" for the default `area`.
+- **A failed warm lint no longer leaves stale findings behind.** The lint
+  worker applies a deploy's changes to its registry one file at a time; when
+  one of them threw, the changes before it stayed in the registry while the
+  worker's record of the sandbox did not move, so a file changed back to
+  what that record held was never updated again and its old findings came
+  back on every later lint. A failed update now drops the registry, and the
+  next lint parses afresh (the failed one runs the CLI, as before).
 - **The answer guard shrinks in near-linear time.** `guardAnswer` (and
   `fitObject`) halved the largest array or string of an over-budget JSON
   answer in a loop that re-serialised the whole value twice per cut, and a

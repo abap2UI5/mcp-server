@@ -18,7 +18,7 @@ import { fakeRelease, fakeTemplate, APP, VERSION } from './helpers/npm-fixture.m
  * text carries FINDME is one finding; DEPS answers how many dependency files
  * the registry holds and how often addDependencies ran in this process;
  * SLOW blocks findIssues for seconds (the timeout test); CRASH exits the
- * worker (the fallback test). */
+ * worker (the fallback test); THROW makes addFile throw (the reset test). */
 const FAKE_CORE = `
 let adds = 0;
 class Position { constructor(r, c) { this.r = r; this.c = c; } getRow() { return this.r; } getCol() { return this.c; } }
@@ -33,7 +33,7 @@ class Registry {
   static abaplintVersion() { return '9.9.9'; }
   constructor(cfg) { this.cfg = cfg; this.deps = new Map(); this.files = new Map(); }
   addDependencies(files) { adds += 1; for (const f of files) this.deps.set(f.getFilename(), f.getRaw()); }
-  addFile(f) { this.files.set(f.getFilename(), f.getRaw()); }
+  addFile(f) { if (f.getRaw().includes('THROW')) throw new Error('addFile refused ' + f.getFilename()); this.files.set(f.getFilename(), f.getRaw()); }
   updateFile(f) { this.files.set(f.getFilename(), f.getRaw()); }
   removeFile(f) { this.files.delete(f.getFilename()); }
   parse() {}
@@ -131,6 +131,33 @@ test('the worker parses the dependency folder once and answers the CLI\'s JSON s
     const other = await lint(base, { config: { ...CONFIG, syntax: { ...CONFIG.syntax, version: 'v702' } } });
     assert.equal(other.reparsed, true);
     assert.equal((await lint(base, { config: { ...CONFIG, syntax: { ...CONFIG.syntax, version: 'v702' } } })).reparsed, false);
+  } finally {
+    await closeLintWorker();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('a sandbox update that throws half way leaves no stale file in the registry for the next lint', async () => {
+  const base = fakeRoot();
+  try {
+    await closeLintWorker();
+    const a = path.join(base, 'sandbox', 'zcl_a.clas.abap');
+    const b = path.join(base, 'sandbox', 'zcl_b.clas.abap');
+    fs.writeFileSync(a, 'CLASS zcl_a.');
+    assert.deepEqual((await lint(base)).issues, []);
+    // zcl_a is updated in the registry, then adding zcl_b throws: this lint is the CLI's
+    fs.writeFileSync(a, 'CLASS zcl_a. FINDME');
+    fs.writeFileSync(b, 'CLASS zcl_b. THROW');
+    const failed = await lint(base);
+    assert.equal(failed.used, false);
+    assert.match(failed.why, /addFile refused/);
+    // zcl_a is back to what the worker last recorded: still linted as it is now
+    fs.writeFileSync(a, 'CLASS zcl_a.');
+    fs.writeFileSync(b, 'CLASS zcl_b.');
+    const after = await lint(base);
+    assert.equal(after.used, true, after.why);
+    assert.equal(after.reparsed, true, 'the registry is rebuilt after a failed update');
+    assert.deepEqual(after.issues, [], 'the FINDME zcl_a no longer has is not reported');
   } finally {
     await closeLintWorker();
     fs.rmSync(base, { recursive: true, force: true });
