@@ -48,6 +48,13 @@ test('an explicit min_ui5 beats the config floor; config fills what was not said
   });
 });
 
+test('a min_ui5 that is no version is refused by name', async () => {
+  for (const bad of ['abc', '1,120', '1.71x', ' 1.71', 'latest']) {
+    await assert.rejects(lintOptionsFor({ min_ui5: bad }), /min_ui5 must be a UI5 version/,
+      `'${bad}' used to be compared as if it were a floor`);
+  }
+});
+
 test('forceNoRender pins render off against a config that turns it on', { skip }, async () => {
   await withProject({ render: true }, async (dir) => {
     const { opt } = await lintOptionsFor({ project_dir: dir }, { forceNoRender: true });
