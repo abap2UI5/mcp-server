@@ -237,6 +237,32 @@ test('read_example pages a long sample by lines and every line arrives once', as
   });
 });
 
+/* Every abapGit file ends with a line break, and split('\n') read one
+ * more, empty, line after it: `lines` counted one too many, and a
+ * from_line past the end answered that empty line under a pastEnd that
+ * promised the file's last one. */
+test('a file ending with a line break: the right count, its real last line past the end, the exact text', async () => {
+  await withServer(async (call, base) => {
+    const src = 'CLASS z2ui5_cl_smp_app_901 DEFINITION PUBLIC.\nENDCLASS.\n\nCLASS z2ui5_cl_smp_app_901 IMPLEMENTATION.\nENDCLASS.\n';
+    fs.mkdirSync(path.join(base, 'samples', 'src', '01'), { recursive: true });
+    fs.writeFileSync(path.join(base, 'samples', 'src', '01', 'z2ui5_cl_smp_app_901.clas.abap'), src);
+    const whole = await call('read_example', { repo: 'samples', path: 'src/01/z2ui5_cl_smp_app_901.clas.abap' });
+    assert.equal(whole.lines, 5);
+    assert.equal(whole.source, src, 'the whole file, its final line break included');
+    const past = await call('read_example', { repo: 'samples', path: 'src/01/z2ui5_cl_smp_app_901.clas.abap', from_line: 99 });
+    assert.equal(past.pastEnd, 'from_line 99 is past the end - the file has 5 lines; its last line is shown');
+    assert.equal(past.source, 'ENDCLASS.\n');
+
+    const dir = path.join(base, 'samples-controls', 'src', 'zz_dev');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'zcl_eol_app.clas.abap'), src.replace(/z2ui5_cl_smp_app_901/g, 'zcl_eol_app'));
+    const app = await call('read_app', { class_name: 'zcl_eol_app', from_line: 99 });
+    assert.equal(app.pastEnd, 'from_line 99 is past the end - the file has 5 lines; its last line is shown');
+    assert.deepEqual(app.lines, { from: 5, to: 5, total: 5 });
+    assert.equal(app.source, 'ENDCLASS.\n');
+  });
+});
+
 test('build_log fits its lines into one answer and says how to read the rest', async () => {
   await withServer(async (call, base) => {
     const lines = Array.from({ length: 2000 }, (_, i) => `line ${String(i).padStart(4, '0')} "${'x'.repeat(110)}"`);
@@ -297,6 +323,11 @@ test('pitfalls pages its sections and every section arrives once', async () => {
     assert.equal(seen.length, total);
     assert.equal(new Set(seen).size, total, 'no section twice');
     assert.ok(seen.includes('abap:Case 40') && seen.includes('view:View case'));
+    // a miss names the catalogue it searched - "the all catalogue" is none
+    const miss = await call('pitfalls', { query: 'zzzz' });
+    assert.match(miss.hint, /^nothing in either catalogue matches "zzzz"/);
+    const viewMiss = await call('pitfalls', { query: 'zzzz', area: 'view' });
+    assert.match(viewMiss.hint, /^nothing in the view catalogue matches "zzzz"/);
   });
 });
 
@@ -353,6 +384,9 @@ test('docs_search counts every matching page and pages the rest', async () => {
     const last = await call('docs_search', { query: 'binding', offset: 20 });
     assert.equal(last.returned, 5);
     assert.equal(last.more, undefined);
+    // blanks are no query: refused like a missing one, not searched for
+    const blank = await call('docs_search', { query: '   ' }, { error: true });
+    assert.match(blank, /^pass `query`/);
   });
 });
 

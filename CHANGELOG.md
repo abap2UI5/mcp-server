@@ -422,6 +422,17 @@ release:
   unit test catches a runtime exception. Proven on the package built from
   abap2UI5/abap2UI5#2864 (transpiler 2.14.2) and on the published 1.146.0
   (2.13.93).
+- **`read_example` and `read_app` count a file's lines right.** Every
+  abapGit file ends with a line break, and the line after it was counted as
+  a line of its own: `lines` was one too many, and a `from_line` past the
+  end answered an empty `source` under a `pastEnd` that promised the file's
+  last line. The break after the last line now opens no line; the page that
+  ends the file carries it, so the pages still join to the exact text.
+- **`docs_search` refuses a blank query, and a `pitfalls` miss names its
+  catalogue.** A query of spaces searched for no term and answered a hint
+  about its terms; it is now the same error as a missing `query`. A
+  `pitfalls` query that matched nothing said "nothing in the all
+  catalogue"; it says "either catalogue" for the default `area`.
 - **The answer guard shrinks in near-linear time.** `guardAnswer` (and
   `fitObject`) halved the largest array or string of an over-budget JSON
   answer in a loop that re-serialised the whole value twice per cut, and a
