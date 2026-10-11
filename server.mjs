@@ -462,6 +462,20 @@ async function deployMigrated(res, ctx) {
   return stop(null);
 }
 
+/* A source as its lines, and whether it ended with a line break. The break
+ * after the last line opens no line of its own: split('\n') answered one
+ * more, empty, line for every file that ends with a newline - which every
+ * abapGit file does - so `lines` counted one too many, and a from_line past
+ * the end showed that empty "last line" under a pastEnd that promised the
+ * file's last line. `eol` puts the break back on the page that ends the file,
+ * so the pages still join to the file's exact text. */
+function sourceLines(text) {
+  const all = String(text).split('\n');
+  const eol = all.length > 1 && all[all.length - 1] === '';
+  if (eol) all.pop();
+  return { all, eol };
+}
+
 /* The whole lines from `fromLine` (1-based) that fit one answer: `{ from,
  * to, page }`. Each line is measured as the answer writes it - JSON-escaped,
  * its line break a `\n` - not raw: a class of JSON string templates went
@@ -640,7 +654,7 @@ async function handle(name, args = {}, ctx = {}) {
       /* Paged by whole lines, like read_app: samples-controls' largest
        * ports answered 84,000 characters, past what a client accepts as
        * one answer - and the agent then read none of it. */
-      const all = fs.readFileSync(at, 'utf8').split('\n');
+      const { all, eol } = sourceLines(fs.readFileSync(at, 'utf8'));
       const page = linePage(all, args.from_line);
       const paged = page.from > 1 || page.to < all.length;
       const pastEnd = page.pastEnd ? { pastEnd: page.pastEnd } : {};
@@ -651,7 +665,7 @@ async function handle(name, args = {}, ctx = {}) {
         lines: all.length,
         ...(paged ? { page: { from_line: page.from, to_line: page.to }, ...(page.to < all.length ? { nextPage: { from_line: page.to + 1 } } : {}) } : {}),
         ...pastEnd,
-        source: page.page.join('\n'),
+        source: page.page.join('\n') + (eol && page.to === all.length ? '\n' : ''),
         next: 'take the pattern, not the file: an app of your own keeps its own class name, package and events (app_guide chapter 2)',
       });
     }
@@ -1086,12 +1100,12 @@ async function handle(name, args = {}, ctx = {}) {
        * deploys them) answered 107,304 characters. Each line is measured
        * as the answer writes it - JSON-escaped, its line break a `\n` - not
        * raw: a class of JSON string templates went out ~35% over. */
-      const all = res.source.split('\n');
+      const { all, eol } = sourceLines(res.source);
       const { from, to, page, pastEnd } = linePage(all, args.from_line);
       const paged = from > 1 || to < all.length;
       return text({
         ...res,
-        source: page.join('\n'),
+        source: page.join('\n') + (eol && to === all.length ? '\n' : ''),
         ...(paged ? { lines: { from, to, total: all.length }, ...(to < all.length ? { next: { from_line: to + 1 } } : {}) } : {}),
         ...(pastEnd ? { pastEnd } : {}),
         ...(res.staleInBackend
