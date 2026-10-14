@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **The npm backend transpiles the dev apps WITH the framework, from the
+  `@abap2ui5/node-runtime` release after 1.147.0 on.** Such a release
+  records its express-icf-shim commit (`abap2ui5.expressIcfShim`) and
+  writes an entry point into a host's own output; `build_backend` then
+  transpiles the sandbox and the package's `downport/` in one run, with
+  open-abap-core and express-icf-shim at the recorded commits, into
+  `apps/` - a complete runtime of its own, served through its `host.mjs`,
+  its unit-test runner and its `init.mjs` (which creates every table)
+  unchanged. Nothing is rewritten and nothing of the package's `output/` is
+  loaded: one transpile, one transpiler version, as the transpiler's
+  maintainer asked for in abaplint/transpiler#1999 (closed). A changed
+  build takes about 16 s instead of 8; a build nothing changed for is still
+  not made. Releases up to 1.147.0 build as before. The build result gains
+  `full` and `expressIcfShim`, the build record `layout: "full"`.
+
 ## 1.0.0 - 2026-10-11
 
 **1.0 is a stability promise, not a feature release.** This server's tool

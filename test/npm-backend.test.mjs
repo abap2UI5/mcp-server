@@ -14,7 +14,8 @@ import { fileURLToPath } from 'node:url';
 import {
   readRuntimePin, compareVersions, openAbapCoreOf, transpilerOf, expressRangeOf, cliVersionOf, desiredDeps,
   installSpecs, devObjects, devOutputFiles, rewriteImports, strayImports, bootOrder, appsInitSource, transpileConfig, tableSchema, transparentTables,
-  flatRunner, outputLayout, outputModules,
+  flatRunner, outputLayout, outputModules, expressIcfShimOf, fullTranspileOf, fullTranspileConfig, appsBootSource,
+  OPEN_ABAP_CORE_URL, EXPRESS_ICF_SHIM_URL,
   selectRuntimeVersion, installedRuntimes, currentRuntimeVersion, ensureRuntime, ensureOpenAbapCore, buildApps, npmView,
   prepareRuntime,
   runtimeDir, runtimeBase, npmSandboxDir, openAbapCoreDir, appsDir, downportDir, npmCommand, resetNpmBackend,
@@ -803,3 +804,42 @@ test('the build refuses a sandbox that holds a symbolic link out of it', withWor
   assert.match(res.reason, /zcl_leak\.clas\.abap, which resolve\(s\), through a symbolic link, outside it/);
   assert.ok(!fs.existsSync(appsDir(dir)), 'nothing was built');
 }));
+
+test('the full transpile: a release that records the shim and carries the entry writer, its config, its boot', () => {
+  const SHA = 'c1fc36026f69eb0ae7d1830d304e1e1923e9a9a3';
+  assert.equal(expressIcfShimOf({ abap2ui5: { expressIcfShim: SHA } }), SHA);
+  assert.equal(expressIcfShimOf({ abap2ui5: { expressIcfShim: 'HEAD' } }), null, 'not a commit: no full transpile');
+  assert.equal(expressIcfShimOf({ abap2ui5: {} }), null);
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-full-'));
+  try {
+    const meta = { abap2ui5: { expressIcfShim: SHA } };
+    assert.equal(fullTranspileOf(dir, meta), false, 'nothing installed');
+    const pkg = path.join(dir, 'node_modules', '@abap2ui5', 'node-runtime');
+    fs.mkdirSync(path.join(pkg, 'srv'), { recursive: true });
+    fs.mkdirSync(path.join(pkg, 'setup'), { recursive: true });
+    fs.writeFileSync(path.join(pkg, 'srv', 'framework.mjs'), '');
+    assert.equal(fullTranspileOf(dir, meta), false, 'no setup/transpile.mjs');
+    fs.writeFileSync(path.join(pkg, 'setup', 'transpile.mjs'), '');
+    assert.equal(fullTranspileOf(dir, meta), true);
+    assert.equal(fullTranspileOf(dir, { abap2ui5: {} }), false, 'no shim commit recorded');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  const config = fullTranspileConfig({ inputDir: '/ws/sandbox', outputDir: '/ws/runtime/9.9.9/.apps-1-x', downportRel: 'node_modules/@abap2ui5/node-runtime/downport', coreRel: '../../open-abap-core/aaa', shimRel: '../../express-icf-shim/bbb', setupRel: '../node_modules/@abap2ui5/node-runtime/setup/setup.mjs' });
+  assert.deepEqual(config.input_folder, ['/ws/sandbox', 'node_modules/@abap2ui5/node-runtime/downport']);
+  // by url: the url names the library's folder in the output, which the package's host.mjs imports from
+  assert.deepEqual(config.libs, [{ url: OPEN_ABAP_CORE_URL, folder: '../../open-abap-core/aaa' }, { url: EXPRESS_ICF_SHIM_URL, folder: '../../express-icf-shim/bbb' }]);
+  assert.equal(config.write_unit_tests, true);
+  assert.deepEqual(config.options.setup, { filename: '../node_modules/@abap2ui5/node-runtime/setup/setup.mjs', preFunction: 'setup' });
+  assert.deepEqual(config.options.populateTables, { reposrc: false });
+  assert.deepEqual(config.input_filter, transpileConfig({ inputDir: '/ws/sandbox', outputDir: 'o', downportRel: 'd', coreRel: 'c' }).input_filter, 'the same object types as the other build');
+
+  const boot = appsBootSource(['zcl_a.clas.mjs'], { version: '9.9.9' });
+  assert.match(boot, /^import \* as runtime from "\.\/host\.mjs";$/m, 'the output\'s own entry point, never the package\'s');
+  assert.doesNotMatch(boot, /from "@abap2ui5\/node-runtime"/);
+  assert.match(boot, /await runtime\.initialize\(\);/);
+  assert.match(boot, /export const devModules = \["zcl_a\.clas\.mjs"\];/);
+  assert.doesNotMatch(boot, /await import\(/, 'the output\'s init.mjs registers every class itself');
+});

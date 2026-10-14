@@ -66,6 +66,24 @@ test('run_app\'s backend on the package: the host boots it, accelerates it and s
   assert.equal(backendStatus().running, false);
 });
 
+test('a full build is served through its own host.mjs - the package\'s entry point is never imported', async () => {
+  fs.rmSync(workspace, { recursive: true, force: true });
+  fakeRelease(workspace, { layout: 'full', accelerate: true });
+  deployApp({ className: 'zcl_hosted', source: APP('zcl_hosted') });
+  const built = await buildBackend({ mode: 'auto' });
+  assert.equal(built.ok, true, built.tail);
+  try {
+    const st = await startBackend();
+    assert.match(st.host, /transpiled with the dev apps into apps\/; 1 dev module\(s\) \(zcl_hosted\.clas\.mjs\); accelerate: on/);
+    const page = JSON.parse((await get()).body);
+    assert.ok(page.classes.includes('ZCL_HOSTED'), `the dev app is registered: ${page.classes}`);
+    assert.ok(page.classes.includes('Z2UI5_IF_APP'), 'the framework, out of the same output');
+    assert.equal(page.accelerated, true);
+  } finally {
+    await stopBackend();
+  }
+});
+
 test('a release that exports compress gets it in front of the handler; one without accelerate boots without', async () => {
   fs.rmSync(workspace, { recursive: true, force: true });
   fakeRelease(workspace, { accelerate: false, compress: true });
