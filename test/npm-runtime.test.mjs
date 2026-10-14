@@ -350,6 +350,43 @@ test('a folder-layout release (transpiler 2.14): apps/ flat, imports on the pack
   assert.match(two.failed.error, /assert_equals failed/);
 }, { release: { layout: 'folders' } }));
 
+/* A release that transpiles the dev apps WITH the framework (the release
+ * after 1.147.0, abaplint/transpiler#1999): apps/ is a runtime of its own -
+ * the sandbox and the package's downport/ in project/, both libraries in
+ * folders of their own, nothing rewritten - with the package's host.mjs
+ * written into it and boot.mjs beside it; the runner runs from there. */
+test('a full-transpile release: apps/ is a runtime of its own, nothing rewritten, the runner on it, an unchanged build not made', withNpm(async (t, { dir }) => {
+  deployApp({ className: 'zcl_npm_a', source: APP('zcl_npm_a'), testclasses: TESTS() });
+  deployApp({ className: 'zcl_npm_b', source: APP('zcl_npm_b'), testclasses: TESTS(true) });
+  const lines = [];
+  const res = await buildBackend({ mode: 'auto', onLine: (l) => lines.push(l) });
+  assert.equal(res.ok, true, `${res.tail}\n${lines.join('\n')}`);
+  assert.ok(lines.some((l) => /WITH @abap2ui5\/node-runtime 1\.145\.0's framework, open-abap-core and express-icf-shim/.test(l)), lines.join('\n'));
+  const apps = appsDir(dir);
+  const top = fs.readdirSync(apps).sort();
+  for (const f of ['boot.mjs', 'claim.mjs', 'express-icf-shim', 'host.mjs', 'index.mjs', 'init.mjs', 'open-abap-core', 'project']) assert.ok(top.includes(f), `${f} in apps/: ${top}`);
+  const project = fs.readdirSync(path.join(apps, 'project'));
+  assert.ok(project.includes('zcl_npm_a.clas.mjs') && project.includes('z2ui5_if_app.intf.mjs'), `the dev apps and the framework together: ${project}`);
+  const mod = fs.readFileSync(path.join(apps, 'project', 'zcl_npm_a.clas.mjs'), 'utf8');
+  assert.match(mod, /await import\("\.\.\/open-abap-core\/cx_root\.clas\.mjs"\)/, 'the transpiler\'s import, as written');
+  assert.doesNotMatch(mod, /@abap2ui5\/node-runtime/, 'nothing pointed at the package');
+  assert.match(fs.readFileSync(path.join(apps, 'boot.mjs'), 'utf8'), /import \* as runtime from "\.\/host\.mjs";[\s\S]*export const devModules = \["zcl_npm_a\.clas\.mjs","zcl_npm_b\.clas\.mjs"\]/);
+  const record = JSON.parse(fs.readFileSync(path.join(apps, '.abap2ui5-mcp-build.json'), 'utf8'));
+  assert.equal(record.layout, 'full');
+  assert.deepEqual(record.testObjects, ['ZCL_NPM_A', 'ZCL_NPM_B']);
+
+  const one = await runUnitTests({ className: 'zcl_npm_a' });
+  assert.equal(one.ok, true, JSON.stringify(one));
+  assert.deepEqual(one.tests.map((x) => `${x.object} ${x.localClass}->${x.method}`), ['ZCL_NPM_A ltcl->check']);
+  const two = await runUnitTests({ className: 'zcl_npm_b' });
+  assert.equal(two.ok, false);
+  assert.match(two.failed.error, /assert_equals failed/);
+
+  const again = await buildBackend({ mode: 'auto' });
+  assert.equal(again.ok, true, again.tail);
+  assert.match(again.tail, /nothing changed since the last build/);
+}, { release: { layout: 'full' } }));
+
 test('a transpiler whose layout is not the package\'s fails the build, named, and leaves apps/ alone', withNpm(async () => {
   deployApp({ className: 'zcl_npm_a', source: APP('zcl_npm_a') });
   const res = await buildBackend({ mode: 'auto' });

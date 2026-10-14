@@ -236,6 +236,8 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
     runtime/current.json the release the last build used
     runtime/registry.json the registry's latest, as last asked
     open-abap-core/<sha>/ the standard library, by commit
+    express-icf-shim/<sha>/ the ICF layer, by commit - a full-transpile
+                         release only (below)
     sandbox/             the dev apps' sources - outside runtime/, so a new
                          release keeps every deployed app
 
@@ -317,6 +319,41 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
   stay. `build_backend`, and `verify_app`'s and `migrate_report`'s build
   stages through it, say `unchanged: true` then; a changed byte, a new
   release or another transpiler builds as before.
+- **The full transpile** (`buildFull`, a release after 1.147.0 -
+  `fullTranspileOf`: it records `abap2ui5.expressIcfShim` and carries
+  `setup/transpile.mjs` and `srv/framework.mjs`): the build above is turned
+  round, the way the transpiler's maintainer asked for on
+  abaplint/transpiler#1999 - one transpile of everything, one transpiler
+  version, nothing rewritten. `fullTranspileConfig` puts the sandbox and the
+  package's `downport/` in as the two inputs (they land in `project/`
+  together), open-abap-core and express-icf-shim (`ensureGitLibrary`, at
+  `<workspace>/express-icf-shim/<sha>`) in as libraries BY URL - the url
+  names a library's folder in the output, and the package's host imports
+  `express-icf-shim/` by that name - with the package's own build options
+  and the database hook at its path from the output folder. The staging is
+  the new `apps/` itself: a complete runtime in the folder layout, the
+  transpiler's `init.mjs` (every class and every table - `tableSchema` only
+  checks the sandbox's are there) and its runner `index.mjs` as written
+  (downport/ carries no test classes, the libraries' tests are never
+  listed). The package's own `writeEntry( )` (setup/transpile.mjs, run as a
+  child: `node -e` with the output as `argv[1]`, because the module runs as
+  its bin when `argv[1]` is the file itself) writes `host.mjs` - the
+  package's exports bound to this output - and its `claim.mjs`; the build
+  adds `boot.mjs` (`appsBootSource`: `initialize()` and `accelerate()` from
+  `./host.mjs`, the dev modules for the banner). The host imports
+  `apps/boot.mjs` and takes the exports from `apps/host.mjs` and NEVER the
+  package's entry point, which would boot the package's `output/` as a
+  second runtime (the package refuses that before it happens). The record
+  says `layout: "full"`, and `app_list` then names dev and framework apps
+  by the sandbox's names (`builtAppClasses`), as on a checkout - `apps/`
+  holds the framework too. The fingerprint carries the shim's commit.
+  Measured against the packed release (`npm-package` of abap2UI5#2916): a
+  changed build 16 s with both fetches (the transpile of the framework's
+  thousand objects is most of it, against 8 s for the old one), an
+  unchanged one 0 s, the unit run, the app start and the framework's CATCH
+  of the app's own exception as before. `test/npm-runtime.test.mjs` and
+  `test/npm-host.test.mjs` run it on the fixture's `layout: 'full'`
+  release, whose entry point throws when imported.
 - **Database tables** (TABL, with their DTELs): a sandbox may hold them -
   `migrate_report { deploy: true }` brings abap-cloud-gui's variant and
   layout stores (`z2ui5_cgui_var`, `z2ui5_cgui_lay`, the default stores
@@ -380,6 +417,9 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
   `npm_config_*`, credential helpers, the proxy).
 - **Unit tests**: `apps/index.mjs`, filtered like the checkout's runner.
   NEVER the package's `output/index.mjs` - that is the framework's own suite.
+  A full build's runner imports the output's own `init.mjs`, not
+  `apps/boot.mjs`: the tests run on the transpiled runtime without the
+  host's seams, as the framework's own suite does on a checkout.
 - **Lint**: app-template's `abaplint.jsonc` retargeted
   (`frameworkLintConfig(text, npmLintTarget(...))`): the sandbox as the
   files, the release's `downport/` as the framework dependency; the config

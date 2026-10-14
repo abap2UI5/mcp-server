@@ -12,6 +12,7 @@ import { createRequire } from 'node:module';
 
 export const VERSION = '1.145.0';
 export const CORE_SHA = 'b2d219df61f8c077df7a038bc43d168f9f280fbf';
+export const SHIM_SHA = 'c1fc36026f69eb0ae7d1830d304e1e1923e9a9a3';
 
 /* The package: initialize() counts boots, accelerate() is optional,
  * serve() answers every request with the classes registered at that moment
@@ -51,8 +52,19 @@ const fs = require('fs'); const path = require('path');
 const cfg = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 for (const lib of cfg.libs) if (!fs.existsSync(path.join(process.cwd(), lib.folder))) { console.log('Error: Library folder not found: ' + lib.folder); process.exit(1); }
 const filter = new RegExp(cfg.input_filter[0], 'i');
-const files = fs.existsSync(cfg.input_folder) ? fs.readdirSync(cfg.input_folder).filter((f) => filter.test(path.join(cfg.input_folder, f))) : [];
-const text = (f) => fs.readFileSync(path.join(cfg.input_folder, f), 'utf8');
+/* one input folder, or (a full transpile) several - every file below each,
+ * as the real one reads them */
+const FULL = Array.isArray(cfg.input_folder);
+const where = new Map();
+const walk = (dir) => {
+  for (const e of fs.existsSync(dir) ? fs.readdirSync(dir, { withFileTypes: true }) : []) {
+    if (e.isDirectory()) { if (FULL) walk(path.join(dir, e.name)); continue; }
+    if (filter.test(path.join(dir, e.name))) where.set(e.name, dir);
+  }
+};
+for (const f of [].concat(cfg.input_folder)) walk(path.isAbsolute(f) ? f : path.join(process.cwd(), f));
+const files = [...where.keys()];
+const text = (f) => fs.readFileSync(path.join(where.get(f), f), 'utf8');
 const bad = files.find((f) => text(f).includes('BROKEN'));
 if (bad) { console.log('Error: check_syntax, Method "nope" not found, methodCallChain, ' + bad + ':2'); process.exit(1); }
 const objs = [...new Set(files.map((f) => f.split('.').slice(0, 2).join('.').toLowerCase()))];
@@ -62,9 +74,14 @@ const lib = FOLDERS ? path.join(top, 'open-abap-core') : top;
 const libRef = FOLDERS ? '../open-abap-core/' : './';
 const own = FOLDERS ? './project/' : './';
 for (const d of [out, lib]) fs.mkdirSync(d, { recursive: true });
+if (FULL) {
+  // the shim, a library of a full transpile, in the folder its url names
+  fs.mkdirSync(path.join(top, 'express-icf-shim'), { recursive: true });
+  fs.writeFileSync(path.join(top, 'express-icf-shim', 'cl_express_icf_shim.clas.mjs'), 'export class cl_express_icf_shim {}');
+}
 fs.writeFileSync(path.join(lib, 'cx_root.clas.mjs'), 'export class cx_root {}');
 fs.writeFileSync(path.join(lib, 'z2ui5_cl_util.clas.mjs'), 'export class z2ui5_cl_util {}');
-let init = 'await initializeABAP();\\nawait import("' + (FOLDERS ? './open-abap-core/' : './') + 'cx_root.clas.mjs");\\n';
+let init = 'globalThis.abap = globalThis.abap || { Classes: {} };\\nexport async function initializeABAP() {}\\nawait initializeABAP();\\nawait import("' + (FOLDERS ? './open-abap-core/' : './') + 'cx_root.clas.mjs");\\n';
 let data = '';
 for (const o of objs) {
   const name = o.split('.')[0];
@@ -155,13 +172,36 @@ function write(file, text) {
   fs.writeFileSync(file, text);
 }
 
+/* The package's setup/transpile.mjs of a release that transpiles a host's
+ * classes WITH the framework, reduced to what the build relies on: its
+ * writeEntry( ) writes host.mjs - the fake host above, booted on the
+ * output's own init.mjs - and claim.mjs into an output. Run as its own bin
+ * (argv[1] the file itself) it exits 3: the build must import it, not run it. */
+const fullTranspileModule = (host) => `import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url))) {
+  console.error('setup/transpile.mjs ran as its bin');
+  process.exit(3);
+}
+export function writeEntry(dir) {
+  fs.writeFileSync(path.join(dir, 'claim.mjs'), '// claim\\n');
+  fs.writeFileSync(path.join(dir, 'host.mjs'), ${JSON.stringify(host)});
+}
+`;
+
 /** Install the fake release into `<workspace>/runtime/<version>` and fetch
  *  the fake open-abap-core; returns the runtime directory. `layout` is the
- *  package's output/ ('flat' before transpiler 2.14, 'folders' from it on),
+ *  package's output/ ('flat' before transpiler 2.14, 'folders' from it on,
+ *  'full' for a folders release that transpiles the dev apps WITH the
+ *  framework - setup/transpile.mjs, srv/framework.mjs, the shim's commit
+ *  recorded and fetched, and an entry point that throws when imported),
  *  `transpilerLayout` what its transpiler writes (the same, unless a test
  *  wants the two apart), `ownApps` whether a folder-layout package ships
  *  setup/own-apps.mjs. */
-export function fakeRelease(workspace, { version = VERSION, accelerate = true, compress = false, lyingServe = false, layout = 'flat', transpilerLayout = layout, ownApps = true } = {}) {
+export function fakeRelease(workspace, { version = VERSION, accelerate = true, compress = false, lyingServe = false, layout = 'flat', transpilerLayout = layout === 'full' ? 'folders' : layout, ownApps = true } = {}) {
+  const full = layout === 'full';
+  if (full) layout = 'folders';
   const dir = path.join(workspace, 'runtime', version);
   const nm = path.join(dir, 'node_modules');
   const pkg = path.join(nm, '@abap2ui5', 'node-runtime');
@@ -172,9 +212,20 @@ export function fakeRelease(workspace, { version = VERSION, accelerate = true, c
     type: 'module',
     exports: { '.': './srv/host.mjs', './package.json': './package.json', './output/*': './output/*', './downport/*': './downport/*' },
     peerDependencies: { express: '^5.0.0' },
-    abap2ui5: { transpiler: '2.13.91' },
+    abap2ui5: { transpiler: '2.13.91', ...(full ? { expressIcfShim: SHIM_SHA } : {}) },
   }));
-  write(path.join(pkg, 'srv', 'host.mjs'), hostModule({ accelerate, compress, lyingServe }));
+  if (full) {
+    // the package's own entry point boots the package's output/: never in a full build
+    write(path.join(pkg, 'srv', 'host.mjs'), "throw new Error(\"the package's entry point was imported next to a full build's host.mjs\");\n");
+    write(path.join(pkg, 'srv', 'framework.mjs'), 'export function bindFramework() {}\n');
+    write(path.join(pkg, 'setup', 'transpile.mjs'), fullTranspileModule(`import "./claim.mjs";\nimport "./init.mjs";\nglobalThis.__full = true;\n${hostModule({ accelerate, compress, lyingServe })}`));
+    write(path.join(pkg, 'setup', 'setup.mjs'), 'export async function setup() {}\n');
+    const shim = path.join(workspace, 'express-icf-shim', SHIM_SHA);
+    write(path.join(shim, 'src', 'cl_express_icf_shim.clas.abap'), '* fake\n');
+    write(path.join(shim, '.abap2ui5-mcp-sha'), `${SHIM_SHA}\n`);
+  } else {
+    write(path.join(pkg, 'srv', 'host.mjs'), hostModule({ accelerate, compress, lyingServe }));
+  }
   write(path.join(pkg, 'output', 'init.mjs'), 'export async function initializeABAP() {}\n');
   const cxRoot = 'export class cx_root {}\nglobalThis.abap = globalThis.abap || { Classes: {} };\nglobalThis.abap.Classes.CX_ROOT = cx_root;\n';
   if (layout === 'folders') {
