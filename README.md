@@ -72,7 +72,11 @@ one install for both:
 Releases from 1.0.0 on are also listed in the
 [official MCP Registry](https://github.com/modelcontextprotocol/registry) as
 `io.github.abap2UI5/mcp-server` ([`server.json`](server.json)), for clients
-that install from the registry.
+that install from the registry. The same command is what the
+[Smithery](https://smithery.ai) ([`smithery.yaml`](smithery.yaml)) and
+[Glama](https://glama.ai/mcp/servers) ([`glama.json`](glama.json))
+directories list: one npm package, one version, whichever catalogue a client
+reads.
 
 That is level 1 below: `validate_view` and `fix_view` work out of the box,
 and `setup_status` tells the agent what else works on this machine and what

@@ -70,11 +70,87 @@ mcp-publisher login github     # device flow in the browser
 mcp-publisher publish          # reads ./server.json
 ```
 
+(The full by-hand sequence, with the install and the validation that precede
+these two commands, is under
+[Listing a release in the registries](#listing-a-release-in-the-registries).)
+
 Two things follow the first publish, in other repositories. Both were done
 when 0.1.0 landed; what they still are is the checklist for the release after
 a **rename**, and that list is under [After a release](#after-a-release) rather
 than here — it used to be in both places, in the present tense here and in the
 past tense there, so the file contradicted itself about work that was finished.
+
+## Listing a release in the registries
+
+Three catalogues point clients at the npm package; none of them hosts it.
+What every one of them reads is in this repository, and
+`npm run check:server-json` (a CI step, a release step and
+`test/server-json.test.mjs`) keeps the three in step with `package.json`
+and with the environment variables the code reads.
+
+**The rule that holds for all of them: `server.json`'s `version` and its
+npm package's `version` equal `package.json`'s.** The registry fetches
+`@abap2ui5/mcp-server@<that version>` from npm and compares its `mcpName`
+with `server.json`'s `name` (`io.github.abap2UI5/mcp-server`); a version
+npm does not hold is refused, and a published registry version cannot be
+edited. `npm version` writes the version into both fields (the `version`
+script runs `scripts/check-server-json.mjs --sync`); the release workflow
+and the gate refuse a tag where they differ.
+
+### The official MCP Registry — `server.json`
+
+The listing is `server.json` (schema
+`https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json`,
+description at most 100 characters, npm packages from `registry.npmjs.org`
+only). The `mcp-registry` job of `release.yml` publishes it after the npm
+publish of every tag, with `mcp-publisher login github-oidc`. **By hand**,
+when the job is not used or has to be repeated - an org **Owner** of
+abap2UI5, since the registry grants `io.github.abap2UI5/*` to owners only,
+from a checkout at the released tag, after `npm view @abap2ui5/mcp-server
+version` shows that version:
+
+```sh
+# install the publisher once (or: brew install mcp-publisher)
+curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher && sudo mv mcp-publisher /usr/local/bin/
+
+npm run check:server-json          # the versions, mcpName, the variables
+mcp-publisher validate server.json # the registry's own schema and lint, no write
+mcp-publisher login github         # device flow in the browser; grants io.github.abap2UI5/*
+mcp-publisher publish server.json  # the listing
+curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.abap2UI5/mcp-server"
+```
+
+`mcp-publisher status --status deprecated|deleted io.github.abap2UI5/mcp-server <version>`
+is the only correction a published registry version allows.
+
+### Smithery — `smithery.yaml`
+
+Smithery (smithery.ai) indexes a server from the repository: `smithery.yaml`
+in the root is the start command (stdio, `npx -y -p @abap2ui5/mcp-server
+abap2ui5-mcp` - the README's registration) and a `configSchema` with one
+optional property per environment variable `server.json` lists, same name,
+same description. The file is **rendered from `server.json`** by
+`scripts/check-server-json.mjs --sync` (which `npm version` runs) and the
+gate fails when the two differ, so a variable is added in `server.json` and
+nowhere else. Listing is a one-time, manual step on smithery.ai: sign in
+with GitHub, add the server from the `abap2UI5/mcp-server` repository, and
+Smithery reads the file from `main` from then on; nothing in a release
+touches it. The file's shape (`startCommand` with `type: stdio`,
+`configSchema`, `exampleConfig`, `commandFunction`) is the one Smithery's
+project-configuration page (`https://smithery.ai/docs/build/project-config`)
+documents for a stdio server; when that page changes, the renderer in the
+script is the one place to follow it.
+
+### Glama — `glama.json`
+
+Glama (glama.ai/mcp/servers) lists every public MCP server it finds on GitHub
+by itself; `glama.json` in the root is how an **organization's** repository
+claims that listing (a personal repository can sign in with GitHub instead,
+an organization's cannot). It carries exactly what Glama's documentation
+asks for: the schema URL and the GitHub user names of the maintainers.
+One-time, by hand, as one of the users named there: open the server's page
+on glama.ai, sign in with GitHub, **Claim ownership**; after editing the file,
+run the claim flow again. Nothing in a release touches it.
 
 ## Cutting a release
 
