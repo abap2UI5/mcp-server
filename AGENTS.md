@@ -1296,6 +1296,19 @@ legitimately slower.
   since a set variable is authoritative here - or an entry in the script's
   `NOT_LISTED` with the reason. `npm version` syncs the two version fields by
   itself (the `version` script).
+- **`smithery.yaml` is GENERATED from `server.json`; `glama.json` is two
+  keys.** The Smithery listing repeats every listed environment variable as a
+  `configSchema` property (same name, same description) and the README's
+  start command; written by hand it would be a fourth copy to drift, so
+  `scripts/check-server-json.mjs --sync` renders it and the same gate fails
+  when the file on disk is not what `server.json` renders to - edit
+  `server.json`, run `--sync`, commit both. `glama.json` carries only the
+  schema URL and the maintainers' GitHub user names, which is all Glama's
+  documentation describes; the gate refuses any other key, since a field
+  the directory does not know is a guess nobody validates. RELEASING.md
+  ("Listing a release in the registries") has the one-time steps on each
+  site; neither file ships in the tarball (`files`), both are read from the
+  repository.
 - **The resource surface has the same one source: `lib/resources.mjs`.** The
   `RESOURCES` array (plus `RESOURCE_TEMPLATES` for the per-chapter guide) is
   what `resources/list` serves, and the same gate file checks the README's

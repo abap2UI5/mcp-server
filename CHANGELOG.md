@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **Listed in the Smithery and Glama directories, from the repository.**
+  `smithery.yaml` is the Smithery listing: the README's stdio start command
+  (`npx -y -p @abap2ui5/mcp-server abap2ui5-mcp`) and a `configSchema` with
+  one optional property per environment variable `server.json` lists, same
+  name and description - rendered from `server.json` by
+  `scripts/check-server-json.mjs --sync` (which `npm version` runs), so the
+  two cannot disagree; `glama.json` claims the Glama listing for the
+  organization (the schema URL and the maintainers, which is all Glama
+  documents). `npm run check:server-json` and `test/server-json.test.mjs`
+  now fail when either file drifts from `server.json` or from `package.json`
+  (`name`, `version`, `mcpName`, the `abap2ui5-mcp` bin), and the test
+  pins that every variable `server.json` lists is read by the source and
+  every `A2UI5_MCP_*` the source reads is listed. RELEASING.md gains the
+  by-hand registry publish (`mcp-publisher validate`, `login github`,
+  `publish`) and the one-time listing steps on smithery.ai and glama.ai;
+  the README names the three catalogues under the install buttons. Nothing
+  was published: the listings follow the next tag, and the directory
+  claims are manual steps on each site.
+
 - **The npm backend transpiles the dev apps WITH the framework, from the
   `@abap2ui5/node-runtime` release after 1.147.0 on.** Such a release
   records its express-icf-shim commit (`abap2ui5.expressIcfShim`) and
