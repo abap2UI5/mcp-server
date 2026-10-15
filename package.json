@@ -14,7 +14,7 @@
     "check": "npm run check:server-json && npm test",
     "check:server-json": "node scripts/check-server-json.mjs",
     "test": "node --test \"test/*.test.mjs\"",
-    "version": "node scripts/check-server-json.mjs --sync && git add server.json"
+    "version": "node scripts/check-server-json.mjs --sync && git add server.json smithery.yaml"
   },
   "repository": {
     "type": "git",
