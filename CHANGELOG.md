@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `test/npm-integration.test.mjs`: the two registry tests read the published release's layout - a release after 1.147.0 transpiles the dev objects WITH the framework (apps/ is a complete runtime served through its host.mjs, and the sandbox table is listed in the transpile line, not created at boot), so both assertions, written for the old layout, failed on every main run since 1.148.0 was published.
 - **The prebuilt backend is verified before it is unpacked, and a plain-http
   mirror is refused.** The framework attaches `backend-<version>.tar.gz.sha256`
   beside the release archive (releases after 1.148.0); `downloadPrebuilt`
