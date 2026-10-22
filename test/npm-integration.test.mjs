@@ -158,17 +158,29 @@ test('deploy, build, unit tests, boot and a roundtrip on the published @abap2ui5
     assert.equal(built.mode, 'npm');
     const status = npm.npmStatus();
     t.diagnostic(`release ${status.version} (${status.versionSource}), transpiler ${status.transpiler}, express ${status.express}, abaplint ${status.abaplintCli.version}, open-abap-core ${status.openAbapCore.sha} (${status.openAbapCore.source})`);
-    const apps = fs.readdirSync(npm.appsDir(status.dir));
-    assert.deepEqual(apps.filter((f) => f.endsWith('.mjs')).sort(), ['index.mjs', 'init.mjs', 'zcl_hello_mcp.clas.mjs', 'zcl_hello_mcp.clas.testclasses.mjs']);
-    // every import of a dev module is a dev module beside it or the package's own module -
-    // in the folder of output/ the package has it in - never a second copy of a framework class
-    const exported = path.join(status.dir, 'node_modules', '@abap2ui5', 'node-runtime', 'output');
-    for (const f of apps.filter((x) => /^zcl_.*\.mjs$/.test(x))) {
-      const text = fs.readFileSync(path.join(npm.appsDir(status.dir), f), 'utf8');
-      for (const m of text.matchAll(/^[ \t]*(?:const\s*\{[^}\n]*\}\s*=\s*)?(?:await\s+import\(\s*|import\s+)"([^"]+)"/gm)) {
-        if (m[1].startsWith('./')) assert.ok(apps.includes(m[1].slice(2)), `${f} imports ${m[1]}, which is not in apps/`);
-        else if (m[1].startsWith('@abap2ui5/node-runtime/output/')) assert.ok(fs.existsSync(path.join(exported, decodeURIComponent(m[1].slice('@abap2ui5/node-runtime/output/'.length)))), `${f} imports ${m[1]}, which the package does not have`);
-        else assert.fail(`${f} imports ${m[1]}`);
+    const appsDir = npm.appsDir(status.dir);
+    const apps = fs.readdirSync(appsDir);
+    if (npm.fullTranspileOf(status.dir, npm.installedMeta(status.dir))) {
+      // a release after 1.147.0 transpiles the dev objects WITH the framework
+      // (AGENTS.md, "The full transpile"): apps/ is a complete runtime in the
+      // folder layout, served through its own host.mjs, and the framework's
+      // modules sit beside the dev modules by design - so the test asks for
+      // the entry points and the two dev modules wherever the layout put them
+      for (const f of ['host.mjs', 'boot.mjs', 'init.mjs']) assert.ok(apps.includes(f), `${f} in apps/: ${apps.join(', ')}`);
+      const found = fs.readdirSync(appsDir, { recursive: true }).map(String).filter((f) => /zcl_hello_mcp\.clas(\.testclasses)?\.mjs$/.test(f));
+      assert.equal(found.length, 2, `the two dev modules in apps/: ${found.join(', ')}`);
+    } else {
+      assert.deepEqual(apps.filter((f) => f.endsWith('.mjs')).sort(), ['index.mjs', 'init.mjs', 'zcl_hello_mcp.clas.mjs', 'zcl_hello_mcp.clas.testclasses.mjs']);
+      // every import of a dev module is a dev module beside it or the package's own module -
+      // in the folder of output/ the package has it in - never a second copy of a framework class
+      const exported = path.join(status.dir, 'node_modules', '@abap2ui5', 'node-runtime', 'output');
+      for (const f of apps.filter((x) => /^zcl_.*\.mjs$/.test(x))) {
+        const text = fs.readFileSync(path.join(appsDir, f), 'utf8');
+        for (const m of text.matchAll(/^[ \t]*(?:const\s*\{[^}\n]*\}\s*=\s*)?(?:await\s+import\(\s*|import\s+)"([^"]+)"/gm)) {
+          if (m[1].startsWith('./')) assert.ok(apps.includes(m[1].slice(2)), `${f} imports ${m[1]}, which is not in apps/`);
+          else if (m[1].startsWith('@abap2ui5/node-runtime/output/')) assert.ok(fs.existsSync(path.join(exported, decodeURIComponent(m[1].slice('@abap2ui5/node-runtime/output/'.length)))), `${f} imports ${m[1]}, which the package does not have`);
+          else assert.fail(`${f} imports ${m[1]}`);
+        }
       }
     }
 
@@ -223,7 +235,9 @@ test('a sandbox table: abap2ui5-unit runs a class that INSERTs into and SELECTs 
       cwd: project, env, encoding: 'utf8', timeout: 14 * 60_000,
     });
     assert.equal(run.status, 0, `abap2ui5-unit exited ${run.status}:\n${run.stdout}\n${run.stderr}`);
-    assert.match(run.stderr + run.stdout, /creates the table\(s\) zmcp_note at boot/);
+    // the old layout creates the table at boot, the full transpile (a release
+    // after 1.147.0) lists it as part of the runtime it writes
+    assert.match(run.stderr + run.stdout, /creates the table\(s\) zmcp_note at boot|the table\(s\) zmcp_note - served through its host\.mjs/);
     const report = JSON.parse(run.stdout);
     const tests = report.results.flatMap((r) => r.tests || []);
     assert.deepEqual(tests.map((t) => `${t.object} ${t.localClass}->${t.method} ${t.ok === false ? 'FAIL' : 'ok'}`), ['ZCL_MCP_NOTES ltcl_notes->insert_and_select ok']);
