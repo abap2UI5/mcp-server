@@ -80,7 +80,11 @@ the default is used only while it is a real directory of the user's own,
 created 0700 - otherwise the PNG is returned but not saved, under
 `screenshotNotSaved`, and no build log is kept there - `lib/private-dir.mjs`),
 `A2UI5_MCP_PREBUILT_URL` (where `build_backend` mode `prebuilt` downloads
-from; default the framework release asset, see below), the mirror knobs
+from; default the framework release asset, see below - `https:` only, a
+plain `http:` URL off the loopback is refused unless
+`A2UI5_MCP_PREBUILT_INSECURE=1`; `downloadPrebuilt` verifies the archive
+against the `.sha256` sidecar the framework attaches beside it from the
+release after 1.148.0 on, and says so when a release has none), the mirror knobs
 `A2UI5_MCP_REMOTE=0` / `A2UI5_MCP_REMOTE_DIR` / `A2UI5_MCP_REMOTE_TTL_MS`
 (below), `GITHUB_TOKEN`/`GH_TOKEN` (sent to `api.github.com` only — it raises
 the docs tree listing's rate limit; never to `raw.githubusercontent.com`, which
@@ -962,7 +966,9 @@ changes upstream, this repo must change in the same breath:
   `node/setup/pack-backend.mjs`, attached by `backend-prebuilt.yaml`; the
   name, the three directories and the manifest are the contract
   `downloadPrebuilt` reads — a rename over there is a failed download here,
-  reported by URL), the two `.claude/skills/*-check/`
+  reported by URL; the `.sha256` sidecar beside it, sha256sum's format, is
+  the part of the contract that is allowed to be missing: a release without
+  it unpacks unverified, said in the build log), the two `.claude/skills/*-check/`
   catalogues, and **`docs/agents/building-apps.md`** — the app-building guide
   `app_guide` serves. Its `## ` headings are the chapters that tool slices on;
   a rename of the file is a broken tool here (reported, not silent — the tool

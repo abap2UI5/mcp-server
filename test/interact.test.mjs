@@ -12,8 +12,9 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { parseActions, cssAttr, ACTIONS, MAX_ACTIONS, STEP_KEYS } from '../lib/interact.mjs';
-import { parseUnitOutput, downloadPrebuilt, prebuiltUrl, prebuiltManifest, RUNNER_LOOP, runUnitTests, backendBuilt, PREBUILT_MAX_BYTES, quietAfter } from '../lib/runtime.mjs';
+import { parseUnitOutput, downloadPrebuilt, prebuiltUrl, prebuiltUrlProblem, parseSha256Sidecar, prebuiltManifest, RUNNER_LOOP, runUnitTests, backendBuilt, PREBUILT_MAX_BYTES, quietAfter } from '../lib/runtime.mjs';
 import { resolveA2UI5 } from '../lib/repos.mjs';
 import { TOOLS } from '../lib/tools.mjs';
 
@@ -324,9 +325,16 @@ function fakeCheckoutAndArchive(version, { manifest = true, transpiler = null, l
   return { root, a2, tar };
 }
 
-function serve(file, { status = 200, chunked = false } = {}) {
+/* `sidecar`: the text served at <url>.sha256 (404 when absent, like a
+ *  release before the framework attached one). */
+function serve(file, { status = 200, chunked = false, sidecar = null } = {}) {
   return new Promise((resolve) => {
     const srv = http.createServer((req, res) => {
+      if (req.url.endsWith('.sha256')) {
+        if (sidecar === null) res.writeHead(404).end('nope');
+        else res.writeHead(200, { 'content-type': 'text/plain' }).end(sidecar);
+        return;
+      }
       if (status !== 200 || !fs.existsSync(file)) {
         res.writeHead(status === 200 ? 404 : status).end('nope');
         return;
@@ -349,6 +357,75 @@ test('prebuiltUrl follows the framework release, or the override', () => {
   }
 });
 
+test('prebuiltUrlProblem refuses plain http off the loopback unless A2UI5_MCP_PREBUILT_INSECURE=1', () => {
+  assert.equal(prebuiltUrlProblem('https://github.com/abap2UI5/abap2UI5/releases/download/1.148.0/backend-1.148.0.tar.gz', {}), null);
+  assert.equal(prebuiltUrlProblem('http://127.0.0.1:8080/backend.tar.gz', {}), null, 'the loopback has no wire');
+  assert.match(prebuiltUrlProblem('http://localhost/backend.tar.gz', {}), /plain http:/, 'a name is not an address');
+  assert.equal(prebuiltUrlProblem('http://[::1]:9/backend.tar.gz', {}), null);
+  assert.match(prebuiltUrlProblem('http://mirror.example/backend.tar.gz', {}), /plain http:.*A2UI5_MCP_PREBUILT_INSECURE=1/);
+  assert.equal(prebuiltUrlProblem('http://mirror.example/backend.tar.gz', { A2UI5_MCP_PREBUILT_INSECURE: '1' }), null);
+  assert.match(prebuiltUrlProblem('not a url', {}), /is not a URL/);
+  // the sidecar's format: sha256sum's line, the hex is what counts
+  assert.equal(parseSha256Sidecar(`${'a'.repeat(64)}  backend-1.148.0.tar.gz\n`), 'a'.repeat(64));
+  assert.equal(parseSha256Sidecar('A'.repeat(64)), 'a'.repeat(64));
+  assert.equal(parseSha256Sidecar('<html>not found</html>'), null);
+  assert.equal(parseSha256Sidecar(`${'a'.repeat(63)}  x`), null);
+});
+
+test('downloadPrebuilt refuses a plain-http mirror before fetching anything', async () => {
+  const { root, a2 } = fakeCheckoutAndArchive('1.148.0');
+  process.env.A2UI5_MCP_PREBUILT_URL = 'http://mirror.example/backend.tar.gz';
+  const lines = [];
+  let fetched = 0;
+  try {
+    const res = await downloadPrebuilt({ a2, onLine: (l) => lines.push(l), timeoutMs: 60000, fetchImpl: async () => { fetched += 1; throw new Error('must not be called'); } });
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'insecure url');
+    assert.equal(fetched, 0, 'nothing is fetched');
+    assert.ok(lines.some((l) => /plain http:/.test(l)), lines.join('\n'));
+    assert.ok(fs.existsSync(path.join(a2, 'node/output/stale.mjs')), 'the previous build stays');
+  } finally {
+    delete process.env.A2UI5_MCP_PREBUILT_URL;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('downloadPrebuilt verifies the archive against its .sha256 sidecar, and keeps the old build on a mismatch', { skip: !HAVE_TAR && 'needs tar on PATH' }, async () => {
+  const { root, a2, tar } = fakeCheckoutAndArchive('1.148.0');
+  const digest = createHash('sha256').update(fs.readFileSync(tar)).digest('hex');
+  // the sidecar as pack-backend.mjs writes it
+  let served = await serve(tar, { sidecar: `${digest}  backend-1.148.0.tar.gz\n` });
+  process.env.A2UI5_MCP_PREBUILT_URL = served.url;
+  let lines = [];
+  try {
+    const res = await downloadPrebuilt({ a2, onLine: (l) => lines.push(l), timeoutMs: 60000 });
+    assert.equal(res.ok, true, lines.join('\n'));
+    assert.ok(lines.some((l) => l.includes(`sha256 ${digest} verified against`)), lines.join('\n'));
+    assert.ok(!lines.some((l) => /unverified/.test(l)));
+  } finally {
+    served.srv.close();
+  }
+  // a tampered archive: the digest is another file's
+  const tampered = fakeCheckoutAndArchive('1.148.0');
+  served = await serve(tampered.tar, { sidecar: `${'0'.repeat(64)}  backend-1.148.0.tar.gz\n` });
+  process.env.A2UI5_MCP_PREBUILT_URL = served.url;
+  lines = [];
+  try {
+    const res = await downloadPrebuilt({ a2: tampered.a2, onLine: (l) => lines.push(l), timeoutMs: 60000 });
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'sha256 mismatch');
+    assert.ok(lines.some((l) => /sha256 mismatch/.test(l)), lines.join('\n'));
+    assert.ok(fs.existsSync(path.join(tampered.a2, 'node/output/stale.mjs')), 'the previous build is untouched');
+    assert.ok(!fs.existsSync(path.join(tampered.a2, 'node/output/init.mjs')), 'nothing of the archive is unpacked');
+    assert.equal(prebuiltManifest(tampered.a2), null);
+  } finally {
+    delete process.env.A2UI5_MCP_PREBUILT_URL;
+    served.srv.close();
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(tampered.root, { recursive: true, force: true });
+  }
+});
+
 test('downloadPrebuilt unpacks the archive over the old build and reads the manifest', { skip: !HAVE_TAR && 'needs tar on PATH' }, async () => {
   const { root, a2, tar } = fakeCheckoutAndArchive('1.144.0');
   const { srv, url } = await serve(tar);
@@ -365,6 +442,7 @@ test('downloadPrebuilt unpacks the archive over the old build and reads the mani
     assert.equal(prebuiltManifest(a2).version, '1.144.0');
     assert.ok(lines.some((l) => /fetching http:\/\/127\.0\.0\.1/.test(l)));
     assert.ok(lines.some((l) => /unpacked into/.test(l)));
+    assert.ok(lines.some((l) => /no .*\.sha256 beside the archive - unverified/.test(l)), 'a release without the sidecar says so once');
     assert.ok(!fs.existsSync(path.join(a2, 'node_modules', 'express', 'package.json')), 'npm ci is skipped when express is there');
   } finally {
     delete process.env.A2UI5_MCP_PREBUILT_URL;

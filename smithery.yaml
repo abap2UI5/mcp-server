@@ -87,7 +87,10 @@ startCommand:
         description: "Where run_app and interact_app write their PNGs (the newest 50 are kept) and build_backend its log. Default: <tmp>/abap2ui5-mcp-screenshots."
       A2UI5_MCP_PREBUILT_URL:
         type: string
-        description: "Where build_backend mode prebuilt downloads the backend from. Default: the framework's release asset."
+        description: "Where build_backend mode prebuilt downloads the backend from (https:; the archive is verified against the .sha256 sidecar beside it when there is one). Default: the framework's release asset."
+      A2UI5_MCP_PREBUILT_INSECURE:
+        type: string
+        description: "Set to 1 to let A2UI5_MCP_PREBUILT_URL be a plain http: mirror off the loopback. The archive is code the backend runs; https: is the default requirement."
       A2UI5_MCP_LINT_WORKER:
         type: string
         description: "Set to 0 to run every lint as a fresh abaplint process. Default: a long-lived worker keeps @abaplint/core with the framework parsed and lints a deploy in milliseconds (the CLI runs whenever the worker cannot stand in for it)."
