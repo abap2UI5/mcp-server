@@ -621,6 +621,15 @@ duplicates none of their content:
   prebuilt backend archive (2.7 MB for 1.146.0). An answer over the cap is
   refused (when it declares its size) or cut at the cap, and the tool says
   so by URL; a cached mirror or the previous build stays in place.
+- **The prebuilt backend is verified before it is unpacked:** the framework
+  attaches a `backend-<version>.tar.gz.sha256` sidecar beside the archive
+  (releases after 1.148.0), and `build_backend` compares the download's
+  sha256 against it - a mismatch discards the download and keeps the
+  previous build; a release without the sidecar unpacks as before and the
+  build log says it was unverified. The archive is code `run_app` boots, so
+  `A2UI5_MCP_PREBUILT_URL` must be `https:` - a plain `http:` mirror off the
+  loopback is refused unless `A2UI5_MCP_PREBUILT_INSECURE=1` says the
+  network is trusted (the sidecar is looked for at `<url>.sha256` there too).
 - **UI5 sources** are served from the samples-controls checkout's `@openui5`
   packages when that checkout is there, so booting needs no network; without
   it `run_app` and `interact_app` load UI5 from the CDN (and say so at once

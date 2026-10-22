@@ -170,7 +170,13 @@
         },
         {
           "name": "A2UI5_MCP_PREBUILT_URL",
-          "description": "Where build_backend mode prebuilt downloads the backend from. Default: the framework's release asset.",
+          "description": "Where build_backend mode prebuilt downloads the backend from (https:; the archive is verified against the .sha256 sidecar beside it when there is one). Default: the framework's release asset.",
+          "format": "string",
+          "isRequired": false
+        },
+        {
+          "name": "A2UI5_MCP_PREBUILT_INSECURE",
+          "description": "Set to 1 to let A2UI5_MCP_PREBUILT_URL be a plain http: mirror off the loopback. The archive is code the backend runs; https: is the default requirement.",
           "format": "string",
           "isRequired": false
         },

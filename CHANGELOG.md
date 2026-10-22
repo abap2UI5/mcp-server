@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **The prebuilt backend is verified before it is unpacked, and a plain-http
+  mirror is refused.** The framework attaches `backend-<version>.tar.gz.sha256`
+  beside the release archive (releases after 1.148.0); `downloadPrebuilt`
+  fetches it, compares the download's sha256 and discards a mismatch with the
+  previous build untouched - a release without the sidecar unpacks as before,
+  with one build-log line saying it was unverified. `A2UI5_MCP_PREBUILT_URL`
+  must be `https:` (the archive is code `run_app` boots): a plain `http:` URL
+  off the loopback is refused before anything is fetched unless the new
+  `A2UI5_MCP_PREBUILT_INSECURE=1` says the network is trusted. `tar` unpacks
+  with `--no-same-owner`, so a root run keeps the checkout's ownership.
+- **npm runs without a shell on Windows.** `npmCommand` runs npm as
+  `node npm-cli.js` (the program behind `npm.cmd`, found beside `node.exe`),
+  so no argument ever reaches cmd.exe; the quoted `.cmd` path remains only
+  for a Node installation that keeps no `npm-cli.js`.
+
 - **Listed in the Smithery and Glama directories, from the repository.**
   `smithery.yaml` is the Smithery listing: the README's stdio start command
   (`npx -y -p @abap2ui5/mcp-server abap2ui5-mcp`) and a `configSchema` with
