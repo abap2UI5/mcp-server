@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **A table bound to a dereferenced data reference is described.** abap2UI5 binds one as `{/MR_X/*}` and the model holds `{ MR_X: { '*': [...] } }`; `parseBinding` read the `*` as no simple path (a `composite`), so the snapshot left the table out with "rows not described". `SIMPLE_PATH` in `lib/viewxml.mjs` now takes `*` as a path segment - `getAt` already walked it as any other key.
 - `test/npm-integration.test.mjs`: the two registry tests read the published release's layout - a release after 1.147.0 transpiles the dev objects WITH the framework (apps/ is a complete runtime served through its host.mjs, and the sandbox table is listed in the transpile line, not created at boot), so both assertions, written for the old layout, failed on every main run since 1.148.0 was published.
 - **The prebuilt backend is verified before it is unpacked, and a plain-http
   mirror is refused.** The framework attaches `backend-<version>.tar.gz.sha256`

@@ -59,6 +59,7 @@ test('parseBinding tells literals, paths, typed paths, expressions and composite
   assert.equal(typed.type, 'sap.ui.model.type.Integer');
   assert.equal(parseBinding("{path: '/T_TAB', templateShareable: false}").path, '/T_TAB');
   assert.equal(parseBinding('{= ${/X} > 1 }').kind, 'expression');
+  assert.deepEqual(parseBinding('{/MR_X/*}'), { kind: 'path', path: '/MR_X/*', model: '', relative: false }, 'a dereferenced data reference');
   const comp = parseBinding('Total: {/SUM} EUR');
   assert.equal(comp.kind, 'composite');
   assert.deepEqual(comp.parts.map((p) => p.text ?? p.path), ['Total: ', '/SUM', ' EUR']);
@@ -353,6 +354,21 @@ test('row actions (samples 048, 537, 070): template wires are row scope with $ro
   assert.equal(byEvent(grid, 'SORT').scope, 'screen');
   assert.equal(byEvent(grid, 'SORT').label, 'Products: sort', 'a table event is labelled by its table');
   assert.ok(grid.fields.some((f) => f.path === '/LV_SELKZ'), 'a column header that is a control is on the screen');
+});
+
+test('a table bound to a dereferenced data reference {/MR_X/*} describes its rows', () => {
+  const xml = '<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m" xmlns:table="sap.ui.table">'
+    + '<table:Table rows="{/MR_X/*}"><table:columns><table:Column><Label text="A"/>'
+    + '<table:template><Text text="{A}"/></table:template></table:Column></table:columns></table:Table></mvc:View>';
+  const s = buildSnapshot({ response: {
+    S_FRONT: { APP: 'Z_T', ID: '1', S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'display', 'MAIN', xml]] } },
+    MODEL: { MR_X: { '*': [{ A: 1 }] } },
+  } });
+  assert.equal(s.tables.length, 1, JSON.stringify(s.unsupported));
+  assert.equal(s.tables[0].control, 'sap.ui.table.Table');
+  assert.equal(s.tables[0].rowCount, 1);
+  assert.equal(s.tables[0].rows.length, 1);
+  assert.ok(!s.unsupported.some((u) => /rows not described/.test(u)));
 });
 
 test('messages (samples 467): the MessageManager table targets its field, typed bindings refine the kind', () => {
