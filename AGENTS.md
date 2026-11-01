@@ -53,7 +53,7 @@ reads it live like a checkout.
 | `SAMPLES_STACK_HOME` | `../samples-stack`, `../abap2UI5-samples-stack` | `catalogue.json` (preferred) + `SAMPLES.md` (fallback) — the stack-dependent catalogue (OData, RAP, APC, launchpad) |
 | `APP_TEMPLATE_HOME` | `../app-template`, `../abap2UI5-app-template` | `template.json` and the files it lists — what `scaffold_app` serves and renames, and what `add_agent_setup` writes into an existing project by the `agentSetup` key (both are dead without this checkout or its mirror) |
 | `DOCS_HOME` | `../docs` | `docs/**/*.md` — the documentation site's sources, searched live by `docs_search` |
-| `ABAP_CLOUD_GUI_HOME` | `../abap-cloud-gui` | `tools/report2cloud/lib/{convert,textpool,report}.mjs` — the report converter `migrate_report` imports in-process, with the checkout's own `node_modules` (`npm ci` there; LOCAL only, no mirror - `resolveCloudGui`, not in `RESOLVERS`); with `deploy: true` also its `src/01`, and the popups beside it (`POPUPS_HOME`, else `.deps/popups` of the checkout, `../popups` beside it, its `build/popups` - in that order, `resolvePopups`) |
+| `ABAP_CLOUD_GUI_HOME` | `../abap-cloud-gui` | `tools/report2ui5/lib/{convert,textpool,report}.mjs` (`tools/report2cloud/lib` in the addon's 1.0.0) — the report converter `migrate_report` imports in-process, with the checkout's own `node_modules` (`npm ci` there; LOCAL only, no mirror - `resolveCloudGui`, not in `RESOLVERS`); with `deploy: true` also its `src/01`, and the popups beside it (`POPUPS_HOME`, else `.deps/popups` of the checkout, `../popups` beside it, its `build/popups` - in that order, `resolvePopups`) |
 | `AI_VIEW_CHECK_HOME` | `../linter` (legacy aliases: `../abap2UI5-linter`, `../ai-view-check`) — which for an npm/npx install is ALSO where npm hoists the declared peer `@abap2ui5/linter` (`node_modules/@abap2ui5/{mcp-server,linter}`), then an INSTALLED one elsewhere: `<cwd>/node_modules/…` (app-template's devDependency), the server's own `node_modules/…`, then wherever Node's resolver finds the package from `lib/repos.mjs` (`viewCheckCandidates`, `nodeResolvedViewCheck`) | `validate_view` + `fix_view` + `screenshot_view`: dynamic import of the linter's package `exports` entries `.`, `./findings`, `./config`, `./rule-docs` (via `importViewCheck`) |
 
 One more checkout is read but not by this server: **`OPENUI5_SRC`** (default
@@ -376,7 +376,7 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
   output shape changed. The tables are empty at every boot, like the
   package's own. A sandbox without tables builds and boots byte for byte as
   before. The recipe is abap-cloud-gui's runtime test
-  (`tools/report2cloud/test/runtime/backend.mjs`). On a checkout (and the
+  (`tools/report2ui5/test/runtime/backend.mjs`). On a checkout (and the
   clone `build_backend` mode prebuilt makes, which is one) nothing is
   needed: the incremental build copies every file of the sandbox into
   `node/downport`, and the framework's `node/setup/setup.mjs` creates every
@@ -1014,13 +1014,19 @@ changes upstream, this repo must change in the same breath:
   runner would boot nothing) and lists only non-dependency tests (2.14:
   `filename: "./project/<file>"`), `init.mjs`'s import order (the boot
   order; sorted when unreadable), and `RUNNER_LOOP`.
-- abap-cloud-gui: **`tools/report2cloud/lib/convert.mjs`** (`convert(source,
+- abap-cloud-gui: **`tools/report2ui5/lib/convert.mjs`** (`convert(source,
   { file, className, textpool })` answering `{ ok, className, programName,
-  files, draft, refusals, todos, release, notes }`), `textpool.mjs`
+  files, draft, refusals, todos, notes }`), `textpool.mjs`
   (`parseTextpool`) and `report.mjs` (`migrationReport(result, { source,
-  texts })`) - imported by `lib/migrate.mjs`, which checks the three exports
-  and answers a checkout without them (or without `npm ci`) as a setup
-  message. With `deploy: true` also the layout `src/01` and the popup set of
+  texts })`) - imported by `lib/migrate.mjs` from the first of
+  `CONVERTER_DIRS` that has all three (`tools/report2ui5/lib`, then
+  `tools/report2cloud/lib` of a 1.0.0 checkout), which checks the three
+  exports and answers a checkout without them (or without `npm ci`) as a
+  setup message. The checkout itself is recognized by
+  `src/01/z2ui5_cl_cgui_report.clas.abap` (the probe in
+  `lib/repo-dirs.json`), not by the converter's path. The converter turns the
+  user interface of a report only and copies its logic: `migrate_report`
+  answers no release list of tables and APIs any more. With `deploy: true` also the layout `src/01` and the popup set of
   the addon's `unit.yaml` (`POPUP_FILES`). A renamed export or a moved file
   over there is a broken `migrate_report` here, said by path.
 - docs: the `docs/` markdown tree (everything but `.vitepress`, `public` and

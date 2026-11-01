@@ -64,7 +64,7 @@
         },
         {
           "name": "ABAP_CLOUD_GUI_HOME",
-          "description": "abap2UI5-addons/abap-cloud-gui checkout (with npm ci done) whose report2cloud converter migrate_report runs. Default: ../abap-cloud-gui; no mirror.",
+          "description": "abap2UI5-addons/abap-cloud-gui checkout (with npm ci done) whose report2UI5 converter migrate_report runs. Default: ../abap-cloud-gui; no mirror.",
           "format": "filepath",
           "isRequired": false
         },

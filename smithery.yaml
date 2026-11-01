@@ -35,7 +35,7 @@ startCommand:
         description: "abap2UI5/docs checkout that docs_search reads. Default: ../docs, else the GitHub mirror."
       ABAP_CLOUD_GUI_HOME:
         type: string
-        description: "abap2UI5-addons/abap-cloud-gui checkout (with npm ci done) whose report2cloud converter migrate_report runs. Default: ../abap-cloud-gui; no mirror."
+        description: "abap2UI5-addons/abap-cloud-gui checkout (with npm ci done) whose report2UI5 converter migrate_report runs. Default: ../abap-cloud-gui; no mirror."
       POPUPS_HOME:
         type: string
         description: "abap2UI5-addons/popups checkout whose popups migrate_report with deploy: true writes into the dev sandbox beside the converted class. Default: .deps/popups of the abap-cloud-gui checkout, ../popups beside it, then its build/popups."

@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **`migrate_report` runs report2UI5.** abap-cloud-gui renamed its converter
+  report2cloud to report2UI5 (`tools/report2ui5`) and narrowed it to the user
+  interface of a report - the selection screen, the event blocks, the list,
+  the ALV, the messages and the popups - with the logic copied as it is.
+  `lib/migrate.mjs` loads `tools/report2ui5/lib` and falls back to
+  `tools/report2cloud/lib` of a 1.0.0 checkout (`loadConverter`, formerly
+  `loadReport2cloud`); the checkout is recognized by its report runtime
+  class. The answer no longer has `release` (the converter checks no release
+  state), the deploy note on missing tables no longer names them, and the
+  tool description, `next` and the docs say what the converter now does. The
+  refused fixture of `test/migrate.test.mjs` refused a `SUBMIT` the
+  converter maps since before 1.0.0 - it refuses `SET USER-COMMAND` now, and
+  the test passes against both checkouts.
 - **A table bound to a dereferenced data reference is described.** abap2UI5 binds one as `{/MR_X/*}` and the model holds `{ MR_X: { '*': [...] } }`; `parseBinding` read the `*` as no simple path (a `composite`), so the snapshot left the table out with "rows not described". `SIMPLE_PATH` in `lib/viewxml.mjs` now takes `*` as a path segment - `getAt` already walked it as any other key.
 - `test/npm-integration.test.mjs`: the two registry tests read the published release's layout - a release after 1.147.0 transpiles the dev objects WITH the framework (apps/ is a complete runtime served through its host.mjs, and the sandbox table is listed in the transpile line, not created at boot), so both assertions, written for the old layout, failed on every main run since 1.148.0 was published.
 - **The prebuilt backend is verified before it is unpacked, and a plain-http
