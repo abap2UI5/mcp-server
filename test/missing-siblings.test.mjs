@@ -202,7 +202,7 @@ test('every sibling-dependent tool degrades with an actionable error when the ch
     expectMissing(await call('app_guide', { section: '5' }), /abap2UI5 checkout not found/, 'A2UI5_HOME');
     // the client API is an interface in the framework sources
     expectMissing(await call('api_reference', {}), /abap2UI5 checkout not found/, 'A2UI5_HOME');
-    /* migrate_report runs report2cloud from the abap-cloud-gui checkout - with
+    /* migrate_report runs report2UI5 from the abap-cloud-gui checkout - with
      * its node_modules, so a local one: no mirror, and the hint says npm ci */
     const migrate = await call('migrate_report', { source: 'REPORT zt.\nWRITE / 1.' });
     expectMissing(migrate, /abap-cloud-gui checkout not found/, 'ABAP_CLOUD_GUI_HOME');

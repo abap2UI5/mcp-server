@@ -452,11 +452,8 @@ async function deployMigrated(res, ctx) {
     stage('deploy', toolError(String(e.message)));
     return stop('deploy');
   }
-  const tables = res.release.filter((x) => x.kind === 'database table').map((x) => x.name);
-  if (tables.length) {
-    stages.deploy.note = `the local backend has no table ${tables.join(', ')}: the selection screen runs, a run that reads them fails - `
-      + 'and a class typed with their fields may not start at all';
-  }
+  stages.deploy.note = 'the local backend has only the tables of abap2UI5 and the addon: the selection screen runs, a run that reads '
+    + 'a table of the report fails - and a class typed with its fields may not start at all';
   if (!stage('build', await handle('build_backend', { mode: 'auto' }, ctx))) return stop('build');
   if (!stage('start', await handle('app_start', { app: res.className }, ctx))) return stop('start');
   return stop(null);
@@ -1669,7 +1666,7 @@ async function handle(name, args = {}, ctx = {}) {
     }
     case 'migrate_report': {
       if (typeof args.source !== 'string' || !args.source.trim()) return toolError('source is required: the text of the report, as in <report>.prog.abap');
-      /* report2cloud runs in-process from the abap-cloud-gui checkout - with
+      /* the converter runs in-process from the abap-cloud-gui checkout - with
        * that checkout's node_modules, so a local one with npm ci done; there
        * is no mirror of it (lib/migrate.mjs). */
       const miss = missingLocalSibling('abap-cloud-gui');
@@ -1693,17 +1690,16 @@ async function handle(name, args = {}, ctx = {}) {
         refusals: res.refusals,
         ...(res.warnings.length ? { warnings: res.warnings } : {}),
         todos: res.todos.length,
-        release: res.release.map((x) => `${x.kind} ${x.name}${x.successor ? ` (successor: ${x.successor})` : ''}`),
         migration_report: res.report,
         next: res.ok
-          ? 'save the files (abapGit format) next to z2ui5_cl_cgui_report, then work the migration report: replace the unreleased objects, settle the TODOs - deploy: true runs it here first'
-          : 'every refusal is a place the report does something a browser app does not do - rewrite those statements in the report (or decide on a design) and convert again',
+          ? 'save the files (abapGit format) next to z2ui5_cl_cgui_report and settle the TODOs of the migration report - the logic of the report went over as it was, so check its tables and APIs on the target system yourself; deploy: true runs it here first'
+          : 'every refusal is a place the user interface of the report does something a browser app does not do - rewrite those statements in the report (or decide on a design) and convert again',
       };
       // a big report is a big class: the mapped table goes first, never the class
       // (measured as text() writes it - indented, the size the client sees)
       if (sizeOf(reply) > ANSWER_BUDGET) {
         const cut = reply.migration_report.indexOf('\n## Mapped');
-        if (cut > 0) reply.migration_report = `${reply.migration_report.slice(0, cut)}\n\n## Mapped\n\n(left out - the answer would pass the client's size limit; convert with the report2cloud CLI for the full table)\n`;
+        if (cut > 0) reply.migration_report = `${reply.migration_report.slice(0, cut)}\n\n## Mapped\n\n(left out - the answer would pass the client's size limit; convert with the report2UI5 CLI for the full table)\n`;
       }
       if (args.deploy === true) reply.deploy = await deployMigrated(res, ctx);
       /* then the files: a report of 2,000 lines converted to 212,028

@@ -1,4 +1,4 @@
-// migrate_report: a classic report converted by report2cloud, which lives in
+// migrate_report: a classic report converted by report2UI5, which lives in
 // the abap-cloud-gui checkout (lib/migrate.mjs). The pure halves run
 // everywhere; the conversion needs the checkout with `npm ci` done
 // (ABAP_CLOUD_GUI_HOME or ../abap-cloud-gui) and SKIPS itself without one, the
@@ -19,18 +19,18 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { programNameOf, validTargetClass, resolvePopups, loadReport2cloud, migrateReport, deployFiles, POPUP_FILES, transpilerHazards, codeOfLine, KernelEscapeError } from '../lib/migrate.mjs';
+import { programNameOf, validTargetClass, resolvePopups, loadConverter, migrateReport, deployFiles, POPUP_FILES, transpilerHazards, codeOfLine, KernelEscapeError } from '../lib/migrate.mjs';
 import { resolveCloudGui } from '../lib/repos.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const FIX = path.join(ROOT, 'test', 'fixtures', 'report2cloud');
+const FIX = path.join(ROOT, 'test', 'fixtures', 'report2ui5');
 const read = (f) => fs.readFileSync(path.join(FIX, f), 'utf8');
 
 const cloudGui = resolveCloudGui();
 let noConverter = cloudGui ? false : 'no abap-cloud-gui checkout (ABAP_CLOUD_GUI_HOME or ../abap-cloud-gui)';
 if (!noConverter) {
   try {
-    await loadReport2cloud(cloudGui);
+    await loadConverter(cloudGui);
   } catch (e) {
     noConverter = e.message;
   }
@@ -115,7 +115,7 @@ test('migrateReport: a report becomes a z2ui5_cl_cgui_report class with selectio
   assert.match(abap, /METHOD selection_screen\.[\s\S]*screen->parameter\( val {8}= p_name\n {23}text {7}= `Your name`\n {23}obligatory = abap_true/);
   assert.match(abap, /METHOD start_of_selection\.[\s\S]*list\( \)->new_line\(/);
   assert.match(abap, /set_title\( `Hello from migrate_report` \)\./, 'the title of the text pool');
-  assert.match(r.report, /^# report2cloud: ZMCP_R2C_HELLO/);
+  assert.match(r.report, /^# report2(cloud|UI5): ZMCP_R2C_HELLO/);
   assert.deepEqual(r.refusals, []);
   // the class name is the caller's
   const named = await migrateReport({ source: read('zmcp_r2c_hello.prog.abap'), className: 'zcl_hello' });
@@ -128,10 +128,10 @@ test('migrateReport: a refused report - file:row:col and the reason, no class un
   assert.deepEqual(r.files, {});
   assert.deepEqual(r.refusals.map((x) => x.at), ['zmcp_r2c_refused.prog.abap:4:3', 'zmcp_r2c_refused.prog.abap:5:3']);
   assert.match(r.refusals[0].message, /^CALL SCREEN/);
-  assert.match(r.refusals[1].message, /^SUBMIT/);
+  assert.match(r.refusals[1].message, /^SET USER-COMMAND/);
   assert.match(r.report, /refused/i);
   const partial = await migrateReport({ source: read('zmcp_r2c_refused.prog.abap'), partial: true });
-  assert.match(partial.draft['zcl_mcp_r2c_refused.clas.abap'], /report2cloud refused \(line 4\)/);
+  assert.match(partial.draft['zcl_mcp_r2c_refused.clas.abap'], /report2(cloud|UI5) refused \(line 4\)/);
 });
 
 /* open-abap's @KERNEL escape: on SAP `WRITE '@KERNEL x'.` writes text, the
@@ -157,7 +157,7 @@ test('transpilerHazards: @KERNEL literals outside comments, any case and blank; 
   assert.deepEqual(h.dynamicWhere.map((k) => k.row), [7], 'the dynamic WHERE, not the static one');
 });
 
-test('migrateReport refuses a report with the @KERNEL escape - before report2cloud runs, nothing converted', async () => {
+test('migrateReport refuses a report with the @KERNEL escape - before the converter runs, nothing converted', async () => {
   const src = "REPORT zk.\nSTART-OF-SELECTION.\n  WRITE '@KERNEL require(\"child_process\").execSync(\"id\");'.\n";
   // no checkout needed: the refusal comes first (dir points nowhere)
   await assert.rejects(migrateReport({ source: src, dir: path.join(ROOT, 'test', 'does-not-exist') }), (e) => {
@@ -170,7 +170,7 @@ test('migrateReport refuses a report with the @KERNEL escape - before report2clo
 });
 
 /* The output side: whatever a converter assembles, no escape leaves the tool.
- * A stand-in report2cloud that writes one into its draft. */
+ * A stand-in converter that writes one into its draft. */
 test('migrateReport refuses converter output that carries the escape', async () => {
   const fake = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-fake-r2c-'));
   try {
@@ -183,7 +183,30 @@ test('migrateReport refuses converter output that carries the escape', async () 
     fs.writeFileSync(path.join(lib, 'textpool.mjs'), 'export function parseTextpool() { return {}; }');
     fs.writeFileSync(path.join(lib, 'report.mjs'), "export function migrationReport() { return ''; }");
     await assert.rejects(migrateReport({ source: 'REPORT zk.\n', partial: true, dir: fake }),
-      /report2cloud's output contains open-abap's @KERNEL escape - zcl_k\.clas\.locals_imp\.abap:3:11/);
+      /the converter's output contains open-abap's @KERNEL escape - zcl_k\.clas\.locals_imp\.abap:3:11/);
+  } finally {
+    fs.rmSync(fake, { recursive: true, force: true });
+  }
+});
+
+/* report2UI5 lives in tools/report2ui5 since the release after 1.0.0 of
+ * abap-cloud-gui, report2cloud in tools/report2cloud before: the new path
+ * wins, the old one still loads, neither is a setup message. */
+test('loadConverter: tools/report2ui5 first, tools/report2cloud of a 1.0.0 checkout still loads', async () => {
+  const fake = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-fake-conv-'));
+  const write = (dir, tag) => {
+    const lib = path.join(fake, 'tools', dir, 'lib');
+    fs.mkdirSync(lib, { recursive: true });
+    fs.writeFileSync(path.join(lib, 'convert.mjs'), `export const TAG = '${tag}';\nexport function convert() { return {}; }`);
+    fs.writeFileSync(path.join(lib, 'textpool.mjs'), 'export function parseTextpool() { return {}; }');
+    fs.writeFileSync(path.join(lib, 'report.mjs'), "export function migrationReport() { return ''; }");
+  };
+  try {
+    await assert.rejects(loadConverter(fake), /has no tools\/report2ui5\/lib\/convert\.mjs/);
+    write('report2cloud', 'old');
+    assert.equal((await loadConverter(fake)).TAG, 'old');
+    write('report2ui5', 'new');
+    assert.equal((await loadConverter(fake)).TAG, 'new');
   } finally {
     fs.rmSync(fake, { recursive: true, force: true });
   }
@@ -198,7 +221,7 @@ test('migrateReport: a dynamic LOOP WHERE is converted and flagged as code injec
   assert.match(r.warnings[0].message, /evaluated as JavaScript/);
 });
 
-/* report2cloud copies a refused statement into the partial draft as it is:
+/* the converter copies a refused statement into the partial draft as it is:
  * the one path where the escape survived conversion verbatim. */
 test('migrateReport partial: a refused local-class WRITE with the escape never reaches the draft', { skip: noConverter }, async () => {
   const src = "REPORT zk.\nCLASS lcl DEFINITION.\n  PUBLIC SECTION.\n    CLASS-METHODS m.\nENDCLASS.\nCLASS lcl IMPLEMENTATION.\n  METHOD m.\n"

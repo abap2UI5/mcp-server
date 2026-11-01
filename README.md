@@ -246,7 +246,7 @@ fix it.
 | `app_act` | Fill fields and fire an event by name — validated against the snapshot, sent as the real model delta — and get the next snapshot | a session from app_start |
 | `run_unit_tests` | Run the deployed apps' test classes (on a checkout: or the whole transpiled tree) in the open-abap runtime: assertions, not pictures | a build (npm backend or abap2UI5 checkout) |
 | `verify_app` | The whole loop in one call — validate, deploy, build, unit, boot — stopping at the first stage that fails | what the stages need |
-| `migrate_report` | Convert a **classic ABAP report** into an abap-cloud-gui app class (report2cloud): the class files, the migration report (TODOs, unreleased tables with successors), the refusals with `file:row:col`; `deploy: true` builds it here and answers its selection screen's agent snapshot | abap-cloud-gui (with `npm ci`); `deploy` also the popups and a build |
+| `migrate_report` | Convert the **user interface of a classic ABAP report** into an abap-cloud-gui app class (report2UI5, the logic copied as it is): the class files, the migration report (TODOs, what was not carried over), the refusals with `file:row:col`; `deploy: true` builds it here and answers its selection screen's agent snapshot | abap-cloud-gui (with `npm ci`); `deploy` also the popups and a build |
 | `backend` | `status` / `start` / `stop` / `restart` of the local express backend | a build (start/restart; status and stop always work) |
 | `remove_app` | Delete a dev app from the sandbox, or list the deployed ones | the sandbox (as deploy_app) |
 
@@ -386,15 +386,18 @@ its `.prog.xml` text pool, and answers the class of the
 [abap-cloud-gui](https://github.com/abap2UI5-addons/abap-cloud-gui) addon
 that keeps its programming model — `selection_screen( )`,
 `start_of_selection( )`, `write( )`, `alv( )`, `message( )` — together with
-the migration report (the TODOs, the tables and APIs not released on ABAP
-Cloud with their successors, what the list does not carry over) and the
-statements it refused with `file:row:col` (dynpros, batch input, `SUBMIT`,
-native SQL). A report that carries open-abap's `@KERNEL` escape (`WRITE
+the migration report (the TODOs, what the list does not carry over) and the
+statements of the user interface it refused with `file:row:col` (a dynpro it
+cannot build, reading the list back by index). It converts the user interface
+only: the logic of the report - its tables, function modules, native SQL,
+batch input - is copied as it is, and whether it runs on the target system is
+yours to check. A report that carries open-abap's `@KERNEL` escape (`WRITE
 '@KERNEL ...'.`, JavaScript once transpiled) is refused before anything is
 converted, and a dynamic `WHERE (cond)` is converted but flagged under
 `warnings` - the runtime evaluates it with `eval()` (SECURITY.md). The
-converter is the addon's own `report2cloud`, run from a checkout of the
-addon — it is not on npm:
+converter is the addon's own `report2UI5` (`tools/report2ui5`; called
+`report2cloud` in the addon's 1.0.0, whose path still loads), run from a
+checkout of the addon — it is not on npm:
 
 ```sh
 git clone https://github.com/abap2UI5-addons/abap-cloud-gui   # ABAP_CLOUD_GUI_HOME
