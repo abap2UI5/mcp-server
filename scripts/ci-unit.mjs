@@ -219,6 +219,10 @@ export function renderSummary({ framework, mode, results }) {
       lines.push(`- ${r.cls.toUpperCase()}: no test include (deployed for the classes that call it)`);
       continue;
     }
+    if (r.notSelected) {
+      lines.push(`- ${r.cls.toUpperCase()}: not selected (--class named others)`);
+      continue;
+    }
     const tests = r.tests || [];
     ran += tests.filter((t) => !t.skipped).length;
     if (r.notRun) {
@@ -412,7 +416,11 @@ async function main(argv) {
         return 2;
       }
       for (const r of results) {
-        if (!withTests.includes(r.cls)) continue;
+        if (!withTests.includes(r.cls)) {
+          // a class with tests that --class did not name: not part of this run
+          if (r.testclasses && !r.deployError) r.notSelected = true;
+          continue;
+        }
         r.tests = run.tests.filter((t) => t.object === r.cls.toUpperCase());
         r.failed = run.failed && run.failed.object === r.cls.toUpperCase() ? run.failed : null;
         /* The generated runner stops at the first failure: a class it had

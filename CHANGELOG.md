@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **`abap2ui5-unit --class` no longer misdiagnoses the classes it did not run.** Every other class with a test include had no `tests` in its result, and the summary read that as "a test include, but the runner found no test method - is the local class FOR TESTING?". `scripts/ci-unit.mjs` marks such a class `notSelected` and the summary lists it as not selected, the way the VS Code extension's results view already skips it.
 - **`migrate_report` runs report2UI5.** abap-cloud-gui renamed its converter
   report2cloud to report2UI5 (`tools/report2ui5`) and narrowed it to the user
   interface of a report - the selection screen, the event blocks, the list,
