@@ -245,6 +245,19 @@ test('the CI runner reads the project\'s framework pin, collects classes, interf
   assert.match(stopped, /\*\*ZCL_F\*\*: not run - the runner stops at the first failure \(ZCL_E\)/);
   assert.doesNotMatch(stopped, /found no test method/);
   assert.match(stopped, /1 test method\(s\) ran, 1 class\(es\) failing/);
+  /* --class narrows the run: a class with a test include that was not named
+   * ran nothing on purpose, and is not "a class without test methods" */
+  const narrowed = renderSummary({
+    framework: '1.145.0',
+    mode: 'npm',
+    results: [
+      { cls: 'zcl_g', testclasses: true, tests: [{ localClass: 'ltcl', method: 'ok_one' }], failed: null },
+      { cls: 'zcl_h', testclasses: true, notSelected: true },
+    ],
+  });
+  assert.match(narrowed, /- ZCL_H: not selected \(--class named others\)/);
+  assert.doesNotMatch(narrowed, /found no test method/);
+  assert.match(narrowed, /1 test method\(s\) ran, 0 class\(es\) failing/);
 });
 
 /* abap2ui5-unit runs on the npm package by default: a checkout somebody
