@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **The linter's 0.10 line is admitted.** The peer ranges on
+  `@abap2ui5/linter` and `@abap2ui5/linter-render` are `>=0.8.0 <0.11.0`
+  (were `<0.10.0`), so a project on linter 0.10.0 installs this server
+  without an ERESOLVE. The exports the server imports (`.`, `./findings`,
+  `./config`, `./rule-docs` and the shapes behind them) are unchanged in
+  0.10.0, and the full suite is green against a 0.10.0 tarball installed as
+  the peer (`AI_VIEW_CHECK_HOME` pointed at it). `package-lock.json` keeps
+  the linter it resolved before - only the range moved.
 - **`abap2ui5-unit --class` no longer misdiagnoses the classes it did not run.** Every other class with a test include had no `tests` in its result, and the summary read that as "a test include, but the runner found no test method - is the local class FOR TESTING?". `scripts/ci-unit.mjs` marks such a class `notSelected` and the summary lists it as not selected, the way the VS Code extension's results view already skips it.
 - **`migrate_report` runs report2UI5.** abap-cloud-gui renamed its converter
   report2cloud to report2UI5 (`tools/report2ui5`) and narrowed it to the user
