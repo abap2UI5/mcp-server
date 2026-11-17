@@ -630,6 +630,26 @@ with UI5's JSONModel path semantics (`selectedContexts[0]/sPath` is `null`
 there, so it is `null` here) - and refused naming `args[i]` everywhere else;
 docs/agent-snapshot.md "Row event parameters" is the list.
 
+**Windowed tables** (abap2UI5 1.149.0 on, `window_bind_tab`; protocol
+`spec/windowed-tables.md`, normative) are the one place the client sends a
+request no view wire names: the model holds the first rows and
+`MODEL.__WINDOW.<path>` the state, the snapshot adds `total` and `window`
+to such a table (`windowStateOf` in `lib/snapshot.mjs`; an absent `TOTAL` is
+0 - the backend leaves initial values out), and `app_act { window }` sends
+`___ZZZ_WIN` with `[path, count]`, `[path, count, sort]` or `[path, count,
+"", filter]` exactly as `core/WindowModel.js` `_z2ui5Send` builds them -
+validated first (`windowPlan` in `lib/appclient.mjs`: a column the rows do
+not have, an operator outside `FilterOperator`, a count that is no positive
+integer are refused, nothing sent). A `BINDING_CALL` sort or filter wire on
+such a table is the action `@BINDING_CALL` and sends what the list binding
+sends for it (`bindingCallPlan`). Edits stay `__delta` POSITIONS in the
+order held - the backend maps them to its rows; never send the table whole
+or the `__WINDOW` key. The rule to keep: the client names only the part of
+the order it was asked to set, as the frontend does - the order is the
+backend's and no response tells it. `test/fixtures/agent/window-agent.json`
+is recorded against 1.149.0 from `test/fixtures/agent-app/zcl_agent_mcp_window`
+(30 rows, a window of 5).
+
 ### The screen in the chat — `lib/mcp-app.mjs`, `lib/adaptive-card.mjs`
 
 The snapshot is the agent's view; two optional surfaces show the same screen
@@ -1234,8 +1254,9 @@ a minute) and skipped by itself even then when the registry or GitHub
 cannot be reached and with `A2UI5_MCP_SKIP_NETWORK_TESTS=1`.
 `test/agent-integration.test.mjs` sits behind the same gate: it builds `test/fixtures/agent-app/zcl_agent_mcp`
 (a form, a table with a row action and selection, a popup) and
-`zcl_agent_mcp_pick` (a SelectDialog value help, a MessagePopover) on the published
-package and operates it through `lib/appclient.mjs` and through the server's
+`zcl_agent_mcp_pick` (a SelectDialog value help, a MessagePopover) and
+`zcl_agent_mcp_window` (a windowed table - it needs a runtime from 1.149.0
+on) on the published package and operates it through `lib/appclient.mjs` and through the server's
 app tools over stdio (about 25 s). The agent snapshot's pure halves are
 `test/snapshot.test.mjs` (the parsers, the slot bookkeeping, the snapshot on
 the recorded sample sessions of `test/fixtures/agent/`, the contract shape)

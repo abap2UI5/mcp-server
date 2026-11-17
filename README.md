@@ -336,6 +336,32 @@ app_act { session, values: { "/T_SUGGESTION_SEL/2/SELKZ": true }, event: "POPUP_
   -> layer "main", f3 = "BLACK", f4 = "Smith", message { toast, "value selected" }
 ```
 
+**Windowed tables** (abap2UI5 1.149.0 on, `window_bind_tab( val = mt_rows
+window = 100 )`): the model holds the first rows and the backend the rest.
+The snapshot says so - `rowCount` is the rows held, `total` all rows the
+filter lets through, `truncated` is true while rows are missing, and
+`window.more` names the call that loads the next window. `app_act` with
+`window` instead of `event` sends the framework's window request
+(`___ZZZ_WIN`; the app's `main( )` does not run) and asks the backend for
+more rows, or for the first rows of a new sort or filter over all rows:
+
+```text
+app_act { session, window: { table: "t1" } }
+  -> t1 rowCount 10, total 30, window.more "... loads rows 11-15 ..."
+app_act { session, window: { table: "t1", filter: [["STATUS", "EQ", "OPEN"]],
+                             sort: [{ column: "DUE", descending: true }] } }
+  -> t1 rowCount 5, total 10: the five open orders due last
+```
+
+A filter item is a condition `["COLUMN", "OPERATOR", value, value2?]`
+(ANDed with the others) or a list of them (ORed); a part left out is kept by
+the backend, `[]` clears it; a column the rows do not have, or an operator
+outside UI5's `FilterOperator`, is refused before anything is sent. A cell
+edit after a sort addresses the rows as the snapshot shows them - the
+backend writes it into the row behind that position. A `BINDING_CALL` sort
+or filter button of such a table is the action `@BINDING_CALL` and sends
+the same request the UI5 frontend's list binding sends.
+
 The snapshot shape is shared with the VS Code extension and the ABAP agent
 addon; [docs/agent-snapshot.md](docs/agent-snapshot.md) is its reference —
 the derivation rules, the operations, the deviations from the original

@@ -131,19 +131,29 @@ test('every recorded act, built by the page from the snapshot on screen, sends e
       }
       const a = step.arg;
       // explicit args are values only a browser computes - the page has no
-      // way to supply them; the agent's call keeps the replay in sync
-      if (a.args) {
+      // way to supply them, nor a sort, a filter or a count of a window
+      // request; the agent's call keeps the replay in sync
+      if (a.args || (a.window && Object.keys(a.window).some((k) => k !== 'table'))) {
         snap = await client.act(snap.session, a);
         continue;
       }
-      const action = actionOf(snap, a.event, a.row);
-      assert.ok(action, `${name}: no action ${a.event} on the screen`);
       const values = {};
       for (const [k, v] of Object.entries(a.values || {})) {
         const t = targetOf(snap, k);
         assert.ok(t, `${name}: no target ${k}`);
         values[t.kind === 'field' ? t.field.id : t.path] = v;
       }
+      if (a.window) {
+        // the "More rows" button of a windowed table
+        const call = buildActCall(snap, { window: snap.tables.find((t) => t.id === a.window.table || t.path === a.window.table).id, values });
+        assert.deepEqual(Object.keys(call.arguments), ['session', 'window', ...(Object.keys(values).length ? ['values'] : [])]);
+        const { session, ...rest } = call.arguments;
+        snap = await client.act(session, rest);
+        viaPage++;
+        continue;
+      }
+      const action = actionOf(snap, a.event, a.row);
+      assert.ok(action, `${name}: no action ${a.event} on the screen`);
       const call = buildActCall(snap, { action: action.id, values, row: a.row });
       assert.equal(call.name, 'app_act');
       assert.equal(call.arguments.session, snap.session);
@@ -615,4 +625,17 @@ test('the real page: untouched inputs send nothing, typing and focus survive a f
     await browser.close();
     srv.close();
   }
+});
+
+test('a windowed table: the page says how many rows the backend holds and its "More rows" button is app_act { window }', async () => {
+  const [first] = await snapshotsOf('window-agent');
+  const html = renderScreen({ snapshot: first, canAct: true });
+  assert.match(html, /5 of 30 rows shown - the backend holds the rest <button type="button" data-window="t1">More rows<\/button>/);
+  assert.ok(!/page with max_rows/.test(html));
+  assert.deepEqual(buildActCall(first, { window: 't1', values: { '/ROWS/0/CHECKED': true } }).arguments, { session: first.session, window: { table: 't1' }, values: { '/ROWS/0/CHECKED': true } });
+  assert.throws(() => buildActCall(first, { window: 't2' }), /'t2' is no windowed table of this screen/);
+  assert.throws(() => buildActCall(first, { window: 't1', values: { '/ROWS/0/TITLE': 'x' } }), /column TITLE of table t1 is not editable/);
+  const whole = { ...first, tables: [{ ...first.tables[0], rowCount: 30, total: 30, truncated: false, window: { size: 5 } }] };
+  assert.throws(() => buildActCall(whole, { window: 't1' }), /holds all its 30 row\(s\)/);
+  assert.ok(!renderScreen({ snapshot: whole, canAct: true }).includes('data-window'));
 });

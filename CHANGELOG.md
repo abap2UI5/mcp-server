@@ -2,6 +2,46 @@
 
 ## Unreleased
 
+- **Windowed tables: the snapshot tells the truth, and `app_act` loads,
+  sorts and filters them on the backend** (#70). abap2UI5 1.149.0's
+  `window_bind_tab( )` sends the first rows of a table and the state under
+  `MODEL.__WINDOW.<path>` (`TOTAL`, `COUNT`, `SIZE`); the client showed the
+  window as the whole table (`rowCount` 4, `truncated` false), could not ask
+  for more and listed the `BINDING_CALL` sort and filter buttons as
+  browser-only. Now:
+  - a windowed table's snapshot carries `total` (all rows the filter lets
+    through) next to `rowCount` (the rows held), `truncated: true` while
+    rows are missing, and `window: { size, more? }` - `more` names the
+    `app_act` that loads the next window. Both keys are additive and only on
+    such a table (snapshot v1 stays; docs/agent-snapshot.md "Windowed
+    tables");
+  - `app_act { session, window: { table, count?, sort?, filter? } }` sends
+    the framework's window request `___ZZZ_WIN` - `[path, count]`, `[path,
+    count, sort]`, `[path, count, "", filter]`, exactly as the UI5 list
+    binding builds them - with the pending edits as its delta, and adopts
+    the answer (new draft id, full model; the app's `main( )` does not
+    run). `count` defaults to the next window, or one window after a sort or
+    filter; a part left out is kept by the backend, `[]` clears it. A filter
+    item is a condition `["COLUMN", "OPERATOR", value, value2?]` or a list of
+    them (ORed); the items are ANDed. Unknown columns (matched without
+    regard to case against the rows' and the template's columns, remembered
+    across roundtrips), operators outside UI5's `FilterOperator`, a missing
+    `BT`/`NB` bound and a count that is no positive integer are refused
+    before anything is sent;
+  - a `BINDING_CALL` sort or filter wire on a windowed table is the action
+    `@BINDING_CALL` and sends the request the list binding sends for it;
+  - cell edits stay `__delta` positions in the order held - pinned by a
+    test that edits after a sort and checks the backend changed the row
+    shown there;
+  - the MCP Apps screen shows "n of total rows" and a "More rows" button
+    (`app_act { window: { table } }`).
+  Recorded against `@abap2ui5/node-runtime` 1.149.0 (`test/fixtures/agent/
+  window-agent.json`, app `test/fixtures/agent-app/zcl_agent_mcp_window`),
+  and run end to end in `test/agent-integration.test.mjs`. The vendored
+  copies of `lib/{viewxml,snapshot,appclient}.mjs` (abap2UI5/protocol,
+  playground, frontend-webcomponent, vscode-extension, cap2UI5) pick it up
+  with a re-vendor; `lib/viewxml.mjs` is unchanged.
+
 ## 1.1.0 - 2026-11-16
 
 - **The linter's 0.10 line is admitted.** The peer ranges on
