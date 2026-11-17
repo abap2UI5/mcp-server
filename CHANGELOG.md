@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 1.2.0 - 2026-11-17
+
+- **The linter's 0.11 line is admitted.** The peer ranges on
+  `@abap2ui5/linter` and `@abap2ui5/linter-render` are `>=0.8.0 <0.12.0`
+  (were `<0.11.0`), so a project on linter 0.11.0 installs this server
+  without an ERESOLVE. What 0.11.0 changed in `./rule` (`defineRule( )`
+  without the card, `defineCard( )`) is a subpath this server does not
+  import; the exports it does (`.` `checkFiles`/`screenshotFiles`,
+  `./findings`, `./fix`, `./config`, `./properties`, `./render`,
+  `./rule-docs` with `RULE_DOCS` still carrying `summary`, `detail` and
+  `example`) are all there, and the full suite is green against 0.11.0
+  tarballs of both packages installed as the peers (`AI_VIEW_CHECK_HOME`
+  pointed at it, and without). `package-lock.json` keeps the linter it
+  resolved before - only the range moved.
 - **Windowed tables: the snapshot tells the truth, and `app_act` loads,
   sorts and filters them on the backend** (#70). abap2UI5 1.149.0's
   `window_bind_tab( )` sends the first rows of a table and the state under
