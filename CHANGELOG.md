@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.2.0 - 2026-11-17
+
 - **The linter's 0.11 line is admitted.** The peer ranges on
   `@abap2ui5/linter` and `@abap2ui5/linter-render` are `>=0.8.0 <0.12.0`
   (were `<0.11.0`), so a project on linter 0.11.0 installs this server
