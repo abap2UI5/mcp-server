@@ -608,6 +608,7 @@ Over the postMessage bridge the page:
 | handshake | `ui/initialize` (`protocolVersion` 2026-01-26) -> `ui/notifications/initialized` |
 | show | `ui/notifications/tool-result`: the result's text block (or `structuredContent`) parsed as snapshot v1 and rendered - fields as inputs, actions as buttons (a message box close action as one button per choice), tables with their editable cells and row actions, messages, texts, `pending`, `unsupported` |
 | act | a button press -> `tools/call` `app_act { session, event: <action id>, values: { <field id or cell path>: value } of the inputs the user CHANGED, row?, args?: the box choice at the `$action` position, max_rows?: the tool input's }` - only when the host proxies tool calls (`hostCapabilities.serverTools`), one at a time |
+| more rows | a windowed table's "More rows" button (shown while `window.more` is set) -> `tools/call` `app_act { session, window: { table: <table id> }, values?, max_rows? }` |
 | refresh | `tools/call` `app_describe { session }` |
 | tell the model | after a successful act, `ui/update-model-context` with what was sent and the new session (when the host offers `updateModelContext`) |
 | size, teardown | `ui/notifications/size-changed`; `ui/resource-teardown` and `ping` answered |

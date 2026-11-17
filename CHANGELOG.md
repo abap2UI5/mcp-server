@@ -33,6 +33,8 @@
   - cell edits stay `__delta` positions in the order held - pinned by a
     test that edits after a sort and checks the backend changed the row
     shown there;
+  - the MCP Apps screen shows "n of total rows" and a "More rows" button
+    (`app_act { window: { table } }`).
   Recorded against `@abap2ui5/node-runtime` 1.149.0 (`test/fixtures/agent/
   window-agent.json`, app `test/fixtures/agent-app/zcl_agent_mcp_window`),
   and run end to end in `test/agent-integration.test.mjs`. The vendored
