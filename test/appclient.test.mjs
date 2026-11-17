@@ -1119,3 +1119,224 @@ test('signal: a caller\'s cancel aborts the roundtrip in flight, refuses the act
   await rejects(c.start('z_t', { signal: gone.signal }), /^cancelled by the caller/);
   assert.equal(n, sent, 'nothing reached the transport');
 });
+
+// ------------------------------------------------------ windowed tables ----
+
+/* A fetch that answers every request with the first response of a fixture
+ * (a fresh draft id each time, `edit` changing its model first) and keeps
+ * the bodies - for what a request is built of, not what the backend does. */
+function echoBackend(name, edit = (m) => m) {
+  const first = fixture(name).steps[0].exchange.response;
+  const sent = [];
+  let n = 0;
+  const fetchImpl = async (url, init) => {
+    sent.push(JSON.parse(init.body).value);
+    const res = JSON.parse(JSON.stringify(first));
+    n += 1;
+    res.S_FRONT.ID = `D${n}`;
+    res.MODEL = edit(res.MODEL);
+    return new Response(JSON.stringify(res), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  return { client: createAppClient({ baseUrl: BASE, fetchImpl }), sent };
+}
+
+test('windowed table (1.149.0): more rows, a sort and a filter over all rows, and the @BINDING_CALL buttons, as recorded', async () => {
+  const { snaps, sent } = await run('window-agent');
+  const ids = (s) => s.tables[0].rows.map((r) => r.ID);
+  assert.deepEqual(snaps.map((s) => `${s.tables[0].rowCount}/${s.tables[0].total}`), ['5/30', '10/30', '5/10', '5/10', '5/10', '5/10', '12/30', '12/30', '12/30']);
+  // more rows: [path, count], the count cumulative from row 1 and sent as a string
+  assert.deepEqual(sent[1].S_FRONT, { ID: snaps[0].session, EVENT: '___ZZZ_WIN', T_EVENT_ARG: ['/ROWS', '10'] });
+  assert.deepEqual(ids(snaps[1]), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  // a sort and a filter: one window of the new order, both parts named
+  assert.deepEqual(sent[2].S_FRONT.T_EVENT_ARG, ['/ROWS', '5', '[{"PATH":"DUE","DESCENDING":true}]', '[[["STATUS","EQ","OPEN",null]]]']);
+  assert.deepEqual(ids(snaps[2]), [7, 19, 10, 22, 1]);
+  // the sort button: only the sort is named, the backend keeps the filter
+  assert.deepEqual(sent[4].S_FRONT.T_EVENT_ARG, ['/ROWS', '5', '[{"PATH":"QTY","DESCENDING":true}]']);
+  assert.deepEqual(ids(snaps[4]), [10, 22, 13, 4, 25]);
+  assert.ok(snaps[4].tables[0].rows.every((r) => r.STATUS === 'OPEN'));
+  // the filter button: the sort as "", the filter named
+  assert.deepEqual(sent[5].S_FRONT.T_EVENT_ARG, ['/ROWS', '5', '', '[[["STATUS","EQ","OPEN",null]]]']);
+  // [] clears both parts; an explicit count
+  assert.deepEqual(sent[6].S_FRONT.T_EVENT_ARG, ['/ROWS', '12', '[]', '[]']);
+  assert.deepEqual(ids(snaps[6]), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+  // a window request does not run the app (MAINS stays), an event does
+  assert.deepEqual(snaps.map((s) => s.texts[1]), ['1', '1', '1', '2', '2', '2', '2', '3', '4']);
+  assert.ok(!sent.some((b) => b.MODEL && '__WINDOW' in b.MODEL), 'the window state is never sent back');
+});
+
+test('windowed table: a cell edit after a sort goes out as the __delta position and lands in that row', async () => {
+  const { snaps, sent } = await run('window-agent');
+  // sorted by DUE desc, filtered to OPEN: position 2 is ID 10
+  assert.equal(snaps[2].tables[0].rows[2].ID, 10);
+  assert.deepEqual(sent[3].MODEL, { ROWS: { __delta: { 2: { QTY: 77, CHECKED: true } } } });
+  assert.equal(snaps[3].texts[0], '10:77', 'the app found the edit in row ID 10, not in its second row');
+  // an edit that travels WITH a window request: written before the order changes
+  assert.equal(snaps[5].tables[0].rows[1].ID, 22);
+  assert.deepEqual(sent[6].MODEL, { ROWS: { __delta: { 1: { CHECKED: true } } } });
+  assert.equal(snaps[7].texts[0], '10:77 22:30');
+  // a row action reads the row it is given in the order held now
+  assert.deepEqual(sent[8].S_FRONT.T_EVENT_ARG, [2]);
+  assert.equal(snaps[8].texts[0], 'opened 2');
+});
+
+test('windowed table: window.count, window.sort and window.filter are checked before anything is sent', async () => {
+  const { client, sent } = echoBackend('window-agent');
+  const s = await client.start('zcl_agent_mcp_window');
+  const refused = async (win, re, extra = {}) => {
+    const before = sent.length;
+    await rejects(client.act(s.session, { window: win, ...extra }), re);
+    assert.equal(sent.length, before, `nothing sent for ${JSON.stringify(win)}`);
+  };
+  await refused([], /`window` is an object: \{ table/);
+  await refused({ table: 't1', sorted: [] }, /`window` has no key 'sorted' - its keys: table, count, sort, filter/);
+  await refused({}, /window\.table names the table .* windowed tables on this screen: t1 \(\/ROWS, 5 of 30 rows held\)/);
+  await refused({ table: 't7' }, /no table 't7' on this screen/);
+  for (const count of [0, -1, 1.5, '1e3', 'ten', true, 1_000_000_000]) await refused({ table: 't1', count }, /window\.count is the number of rows wanted, counted from the first row \(not an offset\)/);
+  await refused({ table: 't1', sort: [{ column: 'PRICE' }] }, /window\.sort\[0\]: 'PRICE' is no column of table t1 \(\/ROWS\) - its columns: .*CHECKED.*DUE.*ID.*QTY.*STATUS.*TITLE/);
+  await refused({ table: 't1', sort: [{ column: 'QTY', descending: 'yes' }] }, /window\.sort\[0\]\.descending is true or false/);
+  await refused({ table: 't1', sort: [{ column: 'QTY', order: 'desc' }] }, /window\.sort\[0\] has no key 'order' - its keys: column, descending/);
+  await refused({ table: 't1', sort: 'QTY' }, /window\.sort is a list of sorters/);
+  await refused({ table: 't1', filter: { column: 'QTY' } }, /window\.filter is a list whose items are conditions/);
+  await refused({ table: 't1', filter: [['WEIGHT', 'EQ', 1]] }, /window\.filter\[0\]: 'WEIGHT' is no column of table t1/);
+  await refused({ table: 't1', filter: [['QTY', 'LIKE', 1]] }, /'LIKE' is no filter operator - one of: EQ, NE, LT, LE, GT, GE, BT, NB, Contains/);
+  await refused({ table: 't1', filter: [['QTY', 'EQ']] }, /window\.filter\[0\] is \["<COLUMN>", "<OPERATOR>", value, value2\?\] - 2 element/);
+  await refused({ table: 't1', filter: [['QTY', 'EQ', null]] }, /the value to compare QTY with is a string, a number or a boolean/);
+  await refused({ table: 't1', filter: [['QTY', 'EQ', { a: 1 }]] }, /the value to compare QTY with/);
+  await refused({ table: 't1', filter: [['QTY', 'BT', 1]] }, /BT needs value2, the upper bound/);
+  await refused({ table: 't1', filter: [['QTY', 'EQ', 1, 2]] }, /value2 is the upper bound of BT and NB only/);
+  await refused({ table: 't1', filter: [[['QTY', 'EQ', 1], 'x']] }, /window\.filter\[0\] is neither a condition nor a non-empty list of them/);
+  await refused({ table: 't1', filter: [[]] }, /window\.filter\[0\] is neither a condition/);
+  await refused({ table: 't1' }, /pass `event` or `window`, not both/, { event: 'CHECK' });
+  await refused({ table: 't1' }, /`row` belongs to a row action - a window request takes none/, { row: 0 });
+  await refused({ table: 't1' }, /`args` belong to an event/, { args: [] });
+  await refused({ table: 't1', count: 5 }, /no field 'nope' on this screen/, { values: { nope: 1 } });
+  assert.equal(sent.length, 1, 'only the start went out');
+});
+
+test('windowed table: columns match without regard to case, a condition may be an object, a list of conditions is one ORed group', async () => {
+  const { client, sent } = echoBackend('window-agent');
+  const s = await client.start('zcl_agent_mcp_window');
+  await client.act(s.session, {
+    window: {
+      table: 'ROWS',
+      count: '7',
+      sort: { column: 'due' },
+      filter: [{ column: 'status', operator: 'eq', value: 'OPEN' }, [['qty', 'gt', 20], ['QTY', 'bt', 1, 3]], ['title', 'contains', 'order 1']],
+    },
+  });
+  assert.deepEqual(sent[1].S_FRONT, {
+    ID: 'D1',
+    EVENT: '___ZZZ_WIN',
+    T_EVENT_ARG: ['/ROWS', '7', '[{"PATH":"DUE","DESCENDING":false}]',
+      '[[["STATUS","EQ","OPEN",null]],[["QTY","GT",20,null],["QTY","BT",1,3]],[["TITLE","Contains","order 1",null]]]'],
+  });
+  assert.equal(sent[1].MODEL, undefined, 'no edit pending: no model');
+});
+
+test('windowed table: the columns stay known after a filter that lets no row through; a table that is no window is refused', async () => {
+  let empty = false;
+  const { client, sent } = echoBackend('window-agent', (m) => {
+    if (!empty) return m;
+    const { ROWS, ...rest } = m; // the backend leaves an empty table and an initial TOTAL out
+    return { ...rest, __WINDOW: { ROWS: { SIZE: 5 } } };
+  });
+  let s = await client.start('zcl_agent_mcp_window');
+  empty = true;
+  s = await client.act(s.session, { window: { table: 't1', filter: [['STATUS', 'EQ', 'NONE']] } });
+  assert.deepEqual([s.tables[0].rowCount, s.tables[0].total, s.tables[0].truncated, s.tables[0].window], [0, 0, false, { size: 5 }]);
+  s = await client.act(s.session, { window: { table: 't1', filter: [], sort: [{ column: 'checked', descending: true }] } });
+  assert.deepEqual(sent[2].S_FRONT.T_EVENT_ARG, ['/ROWS', '5', '[{"PATH":"CHECKED","DESCENDING":true}]', '[]']);
+  await rejects(client.act(s.session, { window: { table: 't1' } }), /table t1 holds all 0 row\(s\) its filter lets through - nothing more to load/);
+
+  const plain = echoBackend('window-agent', (m) => {
+    const { __WINDOW, ...rest } = m;
+    return rest;
+  });
+  const p = await plain.client.start('zcl_agent_mcp_window');
+  plain.sent.length = 0;
+  assert.ok(!('window' in p.tables[0]));
+  await rejects(plain.client.act(p.session, { window: { table: 't1' } }), /table t1 \(\/ROWS\) is no windowed table - the model carries all its 5 row\(s\); this screen has no windowed table/);
+  assert.equal(plain.sent.length, 0);
+});
+
+test('windowed table: a failed window request takes its edits back and keeps the draft id', async () => {
+  const start = fixture('window-agent').steps[0].exchange.response;
+  let calls = 0;
+  const client = createAppClient({
+    baseUrl: BASE,
+    fetchImpl: async () => {
+      calls += 1;
+      return calls === 1 ? new Response(JSON.stringify(start), { status: 200 }) : new Response('boom', { status: 500 });
+    },
+  });
+  const s = await client.start('zcl_agent_mcp_window');
+  await rejects(client.act(s.session, { values: { 't1/0/QTY': 99 }, window: { table: 't1' } }), /HTTP 500: boom/);
+  const after = client.describe(s.session);
+  assert.equal(after.session, s.session);
+  assert.equal(after.tables[0].rows[0].QTY, 7);
+  assert.equal(after.pending, undefined);
+});
+
+test('@BINDING_CALL: a groups JSON, a cleared filter and a $model value are sent as the UI5 list binding sends them; what the browser only logs is refused', async () => {
+  const button = (text, args) => `<Button text="${text}" press=".eF('BINDING_CALL', 'tab', 'items', ${args})"/>`;
+  const xml = '<mvc:View xmlns="sap.m" xmlns:mvc="sap.ui.core.mvc"><Page><Input value="{/Q}"/>'
+    + button('groups', "'filter', '[[[\\&quot;A\\&quot;,\\&quot;EQ\\&quot;,1],[\\&quot;A\\&quot;,\\&quot;EQ\\&quot;,2]],[[\\&quot;B\\&quot;,\\&quot;Contains\\&quot;,\\&quot;x\\&quot;]],[]]'")
+    + button('clear', "'filter', 'A', 'EQ'")
+    + button('search', "'filter', 'B', 'Contains', ${/Q}")
+    + button('bad json', "'filter', '[oops'")
+    + button('bad op', "'filter', 'A', 'LIKE', 'x'")
+    + button('sort', "'sort', 'B'")
+    + button('unsort', "'sort'")
+    + '<Table id="tab" items="{/T}"><columns><Column/><Column/></columns><items><ColumnListItem><cells><Text text="{A}"/><Text text="{B}"/></cells></ColumnListItem></items></Table></Page></mvc:View>';
+  const response = { S_FRONT: { ID: 'S0', APP: 'Z', S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'display', 'MAIN', xml]] } }, MODEL: { Q: 'zz', T: [{ A: 1, B: 'x' }], __WINDOW: { T: { TOTAL: 50, COUNT: 1, SIZE: 25 } } } };
+  const sent = [];
+  let n = 0;
+  const client = createAppClient({
+    baseUrl: BASE,
+    fetchImpl: async (url, init) => {
+      if (init.body.includes('S_FRONT":{"ID')) sent.push(JSON.parse(init.body).value);
+      n += 1;
+      return new Response(JSON.stringify({ ...response, S_FRONT: { ...response.S_FRONT, ID: `S${n}` }, ...(n > 1 ? { S_FRONT: { ID: `S${n}`, APP: 'Z' } } : {}) }), { status: 200 });
+    },
+  });
+  let s = await client.start('z');
+  assert.deepEqual(s.actions.map((a) => `${a.label}:${a.event}`), ['groups', 'clear', 'search', 'bad json', 'bad op', 'sort', 'unsort'].map((l) => `${l}:@BINDING_CALL`));
+  const fire = async (label, values) => {
+    s = await client.act(s.session, { event: s.actions.find((a) => a.label === label).id, values });
+    return sent[sent.length - 1].S_FRONT.T_EVENT_ARG;
+  };
+  assert.deepEqual(await fire('groups'), ['/T', '25', '', '[[["A","EQ",1,null],["A","EQ",2,null]],[["B","Contains","x",null]]]']);
+  assert.deepEqual(await fire('clear'), ['/T', '25', '', '[]']);
+  assert.deepEqual(await fire('search', { '/Q': 'typed' }), ['/T', '25', '', '[[["B","Contains","typed",null]]]']);
+  assert.deepEqual(sent[sent.length - 1].MODEL, { Q: 'typed' }, 'the edit travels with the window request');
+  assert.deepEqual(await fire('sort'), ['/T', '25', '[{"PATH":"B","DESCENDING":false}]']);
+  assert.deepEqual(await fire('unsort'), ['/T', '25', '[]']);
+  const before = sent.length;
+  await rejects(client.act(s.session, { event: s.actions.find((a) => a.label === 'bad json').id }), /malformed filter groups JSON - the browser only logs it and sends nothing/);
+  await rejects(client.act(s.session, { event: s.actions.find((a) => a.label === 'bad op').id }), /a filter row with path 'A' and operator 'LIKE'/);
+  assert.equal(sent.length, before);
+});
+
+test('windowed table: a second window request while one is in flight waits and continues the new draft id', async () => {
+  const start = fixture('window-agent').steps[0].exchange.response;
+  const sent = [];
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const client = createAppClient({
+    baseUrl: BASE,
+    fetchImpl: async (url, init) => {
+      const body = JSON.parse(init.body).value;
+      sent.push(body);
+      if (sent.length === 2) await gate;
+      return new Response(JSON.stringify({ ...start, S_FRONT: { ...start.S_FRONT, ID: `W${sent.length}` } }), { status: 200 });
+    },
+  });
+  const s = await client.start('zcl_agent_mcp_window');
+  const first = client.act(s.session, { window: { table: 't1' } });
+  const second = client.act(s.session, { window: { table: 't1', count: 15 } });
+  release();
+  await first;
+  const last = await second;
+  assert.deepEqual(sent.slice(1).map((b) => [b.S_FRONT.ID, ...b.S_FRONT.T_EVENT_ARG]), [[s.session, '/ROWS', '10'], ['W2', '/ROWS', '15']]);
+  assert.equal(last.session, 'W3');
+});

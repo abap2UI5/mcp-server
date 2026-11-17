@@ -125,6 +125,8 @@ so far, all additive:
 | `tables[].control` `sap.m.SelectDialog`, `sap.m.TableSelectDialog` | selection dialogs are tables; their `confirm` is a row action (the pick, see [the pick](#the-pick-a-selection-dialogs-confirm)) |
 | `messages[].source` `popover`, `messageview` | the items of a `sap.m.MessagePopover` / `sap.m.MessageView` |
 | `messages[].subtitle`, `messages[].description` | optional, on those items |
+| `tables[].total`, `tables[].window` | optional, on a [windowed table](#windowed-tables) only: all rows the filter lets through, and `{ size, more? }` |
+| `actions[].event` `@BINDING_CALL` | a `BINDING_CALL` sort or filter wire on a windowed table - the client sends the window request the UI5 list binding sends |
 
 ### fields
 
@@ -218,8 +220,14 @@ a message box with `onClose` → `args: ["$action"]`, the choices in the label
 `.eF('CONTROL_GLOBAL','VIEW_SLOTS','destroy','POPUP'|'POPOVER')` (what
 `_event_client( cs_event-popup_close )` writes) is the action `@CLOSE_POPUP` /
 `@CLOSE_POPOVER`. Acting on it closes the slot locally and drops that slot's
-unsent edits; nothing goes to the backend, the draft id stays. Every other
-`.eF(...)` wire is listed in `unsupported`.
+unsent edits; nothing goes to the backend, the draft id stays. A
+`.eF('BINDING_CALL', <id>, <aggregation>, 'sort'|'filter', …)` wire whose
+control (by id, in the same view) binds that aggregation to a
+[windowed table](#windowed-tables) is the action `@BINDING_CALL` (its `args`
+the wire's): acting on it sends the window request the UI5 frontend's list
+binding sends for it. Every other `.eF(...)` wire is listed in `unsupported`
+- a `BINDING_CALL` on a table that is no window too: it sorts or filters in
+the browser only.
 
 ### tables
 
@@ -234,13 +242,18 @@ default-model path:
 | `label` | `headerText`, `title`, the first `Title` in `headerToolbar`/`extension`/`infoToolbar`, else `name` |
 | `control` | the table control |
 | `columns` | `[{ name, label }]`: sap.m.Table and TableSelectDialog — the cells of the `ColumnListItem` template in order, the label from the column header; list items (`StandardListItem`, …, the SelectDialog's) — their bound properties (label = property name); sap.ui.table — each column's `template`, the label from `label` or the column's label control. `name` is the cell's relative binding path (`TITLE`), else `COL<n>` |
-| `rowCount` | length of the bound array |
+| `rowCount` | length of the bound array - for a windowed table the rows the model holds, which are the rows `row` and a cell path address |
+| `total` | *(extension, windowed tables only)* `/__WINDOW/<path>/TOTAL`: the rows the backend's filter lets through, at least `rowCount` |
 | `rows` | the first `maxRows` rows (default 20, max 200): per column the cell's main property resolved in the row (`text`, `value`, `selected`, …); plus `selectionField` when there is one |
-| `truncated` | `rowCount > rows.length` |
+| `truncated` | `rowCount > rows.length`, or - windowed - `rowCount < total` |
 | `selectionMode` | `None`/`Single`/`Multi` from `mode` (sap.m) or `selectionMode` (sap.ui.table, default `MultiToggle` → `Multi`); a selection dialog is `Multi` when `multiSelect` is true, else `Single` |
 | `editableCells` | columns whose cell is an input-like control bound to a row property and not disabled in every row; plus `selectionField` |
 | `layer` | as above |
 | `selectionField` | *(extension)* the row property the template's `selected` is bound to (`SELKZ`), when the table selects at all — selecting a row is setting it: `"/T_TAB/2/SELKZ": true` |
+| `window` | *(extension, windowed tables only)* `{ size, more? }`: `size` the rows of one window (`SIZE`); `more`, only while `rowCount < total`, a sentence naming the `app_act` that loads the next window |
+
+Keys in this order; `total` (after `rowCount`), `selectionField` and
+`window` (last) only when they apply.
 
 Header controls that are more than text (a select-all CheckBox, a sort
 Button) and toolbars are described like any control on the screen.
@@ -341,7 +354,7 @@ backend first, like `run_app`.
 
 The current state from the last response kept — no roundtrip.
 
-### `app_act({ session, values?, event?, args?, row?, max_rows?, format? })` → snapshot
+### `app_act({ session, values?, event?, window?, args?, row?, max_rows?, format? })` → snapshot
 
 1. **Validate**, before anything changes:
    - `values` keys resolve to a field by `id`, `path` or `name`
@@ -395,12 +408,79 @@ The current state from the last response kept — no roundtrip.
    than 2 is refused whole - its draft id, view and model included - naming
    both numbers; a response without `PROTOCOL` is let through.
 6. **One roundtrip at a time** per session: an `app_act` with an `event`
-   while another is in flight waits for it, then runs on the screen and the
+   (or a `window`) while another is in flight waits for it, then runs on the screen and the
    draft id that one left (so it may name the draft id the one in flight
    continues). `values` without an event start no roundtrip and apply at
    once, as typing does while the browser waits; the roundtrip in flight
    clears only the edits it carried, so these stay pending, survive its
    model push and travel with the next event.
+7. **With `window`** instead of `event`: a [window request](#windowed-tables),
+   validated, then sent with the pending edits of the table's model as its
+   delta, and folded in like any answer.
+
+### Windowed tables
+
+A table the app binds with `window_bind_tab( val = mt_rows window = n )`
+(abap2UI5 1.149.0 on; protocol `spec/windowed-tables.md`, revision 0.5) does
+not travel whole: the model holds its first rows, and `MODEL.__WINDOW.<path>`
+the state `{ TOTAL, COUNT, SIZE }` (an initial value is left out of the JSON,
+so an absent `TOTAL` or `COUNT` is 0). A table is windowed when the model
+carries a state for its absolute path - the UI5 frontend's rule
+(`core/WindowModel.js` `bindList`). Its snapshot carries `total` and
+`window`, `rowCount` stays the rows held, and `truncated` is true while
+fewer rows are held than `total`.
+
+`app_act({ session, window: { table, count?, sort?, filter? }, values? })`
+sends the request the UI5 list binding sends (`_z2ui5Send`) - the event
+`___ZZZ_WIN`, which the backend answers without running the app (a new draft
+id, the full model):
+
+| `window` | Sent as `T_EVENT_ARG` |
+| --- | --- |
+| `{ table }` | `[path, count]` with `count` the next window: the rows held plus one, rounded up to whole windows, at most `total` (`_z2ui5Ensure`); refused when every row is held |
+| `{ table, count }` | `[path, "<count>"]` - the first `count` rows (1 to 999,999,999, a number or a string of digits; counted from row 1, not an offset) |
+| `{ table, sort }` | `[path, count, "[{\"PATH\":…,\"DESCENDING\":…}]"]`, `count` one window unless given (`_z2ui5Restart`) |
+| `{ table, filter }` | `[path, count, "", "[[[PATH, OPERATOR, value1, value2]]…]"]` |
+| `{ table, sort, filter }` | `[path, count, sort, filter]` |
+
+- `table` is the table's id, path (with or without the leading slash) or
+  name; a table that is no window is refused naming the windowed ones.
+- `sort` is a list of `{ column, descending? }` (one object is taken as a
+  list of one): the first sorter that tells two rows apart decides.
+- `filter` is a list; each item is a **condition** - `[column, operator,
+  value, value2?]` or `{ column, operator, value, value2? }` - which is a
+  group of its own, or a non-empty **list of conditions**, one group whose
+  conditions are ORed. The groups are ANDed (the backend's shape,
+  `WindowModel.filterGroups`). `operator` is one of UI5's
+  `FilterOperator` names (`EQ NE LT LE GT GE BT NB Contains NotContains
+  StartsWith NotStartsWith EndsWith NotEndsWith`, any case); `value` is a
+  string, number or boolean; `value2` is the upper bound of `BT`/`NB` and
+  refused on the others. Dates compare as `yyyy-MM-dd` or `yyyyMMdd`.
+- A part left out (or `null`) says nothing - the backend keeps the sort or
+  filter it holds; `[]` clears it. The backend keeps ONE sort (the last set,
+  by the app's `t_sort` or a request) and ANDs the request's filter with the
+  app's `t_filter`.
+- A `column` is matched without regard to case against the row's columns -
+  every key a held row has with a scalar value and every column the
+  template binds, remembered across roundtrips (a filter that lets no row
+  through keeps them known); an unknown one is refused listing them.
+- `event`, `row` and `args` are refused beside `window`; `values` are
+  applied first and travel as the delta. A refused request sends nothing and
+  changes nothing; a failed one takes its edits back.
+- **Edits are positions.** The row of a cell path (`"/ROWS/2/QTY"`) is the
+  position in the rows held, in the order the backend sent them; the delta
+  goes out as `{ ROWS: { __delta: { "2": { QTY: … } } } }` and the backend
+  writes it into the row behind that position, after a sort as before
+  (the delta is applied before a window request changes the order).
+
+`@BINDING_CALL` follows `core/actions/BindingCall.js` and the list binding:
+a `sort` with `[path, descending]` sends `[{ PATH, DESCENDING }]` (`"X"` /
+`"true"` / `true` descending), one without a path `[]`; a `filter` with
+`[path, operator, value1, value2?]` sends one group, without a value it
+clears (`[]`), and a single argument that is a JSON array of groups sends
+those groups. Each asks for one window. What the browser only logs and does
+not send (a malformed groups JSON, an operator outside the whitelist) is
+refused, sending nothing.
 
 ### The pick: a selection dialog's confirm
 
@@ -663,6 +743,10 @@ What differs from Contract B as first written, and why:
   message of a run in a MessagePopover).
 - **Actions from `T_CUSTOM`** (toast/box `onClose`, `START_TIMER`) are
   actions with triggers `close` and `timer`.
+- **Windowed tables** carry `total` and `window`, and `app_act` takes
+  `window` - alternative (c) of the protocol's open question 13; the
+  semantic profile (revision 0.5) still describes a windowed table's
+  `rowCount` alone.
 
 ## What the snapshot cannot see (yet)
 
@@ -674,8 +758,12 @@ What differs from Contract B as first written, and why:
   `${$parameters>/item}` is marshalled by the browser with all its
   properties - pass what the app reads).
 - Client-only state: a table's selection without a `selected` binding, a
-  growing table's loaded page, the open tab of an IconTabBar (all tabs'
-  content is described), scroll position, focus.
+  growing table's loaded page (of a table that is no window), the open tab
+  of an IconTabBar (all tabs' content is described), scroll position, focus.
+- Rows of a windowed table past the first `max_rows` (200 at most) of the
+  ones held: the window request always answers rows from the first one, and
+  the snapshot shows rows from the first one - an agent narrows a long list
+  with `window.filter` and `window.sort` rather than paging through it.
 - Named models (`i18n`, `device`, `message`, OData models in switch mode),
   XML templating (`template:repeat`), element bindings (`bindElement`).
 - Custom controls (`z2ui5.cc.*` other than the MessageManager, any

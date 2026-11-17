@@ -12,7 +12,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseViewXml, parseBinding, evalExpression, parseWire, describeArg, controlName } from '../lib/viewxml.mjs';
-import { buildSnapshot, analyzeScreen, applyResponse, emptyState, nameOfPath, FRONTEND_EVENTS, SNAPSHOT_VERSION } from '../lib/snapshot.mjs';
+import {
+  buildSnapshot, analyzeScreen, applyResponse, emptyState, nameOfPath, FRONTEND_EVENTS, SNAPSHOT_VERSION, BINDING_CALL_EVENT,
+  windowStateOf, nextWindowCount,
+} from '../lib/snapshot.mjs';
 
 const FIX = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'agent');
 const fixture = (name) => JSON.parse(fs.readFileSync(path.join(FIX, `${name}.json`), 'utf8'));
@@ -190,6 +193,8 @@ const CONTRACT_KEYS = ['snapshotVersion', 'session', 'app', 'title', 'layer', 'f
 const FIELD_KEYS = ['id', 'path', 'name', 'label', 'control', 'kind', 'value', 'required', 'editable', 'layer'];
 const ACTION_KEYS = ['id', 'event', 'args', 'label', 'control', 'trigger', 'enabled', 'scope', 'layer'];
 const TABLE_KEYS = ['id', 'path', 'name', 'label', 'control', 'columns', 'rowCount', 'rows', 'truncated', 'selectionMode', 'editableCells', 'layer'];
+// the required keys and, where they are set, the optional ones - in this order
+const TABLE_ORDER = ['id', 'path', 'name', 'label', 'control', 'columns', 'rowCount', 'total', 'rows', 'truncated', 'selectionMode', 'editableCells', 'layer', 'selectionField', 'window'];
 // type, text and source always; the others optional, in this order
 const MESSAGE_KEYS = ['type', 'text', 'source', 'field', 'subtitle', 'description'];
 
@@ -212,8 +217,15 @@ test('every fixture snapshot has exactly the contract\'s shape (Contract B, snap
       assert.equal(a.scope === 'row', Boolean(a.table), `${where}table exactly on row actions`);
     }
     for (const t of s.tables) {
-      assert.deepEqual(Object.keys(t).filter((k) => k !== 'selectionField'), TABLE_KEYS, `${where}table ${t.id}`);
+      assert.deepEqual(Object.keys(t), TABLE_ORDER.filter((k) => TABLE_KEYS.includes(k) || k in t), `${where}table ${t.id}`);
       assert.ok(['None', 'Single', 'Multi'].includes(t.selectionMode));
+      // a windowed table carries both window keys, any other table neither
+      assert.equal('total' in t, 'window' in t, `${where}table ${t.id}: total and window together`);
+      if (t.window) {
+        assert.ok(Number.isInteger(t.total) && t.total >= t.rowCount, `${where}total counts at least the rows held`);
+        assert.deepEqual(Object.keys(t.window), ['size', 'more'].filter((k) => k in t.window), `${where}window keys`);
+        assert.equal('more' in t.window, t.rowCount < t.total, `${where}more exactly while rows are not held`);
+      }
     }
     for (const m of s.messages) {
       assert.ok(['success', 'info', 'warning', 'error'].includes(m.type), `${where}${m.type}`);
@@ -645,4 +657,69 @@ test('an out-of-range character reference stays as written; model markup of uncl
   const big = at(view('<FormattedText htmlText="{/H}"/>'), { H: `${'<'.repeat(80000)}<b>x</b>` });
   assert.ok(Date.now() - started < 1500, `${Date.now() - started} ms`);
   assert.ok(big);
+});
+
+// ---------------------------------------------------- windowed tables ----
+
+test('windowStateOf reads /__WINDOW/<path>: an initial TOTAL or COUNT the backend leaves out is 0, no state is no window', () => {
+  assert.deepEqual(windowStateOf({ __WINDOW: { T: { TOTAL: 12, COUNT: 4, SIZE: 4 } } }, '/T'), { total: 12, count: 4, size: 4 });
+  assert.deepEqual(windowStateOf({ __WINDOW: { S: { T: { TOTAL: 3, COUNT: 3, SIZE: 100 } } } }, '/S/T'), { total: 3, count: 3, size: 100 }, 'a table in a structure');
+  assert.deepEqual(windowStateOf({ __WINDOW: { MR_TAB: { '*': { TOTAL: 2, COUNT: 2, SIZE: 1 } } } }, '/MR_TAB/*'), { total: 2, count: 2, size: 1 }, 'behind a data reference');
+  assert.deepEqual(windowStateOf({ __WINDOW: { T: { SIZE: 5 } } }, '/T'), { total: 0, count: 0, size: 5 }, 'a filter that lets nothing through (recorded on 1.149.0)');
+  assert.equal(windowStateOf({ T: [] }, '/T'), null);
+  assert.equal(windowStateOf({ __WINDOW: { T: [1] } }, '/T'), null);
+  assert.equal(windowStateOf({ __WINDOW: { T: { TOTAL: 'x' } } }, '/T'), null);
+  assert.equal(windowStateOf({ __WINDOW: { T: { TOTAL: 1 } } }, 'T'), null, 'a relative path is no window (WindowModel windowName)');
+});
+
+test('nextWindowCount asks for whole windows, as the UI5 list binding does (_z2ui5Ensure), never past TOTAL', () => {
+  assert.equal(nextWindowCount(4, { size: 4, total: 12 }), 8);
+  assert.equal(nextWindowCount(10, { size: 4, total: 12 }), 12);
+  assert.equal(nextWindowCount(10, { size: 4, total: 30 }), 12);
+  assert.equal(nextWindowCount(0, { size: 100, total: 3 }), 3);
+});
+
+test('a windowed table (window-agent, 1.149.0): rowCount the rows held, total, truncated, and a `more` naming the call', () => {
+  const s = snapOf('window-agent', 1);
+  const [t] = s.tables;
+  assert.deepEqual([t.id, t.path, t.rowCount, t.total, t.truncated, t.rows.length], ['t1', '/ROWS', 5, 30, true, 5]);
+  assert.deepEqual(t.columns.map((c) => c.name), ['ID', 'TITLE', 'STATUS', 'DUE', 'QTY', 'CHECKED', 'COL7']);
+  assert.deepEqual(t.editableCells, ['QTY', 'CHECKED']);
+  assert.equal(t.window.size, 5);
+  assert.match(t.window.more, /^5 of 30 rows held - app_act \{ session, window: \{ table: "t1" \} \} loads rows 6-10;/);
+  assert.ok(!Object.keys(s).includes('__WINDOW') && !t.columns.some((c) => c.name === '__WINDOW'));
+  assert.deepEqual(snapOf('window-agent', 2).tables[0].rows.map((r) => r.ID), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 'the next window adopted');
+  const filtered = snapOf('window-agent', 3).tables[0];
+  assert.deepEqual([filtered.rowCount, filtered.total], [5, 10], 'TOTAL counts the rows the filter lets through');
+  assert.deepEqual(filtered.rows.map((r) => `${r.ID}:${r.STATUS}:${r.DUE}`), ['7:OPEN:2026-03-22', '19:OPEN:2026-03-22', '10:OPEN:2026-03-15', '22:OPEN:2026-03-15', '1:OPEN:2026-03-08']);
+  const all = snapOf('window-agent', 7, { maxRows: 50 }).tables[0];
+  assert.deepEqual([all.rowCount, all.total, all.truncated, all.rows.length], [12, 30, true, 12]);
+  // every row held: not truncated, and no `more`
+  const st = applyResponse(emptyState(), fixture('window-agent').steps[0].exchange.response);
+  st.models.MAIN.data.__WINDOW.ROWS = { TOTAL: 5, COUNT: 5, SIZE: 5 };
+  const whole = buildSnapshot({ state: st }).tables[0];
+  assert.deepEqual([whole.rowCount, whole.total, whole.truncated, whole.window], [5, 5, false, { size: 5 }]);
+});
+
+test('BINDING_CALL sort/filter on a windowed list is an action (@BINDING_CALL); on a plain list it stays browser-only', () => {
+  const s = snapOf('window-agent', 1);
+  assert.deepEqual(s.actions.map((a) => `${a.id}:${a.event}:${a.label}`), ['a1:CHECK:Check', `a2:${BINDING_CALL_EVENT}:Sort by quantity`, `a3:${BINDING_CALL_EVENT}:Only open`, 'a4:OPEN:Open']);
+  assert.deepEqual(s.actions[1].args, ['orders', 'items', 'sort', 'QTY', 'X']);
+  assert.deepEqual(s.actions[2].args, ['orders', 'items', 'filter', 'STATUS', 'EQ', 'OPEN']);
+  assert.deepEqual(s.unsupported, []);
+  // the same view over a table without a window state: the plain JSON binding sorts in the browser
+  const st = applyResponse(emptyState(), fixture('window-agent').steps[0].exchange.response);
+  delete st.models.MAIN.data.__WINDOW;
+  const plain = buildSnapshot({ state: st });
+  assert.ok(!plain.actions.some((a) => a.event === BINDING_CALL_EVENT));
+  assert.ok(!('window' in plain.tables[0]) && !('total' in plain.tables[0]));
+  assert.equal(plain.unsupported.filter((u) => /^frontend action BINDING_CALL/.test(u)).length, 2, JSON.stringify(plain.unsupported));
+  // a BINDING_CALL naming no control of the view, or a method other than sort/filter, is no window request either
+  const xml = '<mvc:View xmlns="sap.m" xmlns:mvc="sap.ui.core.mvc"><Page><Button text="x" press=".eF(\'BINDING_CALL\', \'nope\', \'items\', \'sort\', \'A\')"/>'
+    + '<Button text="y" press=".eF(\'BINDING_CALL\', \'t\', \'items\', \'refresh\')"/>'
+    + '<Table id="t" items="{/T}"><columns><Column/></columns><items><ColumnListItem><cells><Text text="{A}"/></cells></ColumnListItem></items></Table></Page></mvc:View>';
+  const odd = buildSnapshot({ response: { S_FRONT: { ID: 'X', APP: 'Z', S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'display', 'MAIN', xml]] } }, MODEL: { T: [{ A: 1 }], __WINDOW: { T: { TOTAL: 9, COUNT: 1, SIZE: 1 } } } } });
+  assert.equal(odd.actions.length, 0);
+  assert.equal(odd.unsupported.length, 2);
+  assert.equal(odd.tables[0].total, 9);
 });

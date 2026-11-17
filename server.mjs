@@ -402,9 +402,9 @@ async function handleSystem(name, args = {}, { signal } = {}) {
       const format = oneOf(args.format, { name: 'format', allowed: APP_FORMATS, dflt: defaultAppFormat() });
       return snapshotAnswer(async () => {
         /* a pending-only act sends nothing, so it needs no logon either */
-        if (args.event !== undefined && args.event !== null && args.event !== '') await sys.ready();
-        // `row` as given: the client checks it (as the sandbox's app_act does)
-        return client.act(args.session, { values: args.values, event: args.event, args: args.args, row: args.row, maxRows, signal });
+        if ((args.event !== undefined && args.event !== null && args.event !== '') || (args.window !== undefined && args.window !== null)) await sys.ready();
+        // `row` and `window` as given: the client checks them (as the sandbox's app_act does)
+        return client.act(args.session, { values: args.values, event: args.event, window: args.window, args: args.args, row: args.row, maxRows, signal });
       }, { format, client });
     }
     default:
@@ -1604,7 +1604,7 @@ async function handle(name, args = {}, ctx = {}) {
       // "", false and [] row 0 and true row 1
       const client = await agentClient();
       return snapshotAnswer(() => client.act(args.session, {
-        values: args.values, event: args.event, args: args.args, row: args.row, maxRows, signal: ctx.signal,
+        values: args.values, event: args.event, window: args.window, args: args.args, row: args.row, maxRows, signal: ctx.signal,
       }), { format, client });
     }
     case 'run_unit_tests': {

@@ -2,7 +2,10 @@
 // from the registry (the npm backend, the way a fresh machine gets it), an
 // app class with a form, a table with a row action and a selection, and a
 // popup (test/fixtures/agent-app/zcl_agent_mcp.clas.abap), and one with a
-// SelectDialog value help and a MessagePopover (zcl_agent_mcp_pick) deployed and built,
+// SelectDialog value help and a MessagePopover (zcl_agent_mcp_pick), and one
+// with a windowed table (zcl_agent_mcp_window, window_bind_tab - abap2UI5
+// 1.149.0 on: more rows, a sort and a filter over all rows, an edit after a
+// sort) deployed and built,
 // then operated through the wire protocol - first through lib/appclient.mjs,
 // then through the server itself over stdio (app_list, app_start, app_act,
 // app_describe), so the tool wiring is proven on the same build.
@@ -27,6 +30,7 @@ const PORT = 4451;
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const APP_FILE = path.join(ROOT, 'test', 'fixtures', 'agent-app', 'zcl_agent_mcp.clas.abap');
 const PICK_FILE = path.join(ROOT, 'test', 'fixtures', 'agent-app', 'zcl_agent_mcp_pick.clas.abap');
+const WINDOW_FILE = path.join(ROOT, 'test', 'fixtures', 'agent-app', 'zcl_agent_mcp_window.clas.abap');
 
 function reachable() {
   if (process.env.A2UI5_MCP_SKIP_NETWORK_TESTS) return 'A2UI5_MCP_SKIP_NETWORK_TESTS is set';
@@ -98,6 +102,7 @@ test('app_start / app_act / app_describe operate a real app on @abap2ui5/node-ru
   try {
     rt.deployApp({ className: 'zcl_agent_mcp', source: fs.readFileSync(APP_FILE, 'utf8') });
     rt.deployApp({ className: 'zcl_agent_mcp_pick', source: fs.readFileSync(PICK_FILE, 'utf8') });
+    rt.deployApp({ className: 'zcl_agent_mcp_window', source: fs.readFileSync(WINDOW_FILE, 'utf8') });
     const built = await rt.buildBackend({ mode: 'auto', withLint: false, onLine: (l) => log.push(l) });
     assert.equal(built.ok, true, `build:\n${built.tail}\n${log.slice(-20).join('\n')}`);
     assert.ok(rt.builtAppClasses().some((a) => a.app === 'ZCL_AGENT_MCP' && a.source === 'dev'), 'app_list sees the dev app');
@@ -153,6 +158,33 @@ test('app_start / app_act / app_describe operate a real app on @abap2ui5/node-ru
     assert.equal(p.fields[0].value, 'gamma', 'selectedItem.getTitle() of the picked row');
     assert.deepEqual(p.messages, [{ type: 'success', text: 'picked gamma selected gamma', source: 'popover' }], 'the pick selected SELKZ of that row');
 
+    // a windowed table - from the runtime's window_bind_tab on (1.149.0); a
+    // runtime without it fails the build of this app above, not here
+    let w = await client.start('zcl_agent_mcp_window');
+    const ids = (snap) => snap.tables[0].rows.map((r) => r.ID);
+    assert.deepEqual([w.tables[0].rowCount, w.tables[0].total, w.tables[0].truncated, w.tables[0].window.size], [5, 30, true, 5]);
+    assert.match(w.tables[0].window.more, /loads rows 6-10/);
+    w = await client.act(w.session, { window: { table: 't1' } });
+    assert.deepEqual(ids(w), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    w = await client.act(w.session, { window: { table: 't1', filter: [['STATUS', 'EQ', 'OPEN']], sort: [{ column: 'due', descending: true }] } });
+    assert.deepEqual([w.tables[0].rowCount, w.tables[0].total], [5, 10]);
+    assert.ok(w.tables[0].rows.every((r) => r.STATUS === 'OPEN'));
+    const dues = w.tables[0].rows.map((r) => r.DUE);
+    assert.deepEqual(dues, [...dues].sort().reverse(), 'sorted by DUE descending over all rows');
+    // an edit after the sort lands in the row shown at that position
+    const target = w.tables[0].rows[2].ID;
+    w = await client.act(w.session, { values: { 't1/2/QTY': 77, 't1/2/CHECKED': true }, event: 'CHECK' });
+    assert.equal(w.texts[0], `${target}:77`);
+    assert.equal(w.texts[1], '2', 'main( ) ran for the start and CHECK only, never for a window request');
+    // the sort button (BINDING_CALL) keeps the filter
+    w = await client.act(w.session, { event: w.actions.find((a) => a.label === 'Sort by quantity').id });
+    const qtys = w.tables[0].rows.map((r) => r.QTY);
+    assert.deepEqual(qtys, [...qtys].sort((x, y) => y - x));
+    assert.ok(w.tables[0].rows.every((r) => r.STATUS === 'OPEN'));
+    await assert.rejects(client.act(w.session, { window: { table: 't1', sort: [{ column: 'PRICE' }] } }), /'PRICE' is no column of table t1/);
+    w = await client.act(w.session, { window: { table: 't1', sort: [], filter: [], count: 40 } });
+    assert.deepEqual([w.tables[0].rowCount, w.tables[0].total, 'more' in w.tables[0].window], [30, 30, false]);
+
     // the same app through the server's tools, on the build above - the
     // server starts a backend of its own, so this process's goes first (and
     // a session of it is gone with it, which the client says)
@@ -162,7 +194,7 @@ test('app_start / app_act / app_describe operate a real app on @abap2ui5/node-ru
     try {
       await srv.rpc('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'agent-it', version: '0' } });
       const list = await srv.call('app_list', { filter: 'agent' });
-      assert.deepEqual(JSON.parse(list.content[0].text).apps, [{ app: 'ZCL_AGENT_MCP', source: 'dev' }, { app: 'ZCL_AGENT_MCP_PICK', source: 'dev' }]);
+      assert.deepEqual(JSON.parse(list.content[0].text).apps, [{ app: 'ZCL_AGENT_MCP', source: 'dev' }, { app: 'ZCL_AGENT_MCP_PICK', source: 'dev' }, { app: 'ZCL_AGENT_MCP_WINDOW', source: 'dev' }]);
       const started = await srv.call('app_start', { app: 'zcl_agent_mcp', values: { f1: 'Tool' } });
       assert.ok(!started.isError, started.content[0].text);
       const snap = JSON.parse(started.content[0].text);
@@ -183,6 +215,17 @@ test('app_start / app_act / app_describe operate a real app on @abap2ui5/node-ru
       const pick2 = JSON.parse((await srv.call('app_act', { session: pick1.session, event: 'PICKED', row: 1 })).content[0].text);
       assert.equal(pick2.fields[0].value, 'beta');
       assert.deepEqual(pick2.messages.map((m) => m.text), ['picked beta selected beta']);
+      // a window request through app_act
+      const win0 = JSON.parse((await srv.call('app_start', { app: 'zcl_agent_mcp_window' })).content[0].text);
+      assert.equal(win0.tables[0].total, 30);
+      const win1 = JSON.parse((await srv.call('app_act', { session: win0.session, window: { table: '/ROWS', filter: [['QTY', 'BT', 1, 5]], sort: [{ column: 'QTY' }] } })).content[0].text);
+      assert.deepEqual(win1.tables[0].rows.map((r) => r.QTY), [1, 2, 3, 4, 5]);
+      const badWin = await srv.call('app_act', { session: win1.session, window: { table: 't1', filter: [['QTY', 'LIKE', 1]] } });
+      assert.equal(badWin.isError, true);
+      assert.match(badWin.content[0].text, /'LIKE' is no filter operator/);
+      const notObject = await srv.call('app_act', { session: win1.session, window: 't1' });
+      assert.equal(notObject.isError, true);
+      assert.match(notObject.content[0].text, /window must be an object/);
     } finally {
       srv.close();
     }

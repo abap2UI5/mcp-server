@@ -131,8 +131,9 @@ test('every recorded act, built by the page from the snapshot on screen, sends e
       }
       const a = step.arg;
       // explicit args are values only a browser computes - the page has no
-      // way to supply them; the agent's call keeps the replay in sync
-      if (a.args) {
+      // way to supply them, nor a window request; the agent's call keeps
+      // the replay in sync
+      if (a.args || a.window) {
         snap = await client.act(snap.session, a);
         continue;
       }
