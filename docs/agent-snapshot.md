@@ -44,7 +44,11 @@ per roundtrip, and so does every implementation:
      `MODEL` = the **delta** of the model owned by the view the event was fired
      from: a scalar or structure edit ships the whole top-level attribute, a
      table cell ships `{ "T_TAB": { "__delta": { "<row>": { "COL": value } } } }`
-     (nested tables recursively; `buildDeltaFromPaths` in `core/Lib.js`).
+     (nested tables recursively; `buildDeltaFromPaths` in `core/Lib.js`). A
+     table behind a data reference is the model node `/<ATTR>/*`, and its
+     cell ships the delta on that node:
+     `{ "MR_TAB": { "*": { "__delta": { "<row>": { "COL": value } } } } }` - a
+     structure or a value behind a reference still ships whole.
 2. **Receive** `{ "S_FRONT": { "ID", "APP", "PROTOCOL": 2, "S_ACTION": { "T_SYSTEM": [...], "T_CUSTOM": [...] } }, "MODEL"? }`.
    `MODEL`, when present, is the full model of the app that answered; absent
    means "nothing bound changed" — the client keeps its model, including
@@ -501,8 +505,11 @@ the model delta, and the confirm's event parameters are the selected rows.
    write is a pending edit of the dialog's model and goes out with the
    confirm as its delta — only what changed, as the browser's two-way
    binding writes only changes. (The model path of a data reference ends in
-   `*`, `/MR_TAB_POPUP/*/0/ZZSELKZ`; the delta then ships the whole
-   attribute, as the frontend's `buildDeltaFromPaths` does.)
+   `*`, `/MR_TAB_POPUP/*/0/ZZSELKZ`; the delta then goes on that node,
+   `{ MR_TAB_POPUP: { "*": { __delta: { "0": { ZZSELKZ: true } } } } }`, as
+   the frontend's `buildDeltaFromPaths` does from abap2UI5 #3026 on - the
+   whole attribute it sent before is never written back into a windowed
+   table, so the pick was lost.)
 3. The selected rows: with a `selectionField`, every row whose field is
    truthy, in model order (a sorter of the items binding is not applied);
    without one, the row given. In single select it is the row given.
