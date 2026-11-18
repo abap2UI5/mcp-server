@@ -432,21 +432,26 @@ test('SelectDialog (samples-controls 623): its items are a table, confirm is the
   assert.equal(back.fields[0].value, 'Notebook Basic 17', 'the title of the picked row');
 });
 
-test('TableSelectDialog (abap-cloud-gui F4 through the popups): cells and column headers, ZZSELKZ the selection field', () => {
+test('TableSelectDialog (abap-cloud-gui F4, its own value help): cells and column headers, ZZSELKZ the selection field, windowed behind a data reference', () => {
   const s = snapOf('cgui-f4-06', 3);
-  assert.equal(s.app, 'Z2UI5_CL_POPUP_TO_SELECT');
+  assert.equal(s.app, 'Z2UI5_CL_CGUI_SELECT');
   assert.equal(s.layer, 'popup');
-  assert.equal(s.title, 'Single Select');
+  assert.equal(s.title, 'Select a Value');
   const [t] = s.tables;
   assert.equal(t.control, 'sap.m.TableSelectDialog');
-  assert.equal(t.path, '/MR_TAB_POPUP/*');
+  assert.equal(t.path, '/MR_VIEW/*');
   assert.deepEqual(t.columns, [{ name: 'WERKS', label: 'WERKS' }, { name: 'NAME', label: 'NAME' }]);
   assert.deepEqual(t.rows.map((r) => `${r.WERKS} ${r.NAME} ${r.ZZSELKZ}`), ['1000 Hamburg false', '2000 Walldorf false', '3000 Berlin false']);
   assert.equal(t.selectionMode, 'Single');
   assert.equal(t.selectionField, 'ZZSELKZ');
   assert.deepEqual(t.editableCells, ['ZZSELKZ']);
+  // window_bind_tab( ) over the data reference: the state at /__WINDOW/MR_VIEW/*
+  assert.equal(t.total, 3);
+  assert.deepEqual(t.window, { size: 100 });
   assert.deepEqual(s.actions.map((a) => `${a.event}:${a.scope}:${JSON.stringify(a.args)}`), [
-    'CANCEL:screen:[]', 'SEARCH:screen:["$parameters:value","$parameters:clearButtonPressed"]', 'CONFIRM:row:["$parameters:selectedContexts[0]/sPath"]',
+    'CGUI_SEL_SEARCH:screen:["$parameters:value"]',
+    'CGUI_SEL_CONFIRM:row:["$expr:${$parameters>/selectedItem} ? ${$parameters>/selectedItem}.getBindingContext().getPath() : \'\'"]',
+    'CGUI_SEL_CANCEL:screen:[]',
   ]);
   const back = snapOf('cgui-f4-06', 5);
   assert.equal(back.app, 'Z2UI5_CL_CGUI_R2C_06');

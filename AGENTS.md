@@ -620,8 +620,10 @@ its own table lacks: the tools need a backend, never the linter.
 `test/fixtures/agent/*.json` are real request/response pairs of
 abap2UI5/samples and samples-controls apps and of abap-cloud-gui's
 report2cloud runtime harness (recorded by driving the client against
-`@abap2ui5/node-runtime`; the `cgui-*` ones through that harness, with the
-popups addon); `test/appclient.test.mjs` replays them and fails
+`@abap2ui5/node-runtime`; the `cgui-*` ones through that harness -
+`cgui-popover-07` with the popups addon, `cgui-f4-06` re-recorded against
+1.149.0 through today's report2ui5 harness and its own value help);
+`test/appclient.test.mjs` replays them and fails
 on any request that differs from the recorded one. Re-record them when the
 protocol moves (the fixture's `note` says against which release). Values the
 browser computes are filled only where the browser's own rule is known and
@@ -644,8 +646,12 @@ integer are refused, nothing sent). A `BINDING_CALL` sort or filter wire on
 such a table is the action `@BINDING_CALL` and sends what the list binding
 sends for it (`bindingCallPlan`). Edits stay `__delta` POSITIONS in the
 order held - the backend maps them to its rows; never send the table whole
-or the `__WINDOW` key. The rule to keep: the client names only the part of
-the order it was asked to set, as the frontend does - the order is the
+or the `__WINDOW` key. A table behind a data reference is the model node
+`/<attr>/*`, and its delta goes on that node (`{ ATTR: { "*": { __delta } } }`,
+`buildDelta` as `core/Lib.js` `buildDeltaFromPaths` since abap2UI5 #3026) -
+shipped whole, a windowed one's edit is dropped. The rule to keep: the
+client names only the part of the order it was asked to set, as the
+frontend does - the order is the
 backend's and no response tells it. `test/fixtures/agent/window-agent.json`
 is recorded against 1.149.0 from `test/fixtures/agent-app/zcl_agent_mcp_window`
 (30 rows, a window of 5).
