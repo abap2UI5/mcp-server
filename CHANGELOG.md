@@ -17,6 +17,10 @@
   `cgui-f4-06` fixture is re-recorded against node-runtime 1.149.0 through
   abap-cloud-gui's runtime harness (its own value help over `MR_VIEW`): the
   pick goes out as `{ MR_VIEW: { "*": { __delta } } }` and lands.
+- **The UI5 Web Components frontend is named by its new repository,**
+  abap2UI5-addons/embed-webcomponent (was abap2UI5/frontend-webcomponent,
+  moved 2026-11-17), in `lib/mcp-app.mjs` and AGENTS.md. Comments only; none
+  of the vendored modules (`lib/{viewxml,snapshot,appclient}.mjs`) changes.
 
 ## 1.2.0 - 2026-11-17
 
