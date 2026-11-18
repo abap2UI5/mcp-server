@@ -567,11 +567,16 @@ refused naming `args[i]`.
 | `${$parameters>/P}.getCells()[n].get<Prop>()` | the same on the n-th cell: every cell of a `ColumnListItem`, the visible columns' templates of a grid table row |
 | `${$parameters>/P} ? <one of the above> : <literal>` | the shape when `P` is an item or a context (or truthy), else the literal (`'…'`, `"…"`, `null` or a number) |
 
-Example — the abap-cloud-gui F4 popup (`z2ui5_cl_popup_to_select`, single
-select, `selected="{ZZSELKZ}"`): `app_act({ event: "CONFIRM", row: 0 })`
-sends `T_EVENT_ARG: [null]` and `MODEL: { "MR_TAB_POPUP": { "*": [ … the
-filtered rows, row 0 with "ZZSELKZ": true … ] } }`; the popup reads
-`ZZSELKZ` and hands the row back. A `SelectDialog` with
+Example — the abap-cloud-gui F4 popup (`z2ui5_cl_cgui_select`, single
+select, `selected="{ZZSELKZ}"`, a windowed table behind the data reference
+`MR_VIEW`): after a search for "Ber", `app_act({ event: "CGUI_SEL_CONFIRM",
+row: 0 })` sends `T_EVENT_ARG: ["/MR_VIEW/*/0"]` (its
+`${$parameters>/selectedItem}.getBindingContext().getPath()`) and `MODEL: {
+"MR_VIEW": { "*": { "__delta": { "0": { "ZZSELKZ": true } } } } }`; the
+popup hands the row back. (Recorded against abap2UI5 1.149.0; the
+`z2ui5_cl_popup_to_select` of the popups addon, before, sent
+`T_EVENT_ARG: [null]` - its `selectedContexts[0]/sPath` is `null` in a
+JSONModel.) A `SelectDialog` with
 `confirm=".eB(['VH_CONFIRM'], ${$parameters>/selectedItem}.getTitle())"`
 and `<StandardListItem title="{NAME}"/>` sends the picked row's `NAME`.
 
