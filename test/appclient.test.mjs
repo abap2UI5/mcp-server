@@ -63,6 +63,38 @@ test('buildDelta builds the delta the frontend builds (core/Lib.js buildDeltaFro
   assert.deepEqual(buildDelta(['/T', '/T/0/Q'], data), { T: data.T }, 'a whole table wins over a cell');
 });
 
+// abap2UI5 node/tests/buildDeltaFromPaths.spec.js "Table behind a data
+// reference": an attribute TYPE REF TO data bound dereferenced is the node
+// <attr>/* of the model, and the backend looks for the delta there - shipped
+// whole, the edit of a windowed table (window_bind_tab) was dropped
+const REF_MODEL = {
+  MR_VIEW: { '*': [{ WERKS: '1000', ZZSELKZ: false }, { WERKS: '3000', ZZSELKZ: true }] },
+  MR_STRUC: { '*': { TAB: [{ F: 'a' }] } },
+  MR_VALUE: { '*': 'x' },
+};
+
+test('buildDelta behind a data reference: a cell edit is a __delta under the * node', () => {
+  assert.deepEqual(buildDelta(['/MR_VIEW/*/1/ZZSELKZ'], REF_MODEL), { MR_VIEW: { '*': { __delta: { 1: { ZZSELKZ: true } } } } });
+});
+
+test('buildDelta behind a data reference: two cells of two rows share the node', () => {
+  assert.deepEqual(buildDelta(['/MR_VIEW/*/1/ZZSELKZ', '/MR_VIEW/*/0/WERKS'], REF_MODEL),
+    { MR_VIEW: { '*': { __delta: { 1: { ZZSELKZ: true }, 0: { WERKS: '1000' } } } } });
+});
+
+test('buildDelta behind a data reference: the whole attribute wins in either order, and the model is not written', () => {
+  const before = JSON.stringify(REF_MODEL);
+  for (const order of [['/MR_VIEW', '/MR_VIEW/*/1/ZZSELKZ'], ['/MR_VIEW/*/1/ZZSELKZ', '/MR_VIEW']]) {
+    assert.deepEqual(buildDelta(order, REF_MODEL), { MR_VIEW: REF_MODEL.MR_VIEW }, order.join(' then '));
+  }
+  assert.equal(JSON.stringify(REF_MODEL), before);
+});
+
+test('buildDelta behind a data reference: a structure or a value still ships whole', () => {
+  assert.deepEqual(buildDelta(['/MR_STRUC/*/TAB/0/F'], REF_MODEL), { MR_STRUC: REF_MODEL.MR_STRUC });
+  assert.deepEqual(buildDelta(['/MR_VALUE/*'], REF_MODEL), { MR_VALUE: REF_MODEL.MR_VALUE });
+});
+
 test('errorText shows the error body verbatim: markup is text, nothing stripped or decoded (spec/errors.md)', () => {
   const body = 'abap2UI5 failed for <b>bold</b> &amp; <img src="x">\n\n--- error ---\n  at /?app_start=<script>x</script>  \n';
   assert.equal(errorText(500, body), 'HTTP 500: abap2UI5 failed for <b>bold</b> &amp; <img src="x">\n\n--- error ---\n  at /?app_start=<script>x</script>');
@@ -148,13 +180,15 @@ test('SelectDialog (samples-controls 623): confirm with `row` sends the picked i
   assert.equal(snaps[3].fields[0].value, 'Notebook Basic 17');
 });
 
-test('TableSelectDialog (abap-cloud-gui F4): the pick selects ZZSELKZ, and selectedContexts[0]/sPath is null as in the browser', async () => {
+test('TableSelectDialog (abap-cloud-gui F4): the pick selects ZZSELKZ as the row delta behind the data reference', async () => {
   const { snaps, sent } = await run('cgui-f4-06');
-  assert.deepEqual(sent[3].S_FRONT.T_EVENT_ARG, ['Ber', false]);
-  // a JSONModel path has no [n] syntax: UI5 reads undefined there, JSON sends null
-  assert.deepEqual(sent[4].S_FRONT.T_EVENT_ARG, [null]);
-  // the '*' segment of a data reference is no row: the frontend ships the whole attribute
-  assert.deepEqual(sent[4].MODEL, { MR_TAB_POPUP: { '*': [{ NAME: 'Berlin', WERKS: '3000', ZZSELKZ: true }] } });
+  assert.deepEqual(sent[3].S_FRONT.T_EVENT_ARG, ['Ber']);
+  // ${$parameters>/selectedItem}.getBindingContext().getPath() of the picked row: the model path behind the reference
+  assert.deepEqual(sent[4].S_FRONT.T_EVENT_ARG, ['/MR_VIEW/*/0']);
+  // the '*' node of a data reference carries the __delta (core/Lib.js
+  // buildDeltaFromPaths, abap2UI5 #3026) - shipped whole, a windowed table's
+  // edit is dropped by the backend
+  assert.deepEqual(sent[4].MODEL, { MR_VIEW: { '*': { __delta: { 0: { ZZSELKZ: true } } } } });
   assert.equal(snaps[4].fields.find((f) => f.name === 'P_PLANT').value, '3000');
 });
 

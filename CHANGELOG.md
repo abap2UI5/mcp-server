@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **A cell of a table behind a data reference travels as its row delta.**
+  An attribute `TYPE REF TO data` bound dereferenced is the model node
+  `/<ATTR>/*`, so its cell path is `/<ATTR>/*/<row>/<field>`; `buildDelta`
+  took the `*` for an unknown shape and shipped the whole attribute, which
+  the backend never writes back into a windowed table (`window_bind_tab`) -
+  the edit, or the pick of a `TableSelectDialog` over such a table, was
+  dropped. The delta now goes on the `*` node, where the backend looks for
+  it: `{ ATTR: { "*": { __delta: { <row>: { COL: value } } } } }`, as the
+  UI5 frontend's `buildDeltaFromPaths` does from abap2UI5 #3026 on. A whole
+  attribute queued by another path still wins, a structure or a value
+  behind a reference still ships whole, and every other path is unchanged.
+  `test/appclient.test.mjs` mirrors the four core specs, and the
+  `cgui-f4-06` fixture is re-recorded against node-runtime 1.149.0 through
+  abap-cloud-gui's runtime harness (its own value help over `MR_VIEW`): the
+  pick goes out as `{ MR_VIEW: { "*": { __delta } } }` and lands.
 - **The UI5 Web Components frontend is named by its new repository,**
   abap2UI5-addons/embed-webcomponent (was abap2UI5/frontend-webcomponent,
   moved 2026-11-17), in `lib/mcp-app.mjs` and AGENTS.md. Comments only; none
