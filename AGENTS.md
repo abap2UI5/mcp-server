@@ -676,7 +676,7 @@ act with the session it last saw is refused naming the current one).
   (`connect-src 'none'`, scripts and styles inline only) runs it, and
   `test/mcp-app.test.mjs` fails on anything that would need more (and on
   `</script` or `<!--` in the module, which would break the inline script).
-  Why not the UI5 Web Components frontend (abap2UI5/frontend-webcomponent):
+  Why not the UI5 Web Components frontend (abap2UI5-addons/embed-webcomponent):
   it is a protocol client with its own draft (it would bypass app_act), and
   its build is 106 files / 14.7 MB loaded through dynamic chunk imports,
   which an inline document under that CSP cannot load. The pure half of the

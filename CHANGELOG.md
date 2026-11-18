@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **The UI5 Web Components frontend is named by its new repository,**
+  abap2UI5-addons/embed-webcomponent (was abap2UI5/frontend-webcomponent,
+  moved 2026-11-17), in `lib/mcp-app.mjs` and AGENTS.md. Comments only; none
+  of the vendored modules (`lib/{viewxml,snapshot,appclient}.mjs`) changes.
+
 ## 1.2.0 - 2026-11-17
 
 - **The linter's 0.11 line is admitted.** The peer ranges on
