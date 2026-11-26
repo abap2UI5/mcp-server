@@ -49,21 +49,35 @@ per roundtrip, and so does every implementation:
      cell ships the delta on that node:
      `{ "MR_TAB": { "*": { "__delta": { "<row>": { "COL": value } } } } }` - a
      structure or a value behind a reference still ships whole.
-2. **Receive** `{ "S_FRONT": { "ID", "APP", "PROTOCOL": 2, "S_ACTION": { "T_SYSTEM": [...], "T_CUSTOM": [...] } }, "MODEL"? }`.
-   `MODEL`, when present, is the full model of the app that answered; absent
+   - the tick of a `START_TIMER` adds `TIMER: true` to `S_FRONT` - for a
+     backend of protocol 3 only (protocol `spec/request.md` "The timer tick").
+2. **Receive** `{ "S_FRONT": { "ID", "APP", "PROTOCOL": 3, "VIEWS": {...}, "NAV": {...}, "ACTIONS": [...] }, "MODEL"? }`
+   (protocol 3, abap2UI5 1.151.0 on; a section that says nothing is absent).
+   A backend of protocol 2 (up to 1.150.0 - a real system on an older
+   release) answers `{ "S_FRONT": { "ID", "APP", "PROTOCOL": 2, "S_ACTION": { "T_SYSTEM": [...], "T_CUSTOM": [...] } }, "MODEL"? }`;
+   the client reads both, by the number the response declares
+   (`protocolOf` in `lib/snapshot.mjs`). `MODEL`, when present, is the full model of the app that answered; absent
    means "nothing bound changed" — the client keeps its model, including
    what the user typed.
 3. **Fold** the answer into the screen state:
-   - `T_SYSTEM` `["VIEW_SLOTS","display",<slot>,<xml>,<options>]` fills one of
-     five slots — `MAIN`, `NEST`, `NEST2` (nested views, part of the page),
-     `POPUP`, `POPOVER`; `["VIEW_SLOTS","destroy",<slot>]` empties one. A MAIN
-     display also drops the nested views, the popup and the popover.
+   - `VIEWS.<slot>` `{ XML, OPT? }` fills one of five slots — `MAIN`,
+     `NEST`, `NEST2` (nested views, part of the page), `POPUP`, `POPOVER`;
+     `{ DESTROY: true }` empties one. The entries are applied in slot order
+     (MAIN first), whatever order the keys arrive in. A MAIN display also
+     drops the nested views, the popup and the popover. A slot `VIEWS` does
+     not name stays as it is - also when the response names another `APP`:
+     the backend states the teardown of an app switch. (Protocol 2: the
+     `T_SYSTEM` entries `["VIEW_SLOTS","display",<slot>,<xml>,<options>]` /
+     `["VIEW_SLOTS","destroy",<slot>]` in list order, and another `APP`
+     takes the popup and the popover down on the client side.)
    - `MAIN`/`NEST`/`NEST2` share one model; `POPUP` and `POPOVER` own a copy.
      A slot displayed by this response takes this response's `MODEL`; a
      `MODEL` is pushed into an open slot only when the slot belongs to the app
      that answered — a popup app (`nav_app_call` of a `z2ui5_cl_pop_*`) never
      overwrites the caller's page behind it.
-   - `T_CUSTOM` is client work: toasts, message boxes, timers, focus, ….
+   - `ACTIONS` (`T_CUSTOM` under protocol 2) is client work: toasts,
+     message boxes, timers, focus, …. `NAV` is the URL intent - the client
+     owns no URL and reads nothing of it.
 
 The snapshot is derived from the folded state: the view XML of every open slot
 plus its model. Bindings in the current protocol are plain model paths
@@ -214,7 +228,7 @@ client at act time, or passed explicitly in `args`):
 | `$expr:<raw>` | any other expression (`${QTY} * 10`, an object literal, a formatter call) | for a row event, the [call shapes](#row-event-parameters) on a row-valued parameter; else must be passed in `args` |
 | `$action` | the pressed action of a message box with `onClose` | `args`, default: its first choice |
 
-**Actions that are not view wires** (from the last response's `T_CUSTOM`):
+**Actions that are not view wires** (from the last response's `ACTIONS`, `T_CUSTOM` under protocol 2):
 a toast with `onClose` → `trigger: "close"`, `control: "sap.m.MessageToast"`;
 a message box with `onClose` → `args: ["$action"]`, the choices in the label
 (`close message box (YES | NO)`); `START_TIMER` → `trigger: "timer"`,
@@ -409,8 +423,12 @@ The current state from the last response kept — no roundtrip.
    `text/plain`, protocol `spec/errors.md`; only shortened, and control
    characters shown as U+FFFD); the session stays at its draft id and the
    act's own edits are rolled back. A response declaring a `PROTOCOL` other
-   than 2 is refused whole - its draft id, view and model included - naming
-   both numbers; a response without `PROTOCOL` is let through.
+   than 2 or 3 is refused whole - its draft id, view and model included -
+   naming the numbers; a response without `PROTOCOL` is let through (and
+   read as protocol 2 unless it carries `VIEWS`, `NAV` or `ACTIONS`). A
+   section in the wrong shape (a `VIEWS` that is no object, an entry that is
+   neither `{ XML }` nor `{ DESTROY: true }`, an `ACTIONS` that is no list)
+   is refused with a sentence the same way.
 6. **One roundtrip at a time** per session: an `app_act` with an `event`
    (or a `window`) while another is in flight waits for it, then runs on the screen and the
    draft id that one left (so it may name the draft id the one in flight
@@ -424,28 +442,45 @@ The current state from the last response kept — no roundtrip.
 
 ### Windowed tables
 
-A table the app binds with `window_bind_tab( val = mt_rows window = n )`
-(abap2UI5 1.149.0 on; protocol `spec/windowed-tables.md`, revision 0.5) does
-not travel whole: the model holds its first rows, and `MODEL.__WINDOW.<path>`
-the state `{ TOTAL, COUNT, SIZE }` (an initial value is left out of the JSON,
-so an absent `TOTAL` or `COUNT` is 0). A table is windowed when the model
-carries a state for its absolute path - the UI5 frontend's rule
+A table the app binds with `window_bind_tab( val = mt_rows total = mv_total
+event = `ROWS` window = n )` (protocol `spec/windowed-tables.md`, the
+app-driven window of protocol 3, abap2UI5 1.151.0 on) does not travel whole:
+the model holds the rows the APP has loaded, and `MODEL.__WINDOW.<path>` the
+state `{ TOTAL, COUNT, SIZE, EVENT }` (an initial value is left out of the
+JSON, so an absent `TOTAL` or `COUNT` is 0). A table is windowed when the
+model carries a state for its absolute path - the UI5 frontend's rule
 (`core/WindowModel.js` `bindList`). Its snapshot carries `total` and
 `window`, `rowCount` stays the rows held, and `truncated` is true while
 fewer rows are held than `total`.
 
 `app_act({ session, window: { table, count?, sort?, filter? }, values? })`
-sends the request the UI5 list binding sends (`_z2ui5Send`) - the event
-`___ZZZ_WIN`, which the backend answers without running the app (a new draft
-id, the full model):
+sends the request the UI5 list binding sends (`_z2ui5Ensure`,
+`_z2ui5Restart`, `_z2ui5Send`) - the event `___ZZZ_WIN`, which the backend
+turns into the app's own `EVENT` of the window state; the app loads the
+rows, sorts, filters and counts itself:
 
 | `window` | Sent as `T_EVENT_ARG` |
 | --- | --- |
-| `{ table }` | `[path, count]` with `count` the next window: the rows held plus one, rounded up to whole windows, at most `total` (`_z2ui5Ensure`); refused when every row is held |
-| `{ table, count }` | `[path, "<count>"]` - the first `count` rows (1 to 999,999,999, a number or a string of digits; counted from row 1, not an offset) |
-| `{ table, sort }` | `[path, count, "[{\"PATH\":…,\"DESCENDING\":…}]"]`, `count` one window unless given (`_z2ui5Restart`) |
-| `{ table, filter }` | `[path, count, "", "[[[PATH, OPERATOR, value1, value2]]…]"]` |
-| `{ table, sort, filter }` | `[path, count, sort, filter]` |
+| `{ table }` | `[path, event, "MORE", skip, top]` - `skip` the rows held, `top` the rest of the next whole window: the rows held plus one, rounded up to whole windows, at most `total`, less the rows held; refused when every row is held |
+| `{ table, count }` | above the rows held: `MORE` with `top` = `count` less the rows held; at or below them: `[path, event, "SORT", "0", count, sort, filter]` with the order held - the first `count` rows again (1 to 999,999,999, a number or a string of digits; counted from row 1, not an offset) |
+| `{ table, sort }` | `[path, event, "SORT", "0", top, sort, filter]`, `top` one window unless `count` is given, `filter` the one held |
+| `{ table, filter }` | `[path, event, "FILTER", "0", top, sort, filter]`, `sort` the one held |
+| `{ table, sort, filter }` | `[path, event, "FILTER", "0", top, sort, filter]` |
+
+`sort` and `filter` travel as the texts of JSON arrays
+(`[{"PATH":…,"DESCENDING":…}]`, `[[[PATH, OPERATOR, value1, value2]]…]`),
+`skip` and `top` as strings - what the UI5 frontend sends. **The order is
+the client's to keep**, as the list binding keeps its sorters and filters:
+a `SORT` or `FILTER` carries both parts, the one the act did not name is
+the one the last landed `SORT`/`FILTER` set (none at first, and none again
+once the table's view is displayed anew). A table whose state names no
+`EVENT` is refused - there is no app event to name.
+
+A backend of protocol 2 (abap2UI5 1.149.0 and 1.150.0, the window the
+backend cut itself) is sent its own wire instead: `[path, count]`,
+`[path, count, sort]`, `[path, count, "", filter]`, `[path, count, sort,
+filter]` with `count` the rows wanted from the first one - the backend kept
+the order and the part not named.
 
 - `table` is the table's id, path (with or without the leading slash) or
   name; a table that is no window is refused naming the windowed ones.
@@ -459,11 +494,8 @@ id, the full model):
   `FilterOperator` names (`EQ NE LT LE GT GE BT NB Contains NotContains
   StartsWith NotStartsWith EndsWith NotEndsWith`, any case); `value` is a
   string, number or boolean; `value2` is the upper bound of `BT`/`NB` and
-  refused on the others. Dates compare as `yyyy-MM-dd` or `yyyyMMdd`.
-- A part left out (or `null`) says nothing - the backend keeps the sort or
-  filter it holds; `[]` clears it. The backend keeps ONE sort (the last set,
-  by the app's `t_sort` or a request) and ANDs the request's filter with the
-  app's `t_filter`.
+  refused on the others. What a sorter or a condition means is the app's.
+- A part left out (or `null`) keeps the order held; `[]` clears it.
 - A `column` is matched without regard to case against the row's columns -
   every key a held row has with a scalar value and every column the
   template binds, remembered across roundtrips (a filter that lets no row
@@ -471,20 +503,20 @@ id, the full model):
 - `event`, `row` and `args` are refused beside `window`; `values` are
   applied first and travel as the delta. A refused request sends nothing and
   changes nothing; a failed one takes its edits back.
-- **Edits are positions.** The row of a cell path (`"/ROWS/2/QTY"`) is the
-  position in the rows held, in the order the backend sent them; the delta
-  goes out as `{ ROWS: { __delta: { "2": { QTY: … } } } }` and the backend
-  writes it into the row behind that position, after a sort as before
-  (the delta is applied before a window request changes the order).
+- **Edits are rows of the table.** The row of a cell path (`"/ROWS/2/QTY"`)
+  is the row held at that index; the delta goes out as
+  `{ ROWS: { __delta: { "2": { QTY: … } } } }` and is applied before the
+  app's event runs - also for a window request, which carries it.
 
 `@BINDING_CALL` follows `core/actions/BindingCall.js` and the list binding:
-a `sort` with `[path, descending]` sends `[{ PATH, DESCENDING }]` (`"X"` /
-`"true"` / `true` descending), one without a path `[]`; a `filter` with
-`[path, operator, value1, value2?]` sends one group, without a value it
-clears (`[]`), and a single argument that is a JSON array of groups sends
-those groups. Each asks for one window. What the browser only logs and does
-not send (a malformed groups JSON, an operator outside the whitelist) is
-refused, sending nothing.
+a `sort` with `[path, descending]` sets the sorters to `[{ PATH, DESCENDING }]`
+(`"X"` / `"true"` / `true` descending), one without a path to `[]`; a
+`filter` with `[path, operator, value1, value2?]` sets one group, without a
+value it clears (`[]`), and a single argument that is a JSON array of groups
+sets those groups. Each sends a `SORT` or `FILTER` for one window with the
+other part as held (protocol 2: the part alone). What the browser only logs
+and does not send (a malformed groups JSON, an operator outside the
+whitelist) is refused, sending nothing.
 
 ### The pick: a selection dialog's confirm
 
@@ -716,14 +748,15 @@ default:
 `metadata()`, `maxSessions` and `timeoutMs` are the same for every embedder.
 
 `screen(session)` answers a copy of a session's folded state (the views in
-their slots, the models with the pending edits, the last `T_CUSTOM`) - what a
+their slots, the models with the pending edits, the last follow-up actions,
+`ACTIONS` / `T_CUSTOM`) - what a
 renderer other than the snapshot needs; the Adaptive Card above is one.
 
 ## Deviations and extensions
 
 What differs from Contract B as first written, and why:
 
-- **No `/XX/` two-way prefix.** The current protocol (PROTOCOL 2) binds every
+- **No `/XX/` two-way prefix.** The current protocols (2 and 3) bind every
   attribute as `{/NAME}`, and the backend accepts a delta for every bound
   attribute (`z2ui5_cl_ui5_srv_model main_json_to_attri`); `_bind_edit` is an
   alias of `_bind`. Editability is decided by the control. A leading `XX`
@@ -754,8 +787,9 @@ What differs from Contract B as first written, and why:
 - **`source: "popover"` / `"messageview"`** with the optional `subtitle` and
   `description` — the message lists of sap.m (abap-cloud-gui collects every
   message of a run in a MessagePopover).
-- **Actions from `T_CUSTOM`** (toast/box `onClose`, `START_TIMER`) are
-  actions with triggers `close` and `timer`.
+- **Actions from `ACTIONS`** (`T_CUSTOM` under protocol 2: toast/box
+  `onClose`, `START_TIMER`) are actions with triggers `close` and `timer`;
+  firing a `timer` action sends the tick (`TIMER: true` under protocol 3).
 - **Windowed tables** carry `total` and `window`, and `app_act` takes
   `window` - alternative (c) of the protocol's open question 13; the
   semantic profile (revision 0.5) still describes a windowed table's
@@ -774,8 +808,7 @@ What differs from Contract B as first written, and why:
   growing table's loaded page (of a table that is no window), the open tab
   of an IconTabBar (all tabs' content is described), scroll position, focus.
 - Rows of a windowed table past the first `max_rows` (200 at most) of the
-  ones held: the window request always answers rows from the first one, and
-  the snapshot shows rows from the first one - an agent narrows a long list
+  ones held: the snapshot shows rows from the first one - an agent narrows a long list
   with `window.filter` and `window.sort` rather than paging through it.
 - Named models (`i18n`, `device`, `message`, OData models in switch mode),
   XML templating (`template:repeat`), element bindings (`bindElement`).

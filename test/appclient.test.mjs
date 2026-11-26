@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createAppClient, buildDelta, errorText, AgentError, PROTOCOL, EARLIER_IDS, headerOf, validContextId } from '../lib/appclient.mjs';
+import { createAppClient, buildDelta, errorText, AgentError, PROTOCOL, PROTOCOLS, EARLIER_IDS, headerOf, validContextId } from '../lib/appclient.mjs';
 import { setAt } from '../lib/snapshot.mjs';
 
 const FIX = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'agent');
@@ -794,28 +794,132 @@ const FORM = page('<Input value="{/NAME}"/><Input value="{/ZIP}"/><Button text="
 const startAnswer = (extra = {}) => ({ S_FRONT: { ID: 'D1', APP: 'Z_T', PROTOCOL: 2, S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'display', 'MAIN', FORM]] }, ...extra }, MODEL: { NAME: '', ZIP: '' } });
 const eventAnswer = (n, extra = {}) => ({ S_FRONT: { ID: `D${n}`, APP: 'Z_T', PROTOCOL: 2, ...extra } });
 
-test('PROTOCOL: a response declaring another number is refused whole, naming both; an absent one is let through', async () => {
-  assert.equal(PROTOCOL, 2);
-  const newer = scripted(() => startAnswer({ PROTOCOL: 3 }));
-  const c3 = newer.client();
-  await rejects(c3.start('z_t'), /^the backend answered protocol 3, this client speaks protocol 2 - the client is older; nothing of the response was adopted/);
-  assert.deepEqual(c3.sessions(), [], 'no session from a refused start');
-  assert.throws(() => c3.describe('D1'), /unknown session 'D1'/, 'its draft id is not adopted');
+test('PROTOCOL: a response declaring a number the client does not read is refused whole, naming them; an absent one is let through', async () => {
+  assert.equal(PROTOCOL, 3);
+  assert.deepEqual([...PROTOCOLS], [2, 3]);
+  const newer = scripted(() => startAnswer({ PROTOCOL: 4 }));
+  const c4 = newer.client();
+  await rejects(c4.start('z_t'), /^the backend answered protocol 4, this client speaks protocol 2 and 3 - the client is older; nothing of the response was adopted/);
+  assert.deepEqual(c4.sessions(), [], 'no session from a refused start');
+  assert.throws(() => c4.describe('D1'), /unknown session 'D1'/, 'its draft id is not adopted');
   const older = scripted(() => startAnswer({ PROTOCOL: 1 }));
-  await rejects(older.client().start('z_t'), /answered protocol 1, this client speaks protocol 2 - the backend is older/);
+  await rejects(older.client().start('z_t'), /answered protocol 1, this client speaks protocol 2 and 3 - the backend is older/);
   const absent = scripted(() => { const a = startAnswer(); delete a.S_FRONT.PROTOCOL; return a; });
   assert.equal((await absent.client().start('z_t')).session, 'D1', 'no PROTOCOL: a backend older than the field');
   // during a session: the event's answer is refused, the session stays where it was
-  const mid = scripted((req, n) => (n === 1 ? startAnswer() : eventAnswer(n, { PROTOCOL: 3, S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'display', 'MAIN', page('<Text text="never"/>')]] } })));
+  const mid = scripted((req, n) => (n === 1 ? startAnswer() : eventAnswer(n, { PROTOCOL: 4, VIEWS: { MAIN: { XML: page('<Text text="never"/>') } } })));
   const c = mid.client();
   const s = await c.start('z_t');
   await c.act(s.session, { values: { '/NAME': 'Ann' } });
-  await rejects(c.act(s.session, { event: 'CHECK' }), /protocol 3, this client speaks protocol 2/);
+  await rejects(c.act(s.session, { event: 'CHECK' }), /protocol 4, this client speaks protocol 2 and 3/);
   const after = c.describe(s.session);
   assert.equal(after.session, 'D1', 'the draft id of the refused response was not adopted');
   assert.ok(!after.texts.includes('never'), 'nor its view');
   assert.deepEqual(after.pending, ['/NAME'], 'the edit it carried is still pending');
   assert.throws(() => c.describe('D2'), /unknown session 'D2'/);
+});
+
+// ------------------------------------------------ protocol 3 (1.151.0 on) ----
+
+const start3 = (extra = {}) => ({ S_FRONT: { ID: 'D1', APP: 'Z_T', PROTOCOL: 3, VIEWS: { MAIN: { XML: FORM } }, ...extra }, MODEL: { NAME: '', ZIP: '' } });
+const event3 = (n, extra = {}) => ({ S_FRONT: { ID: `D${n}`, APP: 'Z_T', PROTOCOL: 3, ...extra } });
+
+test('protocol 3: VIEWS, NAV and ACTIONS are read - slots in slot order, actions as the follow-up work', async () => {
+  const pop = '<core:FragmentDefinition xmlns="sap.m" xmlns:core="sap.ui.core"><Dialog title="P"><Text text="in the popup"/><Button text="Close" press=".eB([\'CLOSE\',{queueLast:true,noBusy:true}])"/></Dialog></core:FragmentDefinition>';
+  const be = scripted((req, n) => (n === 1
+    ? start3({ NAV: { setNavRouting: 'KEEP' } })
+    // keys out of slot order: the popup opens over the new MAIN, not under it
+    : event3(n, { VIEWS: { POPUP: { XML: pop }, MAIN: { XML: page('<Text text="second page"/>') } }, ACTIONS: [['MESSAGE_TOAST', 'show', 'Saved']] })));
+  const c = be.client();
+  let s = await c.start('z_t');
+  assert.equal(s.app, 'Z_T');
+  assert.ok(s.fields.some((f) => f.path === '/NAME'), 'the MAIN view of VIEWS is the screen');
+  s = await c.act(s.session, { event: 'CHECK' });
+  assert.equal(s.session, 'D2');
+  assert.equal(s.layer, 'popup', 'POPUP applied after MAIN, whose display would have torn it down');
+  assert.match(c.screen(s.session).slots.MAIN.xml, /second page/, 'the MAIN view of the response is the page behind the popup');
+  assert.ok(s.actions.some((a) => a.event === 'CLOSE'), 'an event wire with the options object behind the name is an action');
+  assert.ok(s.messages.some((m) => m.source === 'toast' && m.text === 'Saved'), 'ACTIONS is read as the follow-up actions');
+  assert.deepEqual(c.screen(s.session).custom, [['MESSAGE_TOAST', 'show', 'Saved']]);
+});
+
+test('protocol 3: an app change keeps what VIEWS does not name; a DESTROY entry takes a slot down', async () => {
+  const pop = '<core:FragmentDefinition xmlns="sap.m" xmlns:core="sap.ui.core"><Dialog title="P"><Text text="popup"/><Button text="Go" press=".eB([\'GO\'])"/></Dialog></core:FragmentDefinition>';
+  const be = scripted((req, n) => {
+    if (n === 1) return start3();
+    if (n === 2) return event3(n, { VIEWS: { POPUP: { XML: pop } } });
+    // another APP without a teardown: the frontend infers none (slots.app-change)
+    if (n === 3) return event3(n, { APP: 'Z_OTHER' });
+    return event3(n, { APP: 'Z_OTHER', VIEWS: { POPUP: { DESTROY: true } } });
+  });
+  const c = be.client();
+  let s = await c.start('z_t');
+  s = await c.act(s.session, { event: 'CHECK' });
+  assert.equal(s.layer, 'popup');
+  s = await c.act(s.session, { event: 'GO' });
+  assert.equal(s.app, 'Z_OTHER');
+  assert.equal(s.layer, 'popup', 'protocol 3: the popup stays - the backend states the teardown of an app switch');
+  s = await c.act(s.session, { event: 'GO' });
+  assert.equal(s.layer, 'main', 'VIEWS.POPUP.DESTROY took it down');
+});
+
+test('protocol 2 still: another APP tears popup and popover down on the client side', async () => {
+  const pop = '<core:FragmentDefinition xmlns="sap.m" xmlns:core="sap.ui.core"><Dialog title="P"><Button text="Go" press=".eB([\'GO\'])"/></Dialog></core:FragmentDefinition>';
+  const be = scripted((req, n) => {
+    if (n === 1) return startAnswer();
+    if (n === 2) return eventAnswer(n, { S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'display', 'POPUP', pop]] } });
+    return eventAnswer(n, { APP: 'Z_OTHER' });
+  });
+  const c = be.client();
+  let s = await c.start('z_t');
+  s = await c.act(s.session, { event: 'CHECK' });
+  assert.equal(s.layer, 'popup');
+  s = await c.act(s.session, { event: 'GO' });
+  assert.equal(s.layer, 'main');
+});
+
+test('protocol 3: the tick of a START_TIMER carries S_FRONT.TIMER: true, nothing else does; protocol 2 is sent none', async () => {
+  for (const proto of [3, 2]) {
+    const timer = [['START_TIMER', 'TICK', 500]];
+    const be = scripted((req, n) => {
+      if (proto === 3) return n === 1 ? start3() : event3(n, n === 2 ? { ACTIONS: timer } : {});
+      return n === 1 ? startAnswer() : eventAnswer(n, n === 2 ? { S_ACTION: { T_CUSTOM: timer } } : {});
+    });
+    const c = be.client();
+    let s = await c.start('z_t');
+    s = await c.act(s.session, { event: 'CHECK' });
+    const tick = s.actions.find((a) => a.trigger === 'timer');
+    assert.ok(tick, `protocol ${proto}: the timer is an action`);
+    await c.act(s.session, { event: tick.id });
+    const fronts = be.posts.map((p) => p.value.S_FRONT);
+    assert.ok(!('TIMER' in fronts[0]) && !('TIMER' in fronts[1]), 'not on the start, not on a user event');
+    assert.equal(fronts[2].EVENT, 'TICK');
+    if (proto === 3) assert.equal(fronts[2].TIMER, true, 'protocol 3: the tick is marked');
+    else assert.ok(!('TIMER' in fronts[2]), 'protocol 2: the request it always was');
+  }
+});
+
+test('protocol 3: a tick answered with the id it continued keeps the session', async () => {
+  const be = scripted((req, n) => (n === 1 ? start3({ ACTIONS: [['START_TIMER', 'TICK', 100]] }) : event3(1)));
+  const c = be.client();
+  const s = await c.start('z_t');
+  const tick = s.actions.find((a) => a.trigger === 'timer');
+  const after = await c.act(s.session, { event: tick.id });
+  assert.equal(after.session, 'D1');
+  assert.equal(c.describe('D1').session, 'D1');
+});
+
+test('protocol 3: a section in the wrong shape is refused with a sentence, nothing adopted', async () => {
+  for (const [bad, msg] of [
+    [{ VIEWS: [] }, /a VIEWS that is no object/],
+    [{ VIEWS: { MAIN: '<x/>' } }, /a VIEWS\.MAIN that is neither \{ XML \} nor \{ DESTROY: true \}/],
+    [{ ACTIONS: { a: 1 } }, /an ACTIONS that is no list/],
+    [{ NAV: 'KEEP' }, /a NAV that is no object/],
+  ]) {
+    const c = scripted(() => start3(bad)).client();
+    await rejects(c.start('z_t'), msg);
+    assert.deepEqual(c.sessions(), []);
+  }
 });
 
 test('sap-contextid: kept from the last response that carried it, sent with every later POST of that session only', async () => {

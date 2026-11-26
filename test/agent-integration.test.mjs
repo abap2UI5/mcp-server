@@ -3,9 +3,9 @@
 // app class with a form, a table with a row action and a selection, and a
 // popup (test/fixtures/agent-app/zcl_agent_mcp.clas.abap), and one with a
 // SelectDialog value help and a MessagePopover (zcl_agent_mcp_pick), and one
-// with a windowed table (zcl_agent_mcp_window, window_bind_tab - abap2UI5
-// 1.149.0 on: more rows, a sort and a filter over all rows, an edit after a
-// sort) deployed and built,
+// with a windowed table the app loads itself (zcl_agent_mcp_window, the
+// app-driven window_bind_tab of protocol 3 - abap2UI5 1.151.0 on: more rows,
+// a sort and a filter over all rows, an edit after a sort) deployed and built,
 // then operated through the wire protocol - first through lib/appclient.mjs,
 // then through the server itself over stdio (app_list, app_start, app_act,
 // app_describe), so the tool wiring is proven on the same build.
@@ -158,8 +158,9 @@ test('app_start / app_act / app_describe operate a real app on @abap2ui5/node-ru
     assert.equal(p.fields[0].value, 'gamma', 'selectedItem.getTitle() of the picked row');
     assert.deepEqual(p.messages, [{ type: 'success', text: 'picked gamma selected gamma', source: 'popover' }], 'the pick selected SELKZ of that row');
 
-    // a windowed table - from the runtime's window_bind_tab on (1.149.0); a
-    // runtime without it fails the build of this app above, not here
+    // a windowed table the app loads itself - the app-driven window_bind_tab
+    // of protocol 3 (1.151.0 on); an older runtime fails the build of this
+    // app above, not here
     let w = await client.start('zcl_agent_mcp_window');
     const ids = (snap) => snap.tables[0].rows.map((r) => r.ID);
     assert.deepEqual([w.tables[0].rowCount, w.tables[0].total, w.tables[0].truncated, w.tables[0].window.size], [5, 30, true, 5]);
@@ -175,7 +176,7 @@ test('app_start / app_act / app_describe operate a real app on @abap2ui5/node-ru
     const target = w.tables[0].rows[2].ID;
     w = await client.act(w.session, { values: { 't1/2/QTY': 77, 't1/2/CHECKED': true }, event: 'CHECK' });
     assert.equal(w.texts[0], `${target}:77`);
-    assert.equal(w.texts[1], '2', 'main( ) ran for the start and CHECK only, never for a window request');
+    assert.equal(w.texts[1], '4', 'main( ) ran for the start, the two window requests (the app\'s event ROWS - the app loads its rows, protocol 3) and CHECK');
     // the sort button (BINDING_CALL) keeps the filter
     w = await client.act(w.session, { event: w.actions.find((a) => a.label === 'Sort by quantity').id });
     const qtys = w.tables[0].rows.map((r) => r.QTY);

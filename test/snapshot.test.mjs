@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { parseViewXml, parseBinding, evalExpression, parseWire, describeArg, controlName } from '../lib/viewxml.mjs';
 import {
   buildSnapshot, analyzeScreen, applyResponse, emptyState, nameOfPath, FRONTEND_EVENTS, SNAPSHOT_VERSION, BINDING_CALL_EVENT,
-  windowStateOf, nextWindowCount,
+  windowStateOf, nextWindowCount, protocolOf, viewChanges, followUpActions,
 } from '../lib/snapshot.mjs';
 
 const FIX = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'agent');
@@ -129,6 +129,64 @@ test('applyResponse: an action list that is no array folds as empty instead of t
     assert.equal(next.id, 'b');
     assert.ok(next.slots.MAIN, 'the open view stays');
     assert.deepEqual(next.custom, []);
+  }
+});
+
+test('protocolOf: the declared number, else the sections; protocol 2 for the S_ACTION envelope and for none', () => {
+  assert.equal(protocolOf({ S_FRONT: { PROTOCOL: 3 } }), 3);
+  assert.equal(protocolOf({ S_FRONT: { PROTOCOL: 2, S_ACTION: {} } }), 2);
+  assert.equal(protocolOf({ S_FRONT: { VIEWS: {} } }), 3);
+  assert.equal(protocolOf({ S_FRONT: { ACTIONS: [] } }), 3);
+  assert.equal(protocolOf({ S_FRONT: { S_ACTION: { T_SYSTEM: [] } } }), 2);
+  assert.equal(protocolOf({ S_FRONT: {} }), 2);
+  assert.equal(protocolOf(null), 2);
+});
+
+test('viewChanges: protocol 3 in slot order whatever the key order; DESTROY a teardown; an empty XML still a display', () => {
+  const r = { S_FRONT: { PROTOCOL: 3, VIEWS: { POPOVER: { XML: '<B/>', OPT: { openById: 'x' } }, POPUP: { DESTROY: true }, MAIN: { XML: '' } } } };
+  assert.deepEqual(viewChanges(r), [
+    { slot: 'MAIN', xml: '', options: {} },
+    { slot: 'POPUP', destroy: true },
+    { slot: 'POPOVER', xml: '<B/>', options: { openById: 'x' } },
+  ]);
+  assert.deepEqual(followUpActions({ S_FRONT: { PROTOCOL: 3, ACTIONS: [['MESSAGE_TOAST', 'show', 'x']] } }), [['MESSAGE_TOAST', 'show', 'x']]);
+  assert.deepEqual(followUpActions({ S_FRONT: { PROTOCOL: 3, S_ACTION: { T_CUSTOM: [['X']] } } }), [], 'a protocol-3 answer has no T_CUSTOM to read');
+});
+
+/* A protocol-2 answer as a protocol-3 backend sends it: VIEWS, NAV,
+ * ACTIONS, and the teardown of POPUP and POPOVER on an app switch, which
+ * the protocol-2 frontend did by itself. */
+function asProtocol3(response, prevApp) {
+  const { S_ACTION: act = {}, ...front } = response.S_FRONT;
+  const views = {};
+  let nav;
+  for (const a of act.T_SYSTEM || []) {
+    if (a[0] === 'ROUTER') nav = a[2];
+    else if (a[1] === 'destroy') views[a[2]] = { DESTROY: true };
+    else views[a[2]] = { XML: a[3], ...(a[4] && Object.keys(a[4]).length ? { OPT: a[4] } : {}) };
+  }
+  if (prevApp && front.APP && front.APP !== prevApp) for (const s of ['POPUP', 'POPOVER']) if (!views[s]) views[s] = { DESTROY: true };
+  const out = { ...front, PROTOCOL: 3 };
+  if (Object.keys(views).length) out.VIEWS = views;
+  if (nav) out.NAV = nav;
+  if ((act.T_CUSTOM || []).length) out.ACTIONS = act.T_CUSTOM;
+  return { ...response, S_FRONT: out };
+}
+
+test('applyResponse: every session recorded on protocol 2 folds to the same state and snapshot read as protocol 3', () => {
+  for (const f of fs.readdirSync(FIX).filter((x) => x.endsWith('.json'))) {
+    const name = f.replace(/\.json$/, '');
+    if (protocolOf(fixture(name).steps[0].exchange.response) !== 2) continue; // recorded on protocol 3 already
+    let two = emptyState();
+    let three = emptyState();
+    for (const step of fixture(name).steps.filter((x) => x.exchange)) {
+      const r = step.exchange.response;
+      const prevApp = three.app;
+      two = applyResponse(two, r);
+      three = applyResponse(three, asProtocol3(r, prevApp));
+      assert.deepEqual(three, two, `${name}: the state after response ${r.S_FRONT.ID}`);
+      assert.deepEqual(buildSnapshot({ state: three }), buildSnapshot({ state: two }), `${name}: the snapshot after ${r.S_FRONT.ID}`);
+    }
   }
 });
 
@@ -667,10 +725,11 @@ test('an out-of-range character reference stays as written; model markup of uncl
 // ---------------------------------------------------- windowed tables ----
 
 test('windowStateOf reads /__WINDOW/<path>: an initial TOTAL or COUNT the backend leaves out is 0, no state is no window', () => {
-  assert.deepEqual(windowStateOf({ __WINDOW: { T: { TOTAL: 12, COUNT: 4, SIZE: 4 } } }, '/T'), { total: 12, count: 4, size: 4 });
-  assert.deepEqual(windowStateOf({ __WINDOW: { S: { T: { TOTAL: 3, COUNT: 3, SIZE: 100 } } } }, '/S/T'), { total: 3, count: 3, size: 100 }, 'a table in a structure');
-  assert.deepEqual(windowStateOf({ __WINDOW: { MR_TAB: { '*': { TOTAL: 2, COUNT: 2, SIZE: 1 } } } }, '/MR_TAB/*'), { total: 2, count: 2, size: 1 }, 'behind a data reference');
-  assert.deepEqual(windowStateOf({ __WINDOW: { T: { SIZE: 5 } } }, '/T'), { total: 0, count: 0, size: 5 }, 'a filter that lets nothing through (recorded on 1.149.0)');
+  assert.deepEqual(windowStateOf({ __WINDOW: { T: { TOTAL: 12, COUNT: 4, SIZE: 4 } } }, '/T'), { total: 12, count: 4, size: 4, event: '' });
+  assert.deepEqual(windowStateOf({ __WINDOW: { S: { T: { TOTAL: 3, COUNT: 3, SIZE: 100 } } } }, '/S/T'), { total: 3, count: 3, size: 100, event: '' }, 'a table in a structure');
+  assert.deepEqual(windowStateOf({ __WINDOW: { MR_TAB: { '*': { TOTAL: 2, COUNT: 2, SIZE: 1 } } } }, '/MR_TAB/*'), { total: 2, count: 2, size: 1, event: '' }, 'behind a data reference');
+  assert.deepEqual(windowStateOf({ __WINDOW: { T: { SIZE: 5 } } }, '/T'), { total: 0, count: 0, size: 5, event: '' }, 'a filter that lets nothing through (recorded on 1.149.0)');
+  assert.deepEqual(windowStateOf({ __WINDOW: { T: { TOTAL: 12, COUNT: 4, SIZE: 4, EVENT: 'ROWS' } } }, '/T'), { total: 12, count: 4, size: 4, event: 'ROWS' }, 'the app-driven window of protocol 3 names its event');
   assert.equal(windowStateOf({ T: [] }, '/T'), null);
   assert.equal(windowStateOf({ __WINDOW: { T: [1] } }, '/T'), null);
   assert.equal(windowStateOf({ __WINDOW: { T: { TOTAL: 'x' } } }, '/T'), null);

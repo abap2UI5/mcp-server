@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+- **The agent client speaks protocol 3 - abap2UI5 1.151.0 - and still
+  protocol 2.** `lib/appclient.mjs` refused every answer of 1.151.0 ("the
+  backend answered protocol 3, this client speaks protocol 2"), so
+  `app_start`/`app_act` and every embedder (abap-cloud-gui's report2ui5
+  runtime test, the browser playground's vendored copy, the VS Code
+  extension) stopped working against the current release. The client now
+  reads both wires by the number the response declares
+  (`PROTOCOLS = [2, 3]`, `PROTOCOL` is 3; another number is refused as
+  before): protocol 3's `S_FRONT.VIEWS` (`{ XML, OPT }` a display,
+  `{ DESTROY: true }` a teardown, applied in slot order MAIN first,
+  whatever the key order), `NAV` (read past: the client owns no URL) and
+  `ACTIONS` (the follow-up actions, `T_CUSTOM` before); a slot `VIEWS`
+  does not name stays, also on an app change - the backend states that
+  teardown now. Protocol 2 (`S_ACTION.T_SYSTEM`/`T_CUSTOM`, the client's
+  own teardown on an app change) is kept for systems on an older release.
+  A section in the wrong shape is refused with a sentence. New pure
+  exports of `lib/snapshot.mjs`: `protocolOf`, `viewChanges`,
+  `followUpActions`, `SLOT_ORDER`; `applyResponse` and `rebuiltModels`
+  take either wire, so an embedder that folds responses itself (the
+  report2ui5 driver, the playground's mirror) needs no shim.
+  - **The timer tick** of a `START_TIMER` carries `S_FRONT.TIMER: true`
+    against a protocol-3 backend (which may answer an unchanged tick with
+    the draft id it continued; the session keeps that id).
+  - **The app-driven window** (`window_bind_tab( val total event window )`):
+    `app_act { window }` and a `BINDING_CALL` sort or filter send
+    `[path, event, "MORE", skip, top]` / `[path, event, "SORT"|"FILTER",
+    "0", top, sorters, filter groups]` when the window state names the
+    app's `EVENT` (or the backend speaks 3), with the list's order kept by
+    the client per table and sent whole, as the UI5 list binding does; a
+    window of 1.149.0/1.150.0 still gets `[path, count, sort?, filter?]`.
+    A protocol-3 state without `EVENT` is refused - there is no event to
+    name.
+  - `test/fixtures/agent-app`: `zcl_agent_mcp_window` loads, sorts and
+    filters its rows itself (the 1.151.0 `window_bind_tab`),
+    `zcl_agent_mcp_pick` drops the removed `popup_model_update( )`; new
+    fixtures `agent-p3` and `window-agent-p3` recorded against 1.151.0;
+    every protocol-2 fixture is also folded as protocol 3 and must give the
+    same state and snapshot (`test/snapshot.test.mjs`).
 - **A cell of a table behind a data reference travels as its row delta.**
   An attribute `TYPE REF TO data` bound dereferenced is the model node
   `/<ATTR>/*`, so its cell path is `/<ATTR>/*/<row>/<field>`; `buildDelta`
