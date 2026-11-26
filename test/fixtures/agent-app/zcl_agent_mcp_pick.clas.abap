@@ -40,7 +40,6 @@ CLASS zcl_agent_mcp_pick IMPLEMENTATION.
       DATA(query) = client->get_event_arg( 1 ).
       items = all.
       DELETE items WHERE title NS query.
-      client->popup_model_update( ).
     ELSEIF client->check_on_event( `PICKED` ).
       name = client->get_event_arg( 1 ).
       result = |picked { name }|.

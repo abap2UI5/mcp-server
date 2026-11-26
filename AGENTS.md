@@ -592,7 +592,17 @@ abap2UI5/protocol (`profiles/semantic.md`, moved there from
 this implementation) - the VS Code extension and the ABAP agent addon
 implement the same shape, so a change to the snapshot is a change to that
 page in the same commit (and to the profile), and the shape test in
-`test/snapshot.test.mjs` is where it shows. The client follows the
+`test/snapshot.test.mjs` is where it shows. **It reads protocol 3 and
+protocol 2, by the number the response declares** (`PROTOCOLS`,
+`protocolOf` in `lib/snapshot.mjs`): abap2UI5 1.151.0 answers 3 (`VIEWS`,
+`NAV`, `ACTIONS`; the backend states every popup teardown; the timer tick
+marked `TIMER`; the app-driven window), and a real system on an older
+release - the system mode, the VS Code extension's - keeps answering 2
+(`S_ACTION.T_SYSTEM`/`T_CUSTOM`; the client takes popup and popover down on
+an app change) long after a release moves on, so dropping 2 would cut off
+every system that has not upgraded. The fold is one (`viewChanges`,
+`followUpActions`), the request differs only in `TIMER` and the window
+request, and a third number is refused. The client follows the
 protocol's frontend rules - the `PROTOCOL` check, `sap-contextid` per
 session, the CSRF token handshake, one roundtrip at a time per session
 (a second `act` with an event queues), the error body verbatim, the
@@ -620,7 +630,8 @@ its own table lacks: the tools need a backend, never the linter.
 `test/fixtures/agent/*.json` are real request/response pairs of
 abap2UI5/samples and samples-controls apps and of abap-cloud-gui's
 report2cloud runtime harness (recorded by driving the client against
-`@abap2ui5/node-runtime`; the `cgui-*` ones through that harness -
+`@abap2ui5/node-runtime`; all on protocol 2 but `agent-p3` and
+`window-agent-p3`, recorded on 1.151.0 from `test/fixtures/agent-app`; the `cgui-*` ones through that harness -
 `cgui-popover-07` with the popups addon, `cgui-f4-06` re-recorded against
 1.149.0 through today's report2ui5 harness and its own value help);
 `test/appclient.test.mjs` replays them and fails
@@ -632,14 +643,21 @@ with UI5's JSONModel path semantics (`selectedContexts[0]/sPath` is `null`
 there, so it is `null` here) - and refused naming `args[i]` everywhere else;
 docs/agent-snapshot.md "Row event parameters" is the list.
 
-**Windowed tables** (abap2UI5 1.149.0 on, `window_bind_tab`; protocol
+**Windowed tables** (`window_bind_tab`; protocol
 `spec/windowed-tables.md`, normative) are the one place the client sends a
-request no view wire names: the model holds the first rows and
+request no view wire names: the model holds the rows the app loaded and
 `MODEL.__WINDOW.<path>` the state, the snapshot adds `total` and `window`
 to such a table (`windowStateOf` in `lib/snapshot.mjs`; an absent `TOTAL` is
 0 - the backend leaves initial values out), and `app_act { window }` sends
-`___ZZZ_WIN` with `[path, count]`, `[path, count, sort]` or `[path, count,
-"", filter]` exactly as `core/WindowModel.js` `_z2ui5Send` builds them -
+`___ZZZ_WIN`. The app-driven window of protocol 3 (1.151.0 on; a state
+with `EVENT`) takes `[path, event, "MORE", skip, top]` and `[path, event,
+"SORT"|"FILTER", "0", top, sorters, filter groups]` - both parts always, so
+**the client keeps the list's order per table** (`session.orders`, set when
+a `SORT`/`FILTER` lands, dropped with a view displayed anew), as the list
+binding keeps its sorters and filters; the window of 1.149.0 and 1.150.0
+(no `EVENT`, protocol 2) takes `[path, count]`, `[path, count, sort]` or
+`[path, count, "", filter]` - exactly as `core/WindowModel.js` `_z2ui5Send`
+builds them in each release (`appWindowRequest`, `appDriven`) -
 validated first (`windowPlan` in `lib/appclient.mjs`: a column the rows do
 not have, an operator outside `FilterOperator`, a count that is no positive
 integer are refused, nothing sent). A `BINDING_CALL` sort or filter wire on
@@ -650,11 +668,13 @@ or the `__WINDOW` key. A table behind a data reference is the model node
 `/<attr>/*`, and its delta goes on that node (`{ ATTR: { "*": { __delta } } }`,
 `buildDelta` as `core/Lib.js` `buildDeltaFromPaths` since abap2UI5 #3026) -
 shipped whole, a windowed one's edit is dropped. The rule to keep: the
-client names only the part of the order it was asked to set, as the
-frontend does - the order is the
-backend's and no response tells it. `test/fixtures/agent/window-agent.json`
-is recorded against 1.149.0 from `test/fixtures/agent-app/zcl_agent_mcp_window`
-(30 rows, a window of 5).
+request is the one the frontend of the backend's release sends - on
+protocol 2 the client named only the part of the order it was asked to set
+(the backend kept the order); on protocol 3 the order is the client's and
+travels whole. `test/fixtures/agent/window-agent.json` is recorded against
+1.149.0, `window-agent-p3.json` against 1.151.0, from
+`test/fixtures/agent-app/zcl_agent_mcp_window` (30 rows, a window of 5 -
+since 1.151.0 an app that loads, sorts and filters its rows itself).
 
 ### The screen in the chat — `lib/mcp-app.mjs`, `lib/adaptive-card.mjs`
 
@@ -1006,15 +1026,18 @@ changes upstream, this repo must change in the same breath:
 - abap2UI5 core: **the frontend wire protocol** the app tools speak
   (`lib/appclient.mjs`, `lib/snapshot.mjs`, `lib/viewxml.mjs`) - the request
   and response format documented at the top of `app/webapp/core/Server.js`
-  (`{ value: { S_FRONT: { ID, EVENT, T_EVENT_ARG, ORIGIN, PATHNAME, SEARCH },
-  MODEL } }`, `PROTOCOL` 2), the delta format of `core/Lib.js`
+  (`{ value: { S_FRONT: { ID, EVENT, T_EVENT_ARG, ORIGIN, PATHNAME, SEARCH,
+  TIMER? }, MODEL } }`, `PROTOCOL` 3 - `VIEWS`, `NAV`, `ACTIONS` - and 2 -
+  `S_ACTION` - both read), the delta format of `core/Lib.js`
   `buildDeltaFromPaths` (ported as `buildDelta`), the `VIEW_SLOTS`
   display/destroy actions and the per-slot model ownership of
   `core/actions/Slots.js`, the toast/box options of
   `core/actions/ControlCall.js` (`onClose`, `actions`), and the event wire
   grammar `z2ui5_cl_ui5_srv_event` writes into view XML (`.eB(['EVENT',
   flags], args)`, `.eBP($event, cond, [...])`, `.eF(...)`, the quoting rule
-  for static arguments). A protocol bump upstream is a change here and a
+  for static arguments; from protocol 3 the flags are an options object
+  behind the name, `.eB(['EVENT',{queueLast:true}])`, which the client
+  reads past). A protocol bump upstream is a change here and a
   re-recording of `test/fixtures/agent/`.
 - **@abap2ui5/node-runtime** (npm; packed by abap2UI5's
   `node/setup/pack-npm.mjs`): the `.` export's `initialize` and `serve` (and
