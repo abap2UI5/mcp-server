@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- **A repeating timer stays an action of the app snapshot.** A poll armed
+  with `start_timer` and the repeat flag (the fourth `t_arg`) was listed by
+  `app_start`/`app_act` only in the snapshot of the response that armed it.
+  The browser arms such a timer again after every response, but the
+  snapshot did not, so an agent could fire the first tick and then had no
+  way to wait for what the poll was waiting for. The snapshot state now
+  keeps a repeating timer the way the frontend does (`actions/ViewOps`
+  `evStartTimer`, `state.timerRepeat`): it is listed in every later snapshot
+  as `timer (<ms> ms, repeating)` until a `STOP_TIMER`, a plain
+  `START_TIMER` that replaces it, or a response of another app. A plain
+  timer still lasts one response. Tested in `test/snapshot.test.mjs`.
+
 ## 1.3.0 - 2026-11-27
 
 - **The linter peer range follows the linter: `>=0.8.0 <0.14.0`.** It ended
