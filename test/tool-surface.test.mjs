@@ -346,3 +346,45 @@ test('every ...Cut field the answers carry is in the AGENTS.md vocabulary and in
     assert.ok(descriptions.includes(`\`${f}\``), `${f} is answered but no tool description names it`);
   }
 });
+
+// lib/annotations.mjs: every tool of both surfaces carries its hints, and the
+// maps name no tool that does not exist - a renamed tool would otherwise lose
+// its read-only hint without a word.
+import { TOOL_ANNOTATIONS, SYSTEM_TOOL_ANNOTATIONS, annotate } from '../lib/annotations.mjs';
+
+const HINTS = ['readOnlyHint', 'destructiveHint', 'idempotentHint', 'openWorldHint'];
+
+for (const [label, tools, map] of [
+  ['sandbox', TOOLS, TOOL_ANNOTATIONS],
+  ['system', [...SYSTEM_TOOLS, ...SYSTEM_WRITE_TOOLS], SYSTEM_TOOL_ANNOTATIONS],
+]) {
+  test(`annotations: every ${label} tool has all four hints, and the map names only real tools`, () => {
+    const names = tools.map((t) => t.name).sort();
+    assert.deepEqual(Object.keys(map).sort(), names, `lib/annotations.mjs and the ${label} surface disagree`);
+    for (const t of annotate(tools, map)) {
+      for (const h of HINTS) assert.equal(typeof t.annotations[h], 'boolean', `${t.name}: ${h} missing`);
+      // a read-only tool can be neither destructive nor non-idempotent
+      if (t.annotations.readOnlyHint) {
+        assert.equal(t.annotations.destructiveHint, false, `${t.name}: read-only and destructive`);
+        assert.equal(t.annotations.idempotentHint, true, `${t.name}: read-only but not idempotent`);
+      }
+    }
+  });
+}
+
+test('annotations: the tools that delete or replace what the user put there say so', () => {
+  for (const name of ['deploy_app', 'deploy_folder', 'remove_app', 'verify_app']) {
+    assert.equal(TOOL_ANNOTATIONS[name].destructiveHint, true, name);
+  }
+  // the same name, a different effect: an event on a real system can post data
+  assert.equal(TOOL_ANNOTATIONS.app_act.destructiveHint, false);
+  assert.equal(SYSTEM_TOOL_ANNOTATIONS.app_act.destructiveHint, true);
+  assert.equal(SYSTEM_TOOL_ANNOTATIONS.system_write_class.destructiveHint, true);
+});
+
+test('annotate: copies, keeps a tool\'s own annotation fields over the map\'s', () => {
+  const tools = [{ name: 'a', description: 'd', inputSchema: { type: 'object' }, annotations: { title: 'A', readOnlyHint: false } }];
+  const [t] = annotate(tools, { a: { readOnlyHint: true, destructiveHint: false } });
+  assert.deepEqual(t.annotations, { readOnlyHint: false, destructiveHint: false, title: 'A' });
+  assert.equal(tools[0].annotations.destructiveHint, undefined, 'the source array is not mutated');
+});

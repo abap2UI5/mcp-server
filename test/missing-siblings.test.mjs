@@ -12,6 +12,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TOOL_NAMES } from '../lib/tools.mjs';
+import { serverInstructions } from '../lib/instructions.mjs';
+import { TOOL_ANNOTATIONS } from '../lib/annotations.mjs';
 import { RESOURCE_URIS } from '../lib/resources.mjs';
 import { PROMPT_NAMES } from '../lib/prompts.mjs';
 
@@ -86,12 +88,16 @@ test('every sibling-dependent tool degrades with an actionable error when the ch
     const init = await until((m) => m.id === 1);
     assert.equal(init.result.serverInfo.name, 'abap2ui5');
     assert.equal(init.result.serverInfo.version, PKG.version);
+    // the instructions reach the client before any tool is chosen (lib/instructions.mjs)
+    assert.equal(init.result.instructions, serverInstructions());
 
     send({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
     const list = await until((m) => m.id === 2);
     // the derived list from lib/tools.mjs — the full surface stays served
     // even when every sibling checkout is absent
     assert.deepEqual(list.result.tools.map((t) => t.name).sort(), TOOL_NAMES);
+    // ...each with the hints a client decides approval from (lib/annotations.mjs)
+    for (const t of list.result.tools) assert.deepEqual(t.annotations, TOOL_ANNOTATIONS[t.name], t.name);
 
     // samples-controls-backed tools
     const CORPUS = /samples-controls checkout not found/;

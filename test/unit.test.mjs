@@ -9,7 +9,7 @@ import { parseExamples, searchExamples, catalogueEntries, derivedControls, CATAL
 import { CORPUS_DIRS, resolveLintConfig, viewCheckCandidates, SERVER_ROOT } from '../lib/repos.mjs';
 import { sliceCatalogue } from '../lib/pitfalls.mjs';
 import { sliceGuide, guideChapters } from '../lib/guide.mjs';
-import { parseApi, searchApi, apiSummary } from '../lib/api.mjs';
+import { parseApi, searchApi, apiSummary, byNameMatch } from '../lib/api.mjs';
 import { searchDocs, slicePage, headingText, markdownLinks } from '../lib/docs.mjs';
 import { parseSizes } from '../lib/screenshot.mjs';
 import { oneOf, boundedInt, stringArray, checkStringArgs, startParams } from '../lib/args.mjs';
@@ -1632,6 +1632,15 @@ test('an API query is AND-ed and returns whole entries', () => {
   assert.equal(searchApi(p, 'cs_device').constants[0].values.length, 2);
 });
 
+test('an API hit whose NAME answers the query comes first, the source order within a rank', () => {
+  const entries = [{ name: 'nav_app_leave' }, { name: 'message_box_display' }, { name: 'message_toast_display' }, { name: 'message_toast' }];
+  // nav_app_leave matched on its docs only; the exact name leads, then the prefix
+  assert.deepEqual(byNameMatch(entries, ['message_toast']).map((e) => e.name), ['message_toast', 'message_toast_display', 'nav_app_leave', 'message_box_display']);
+  // every term in the name beats a docs-only hit, without reordering the rest
+  assert.deepEqual(byNameMatch(entries, ['display', 'box']).map((e) => e.name), ['message_box_display', 'nav_app_leave', 'message_toast_display', 'message_toast']);
+  assert.deepEqual(byNameMatch([], ['x']), []);
+});
+
 test('the API parser reports, never throws, on a damaged interface', () => {
   for (let i = 0; i <= 40; i++) {
     const cut = API_FIXTURE.slice(0, Math.floor((API_FIXTURE.length * i) / 40));
@@ -1944,8 +1953,13 @@ test('scaffolding renames the class in the ABAP, the sidecar and the file name',
   assert.match(at('package.devc.xml').text, /<CTEXT>Invoice App<\/CTEXT>/);
   assert.match(at('.abapgit.xml').text, /<NAME>invoice-app<\/NAME>/);
 
-  assert.ok(!files.some((f) => /zcl_app_001/i.test(f.text)),
-    'no file still carries the template own class name');
+  /* The tooling under .github/scripts/ is excluded: rename.mjs is a copy of
+   * abap2UI5's shared script (app-template's sync-shared.yaml keeps it equal)
+   * and names the template's class in its usage comment, as the example of
+   * what it renames. That is documentation of the tool, not a part of the
+   * project still carrying the old name - and app-template may not edit it. */
+  const leftover = files.filter((f) => !f.path.startsWith('.github/scripts/') && /zcl_app_001/i.test(f.text));
+  assert.deepEqual(leftover.map((f) => f.path), [], 'no file still carries the template own class name');
   assert.ok(files.some((f) => f.path === 'AGENTS.md'),
     'the briefing ships with the project - an agent without one is the gap this closes');
 });

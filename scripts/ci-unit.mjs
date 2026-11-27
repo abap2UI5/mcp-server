@@ -68,30 +68,20 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import {
-  buildBackend, runUnitTests, cloneFramework, frameworkCloneDir, readVersion, stripJsonc, backendBuilt,
+  buildBackend, runUnitTests, cloneFramework, frameworkCloneDir, readVersion, backendBuilt,
   backendPreference, backendKind, classNameOf, sandbox, syncDevCopies,
 } from '../lib/runtime.mjs';
 import { resolveA2UI5, explicitEnv, workspaceRoot } from '../lib/repos.mjs';
 import { prepareRuntime, readRuntimePin, buildNpm } from '../lib/npm-backend.mjs';
+import { frameworkPinOf } from '../lib/project.mjs';
 
 const TOOL = 'abap2ui5-unit';
 
 // ------------------------------------------------------------- pure half ----
 
-/** The release tag the project pins the framework at, out of its
- *  abaplint.jsonc: the `branch` of the dependency whose url names
- *  abap2UI5/abap2UI5. Null when unpinned or absent. */
-export function frameworkPinOf(abaplintJsonc) {
-  let cfg;
-  try {
-    cfg = JSON.parse(stripJsonc(abaplintJsonc));
-  } catch {
-    return null;
-  }
-  const dep = (cfg.dependencies || []).find((d) => /github\.com\/abap2ui5\/abap2ui5(\.git)?\/?$/i.test(String(d.url || '')));
-  const branch = dep && dep.branch;
-  return typeof branch === 'string' && /^\d+\.\d+\.\d+$/.test(branch) ? branch : null;
-}
+/* The project's framework pin: lib/project.mjs, where the server reads it
+ * too - re-exported, the tests and the action import it from here. */
+export { frameworkPinOf };
 
 /* A file of an ABAP object the way abapGit names it:
  * `<name>.<clas|intf>[.<include>].<abap|xml>` - the source, the XML sidecar

@@ -187,8 +187,9 @@ apps** against it: seconds, never the framework. `deploy_app` writes into
 `~/.abap2ui5-mcp/sandbox` (and lints with app-template's own config against
 the package's sources), `run_app` boots the package's server with the apps
 registered, `run_unit_tests` runs the apps' own tests. The release is the
-registry's latest (asked through npm, cached a day) unless
-`A2UI5_MCP_RUNTIME_VERSION` pins one. Measured here with a cold npm cache:
+one the project pins in its `abaplint.jsonc` (the directory the client started
+the server in, or `A2UI5_MCP_PROJECT_DIR`), else the registry's latest (asked
+through npm, cached a day); `A2UI5_MCP_RUNTIME_VERSION` overrides both. Measured here with a cold npm cache:
 the first install about 10 s, open-abap-core about 1 s, then 7–8 s per build
 and about a second for the unit tests. `setup_status` shows the release, the
 workspace and what the next build would do.
@@ -686,7 +687,8 @@ duplicates none of their content:
   moves it) — nothing an agent deploys can leak into a commit.
 - **Backend:** without a framework checkout the npm package
   `@abap2ui5/node-runtime` — `A2UI5_MCP_RUNTIME_VERSION` pins its release
-  (default: the registry's latest, asked once a day), `A2UI5_MCP_BACKEND=npm`
+  (default: the project's `abaplint.jsonc` pin, else the registry's latest,
+  asked once a day), `A2UI5_MCP_BACKEND=npm`
   uses it beside a checkout too, `A2UI5_MCP_BACKEND=clone` restores the
   framework clone as the default. Everything it installs lives in
   `~/.abap2ui5-mcp` and is safe to delete.
