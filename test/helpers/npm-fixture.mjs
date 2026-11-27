@@ -17,7 +17,7 @@ export const SHIM_SHA = 'c1fc36026f69eb0ae7d1830d304e1e1923e9a9a3';
 /* The package: initialize() counts boots, accelerate() is optional,
  * serve() answers every request with the classes registered at that moment
  * (so a GET proves the host imported the dev apps), compress optional too. */
-function hostModule({ accelerate, compress, lyingServe }) {
+function hostModule({ accelerate, compress, lyingServe, handlers }) {
   return `
 import http from 'node:http';
 export const HANDLER_CLASS = 'ZCL_SICF';
@@ -25,6 +25,16 @@ export async function initialize() { globalThis.__boots = (globalThis.__boots ||
 ${accelerate ? 'export async function accelerate() { globalThis.__accelerated = true; }' : ''}
 ${compress ? `export function compress() { return (req, res, next) => { res.setHeader('x-fake-compress', 'yes'); next(); }; }` : ''}
 const answer = (req, res) => res.end(JSON.stringify({ classes: Object.keys(globalThis.abap.Classes).sort(), accelerated: Boolean(globalThis.__accelerated), boots: globalThis.__boots, createAppOptions: globalThis.__createAppOptions ?? null }));
+${handlers ? `/* createHandler: echoes what reached the handler; ZCL_MISSING throws what the shim
+ * throws for a class that is not there */
+class CX_SY_CREATE_OBJECT_ERROR extends Error {}
+export function createHandler({ handlerClass }) {
+  return async (req, res) => {
+    if (handlerClass === 'ZCL_MISSING') throw new CX_SY_CREATE_OBJECT_ERROR('no class');
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify({ handler: handlerClass, url: req.url, method: req.method, body: Buffer.isBuffer(req.body) ? req.body.toString('utf8') : null }));
+  };
+}` : ''}
 export async function createApp(options) { globalThis.__createAppOptions = options ?? {}; return (req, res) => answer(req, res); }
 export async function serve({ port, host }) {
   await initialize();
@@ -199,7 +209,7 @@ export function writeEntry(dir) {
  *  `transpilerLayout` what its transpiler writes (the same, unless a test
  *  wants the two apart), `ownApps` whether a folder-layout package ships
  *  setup/own-apps.mjs. */
-export function fakeRelease(workspace, { version = VERSION, accelerate = true, compress = false, lyingServe = false, layout = 'flat', transpilerLayout = layout === 'full' ? 'folders' : layout, ownApps = true } = {}) {
+export function fakeRelease(workspace, { version = VERSION, accelerate = true, compress = false, lyingServe = false, handlers = false, layout = 'flat', transpilerLayout = layout === 'full' ? 'folders' : layout, ownApps = true } = {}) {
   const full = layout === 'full';
   if (full) layout = 'folders';
   const dir = path.join(workspace, 'runtime', version);
@@ -218,13 +228,13 @@ export function fakeRelease(workspace, { version = VERSION, accelerate = true, c
     // the package's own entry point boots the package's output/: never in a full build
     write(path.join(pkg, 'srv', 'host.mjs'), "throw new Error(\"the package's entry point was imported next to a full build's host.mjs\");\n");
     write(path.join(pkg, 'srv', 'framework.mjs'), 'export function bindFramework() {}\n');
-    write(path.join(pkg, 'setup', 'transpile.mjs'), fullTranspileModule(`import "./claim.mjs";\nimport "./init.mjs";\nglobalThis.__full = true;\n${hostModule({ accelerate, compress, lyingServe })}`));
+    write(path.join(pkg, 'setup', 'transpile.mjs'), fullTranspileModule(`import "./claim.mjs";\nimport "./init.mjs";\nglobalThis.__full = true;\n${hostModule({ accelerate, compress, lyingServe, handlers })}`));
     write(path.join(pkg, 'setup', 'setup.mjs'), 'export async function setup() {}\n');
     const shim = path.join(workspace, 'express-icf-shim', SHIM_SHA);
     write(path.join(shim, 'src', 'cl_express_icf_shim.clas.abap'), '* fake\n');
     write(path.join(shim, '.abap2ui5-mcp-sha'), `${SHIM_SHA}\n`);
   } else {
-    write(path.join(pkg, 'srv', 'host.mjs'), hostModule({ accelerate, compress, lyingServe }));
+    write(path.join(pkg, 'srv', 'host.mjs'), hostModule({ accelerate, compress, lyingServe, handlers }));
   }
   write(path.join(pkg, 'output', 'init.mjs'), 'export async function initializeABAP() {}\n');
   const cxRoot = 'export class cx_root {}\nglobalThis.abap = globalThis.abap || { Classes: {} };\nglobalThis.abap.Classes.CX_ROOT = cx_root;\n';

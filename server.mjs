@@ -67,7 +67,7 @@ import { TOOLS } from './lib/tools.mjs';
 import { annotate, TOOL_ANNOTATIONS, SYSTEM_TOOL_ANNOTATIONS } from './lib/annotations.mjs';
 import { serverInstructions } from './lib/instructions.mjs';
 import { explainRemoved } from './lib/removed-api.mjs';
-import { classNameFromSource } from './lib/deploy.mjs';
+import { classNameFromSource, blockingDevObjects, blockingSentence } from './lib/deploy.mjs';
 import { RESOURCES, RESOURCE_TEMPLATES, GUIDE_CHAPTER_TEMPLATE, readResource } from './lib/resources.mjs';
 import { PROMPTS, getPrompt } from './lib/prompts.mjs';
 import { missingSiblingMessage, missingLocalSiblingMessage } from './lib/siblings.mjs';
@@ -107,6 +107,7 @@ import {
   classNameOf,
 } from './lib/runtime.mjs';
 import { createAppClient, AgentError } from './lib/appclient.mjs';
+import { callHandler, icfClassName } from './lib/icf.mjs';
 import { toolsWithUi, uiEnabled } from './lib/mcp-app.mjs';
 import { appCard, cardContent, defaultAppFormat, APP_FORMATS } from './lib/adaptive-card.mjs';
 import { migrateReport, deployFiles, resolvePopups, validTargetClass, SetupError, KernelEscapeError } from './lib/migrate.mjs';
@@ -1179,6 +1180,7 @@ async function handle(name, args = {}, ctx = {}) {
         if (!reply.lint.ok) {
           const removed = await explainRemoved(reply.lint);
           reply.hint = 'fix the lint findings and deploy again; build_backend is only worth running on a clean lint'
+            + ` - the class is in the dev sandbox as it is, and every deployed app is built together: until it is fixed or taken out (remove_app { class_name: "${res.class}" }), build_backend fails for all of them`
             + (removed ? ` - ${removed}` : '');
         }
       }
@@ -1547,7 +1549,10 @@ async function handle(name, args = {}, ctx = {}) {
       const res = await buildBackend({ mode, onLine: progressReporter(ctx), signal: ctx.signal, beforeBuild: stopBackend });
       if (res.joined) return toolError(`build_backend cancelled by the client: ${res.tail}`);
       if (res.aborted) return toolError(`build cancelled by the client (mode ${res.mode || mode}):\n${res.tail}`);
-      if (!res.ok) return toolError(`build failed (exit ${res.code}, mode ${res.mode || mode}):\n${res.tail}`);
+      if (!res.ok) {
+        return toolError(`build failed (exit ${res.code}, mode ${res.mode || mode}):\n${res.tail}`
+          + blockingSentence(blockingDevObjects(res.tail, listDevApps())));
+      }
       return text({
         built: true,
         mode: res.mode,
@@ -1753,6 +1758,30 @@ async function handle(name, args = {}, ctx = {}) {
       return snapshotAnswer(() => client.act(args.session, {
         values: args.values, event: args.event, window: args.window, args: args.args, row: args.row, maxRows, signal: ctx.signal,
       }), { format, client });
+    }
+    case 'call_handler': {
+      const miss = missingBackend();
+      if (miss) return miss;
+      if (backendKind() !== 'npm') {
+        return toolError('call_handler needs the npm backend - a framework checkout\'s express host has no /__a2ui5/icf route; unset A2UI5_HOME / A2UI5_MCP_BACKEND to run on @abap2ui5/node-runtime');
+      }
+      if (!icfClassName(args.class)) return toolError(`class must be an ABAP class name (letters, digits, _; at most 30), not ${JSON.stringify(args.class ?? null)}`);
+      if (!backendBuilt()) return toolError('backend not built — deploy the handler class (deploy_app / deploy_folder), then build_backend');
+      await startBackend();
+      try {
+        const answer = await callHandler({
+          baseUrl: backendBaseUrl(), className: args.class, method: args.method, path: args.path,
+          query: args.query, body: args.body, contentType: args.content_type, signal: ctx.signal,
+        });
+        return text({
+          ...answer,
+          ...(answer.status === 404 && /no deployed class/.test(answer.body)
+            ? { hint: 'deploy the class (it must implement if_http_extension), then build_backend - a class deployed after the last build is not in the backend yet' }
+            : {}),
+        });
+      } catch (e) {
+        return toolError(String((e && e.message) || e));
+      }
     }
     case 'run_unit_tests': {
       const miss = missingBackend();

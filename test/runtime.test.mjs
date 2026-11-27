@@ -977,6 +977,29 @@ test('openPage: a throw of newPage or the setup closes the context and takes the
   assert.equal(state.closed, 1);
 });
 
+/* An abort while newContext was still running fired before openPage's
+ * listener existed, and an aborted signal never fires again: the context
+ * stayed open for the whole boot. It is closed at once now, and the call
+ * rejects before a page is made; an abort during the setup ends it too. */
+test('openPage: an abort while the context is made, or during the setup, closes it and rejects', async () => {
+  const state = { closed: 0, pages: 0 };
+  const ctl = new AbortController();
+  const ctx = {
+    close: async () => { state.closed += 1; },
+    newPage: async () => { state.pages += 1; return {}; },
+  };
+  const browser = { newContext: async () => { ctl.abort(); return ctx; } };
+  await assert.rejects(openPage(browser, {}, ctl.signal), (e) => e.name === 'AbortError');
+  assert.equal(state.closed, 1, 'closed at once');
+  assert.equal(state.pages, 0, 'no page made');
+  const ctl2 = new AbortController();
+  const state2 = { closed: 0 };
+  const ctx2 = { close: async () => { state2.closed += 1; }, newPage: async () => ({}) };
+  await assert.rejects(openPage({ newContext: async () => ctx2 }, {}, ctl2.signal, async () => { ctl2.abort(); }), (e) => e.name === 'AbortError');
+  await new Promise((r) => setImmediate(r));
+  assert.ok(state2.closed >= 1, 'the context of an abort during the setup is closed');
+});
+
 test('onPath scans PATH in-process: executables only, PATHEXT on Windows, no which needed', () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-path-'));
   try {
