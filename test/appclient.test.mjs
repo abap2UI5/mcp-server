@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createAppClient, buildDelta, errorText, AgentError, PROTOCOL, PROTOCOLS, EARLIER_IDS, headerOf, validContextId } from '../lib/appclient.mjs';
+import { createAppClient, buildDelta, errorText, AgentError, PROTOCOL, PROTOCOLS, EARLIER_IDS, headerOf, validContextId, fetchTransport, RESPONSE_MAX_BYTES } from '../lib/appclient.mjs';
 import { setAt } from '../lib/snapshot.mjs';
 
 const FIX = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'agent');
@@ -1357,6 +1357,41 @@ test('an event that may have run (timeout, cancel, a lost answer) leaves the ses
   const ls = await late.start('z_t');
   await rejects(late.act(ls.session, { event: 'CHECK', signal: ctl.signal }),
     /^cancelled by the caller after the backend had answered - nothing of the answer was adopted\. session '.+' is out of sync: event CHECK ran on the backend/);
+});
+
+/* The default transport read the answer whole (res.text()): a backend or a
+ * proxy that streamed without end held the server's memory until the
+ * timeout. It reads up to RESPONSE_MAX_BYTES, refuses a larger declared
+ * length unread and cancels a stream at the cap - and since an answer came,
+ * the event ran: the session is held like any lost answer's. */
+test('fetchTransport reads at most RESPONSE_MAX_BYTES: a declared or streamed excess is refused, the stream cancelled', async () => {
+  assert.equal(RESPONSE_MAX_BYTES, 32 * 1024 * 1024);
+  let pulls = 0;
+  let cancelledStream = false;
+  let mode = 'stream';
+  const fetchImpl = async (url, init) => {
+    const value = JSON.parse(init.body).value;
+    if (!value.S_FRONT.EVENT) return new Response(JSON.stringify(startAnswer()), { status: 200 });
+    if (mode === 'declared') return new Response('x'.repeat(10), { status: 200, headers: { 'content-length': '5000' } });
+    if (mode === 'small') return new Response(JSON.stringify(eventAnswer(9)), { status: 200 });
+    const endless = new ReadableStream({
+      pull(ctl) { pulls += 1; ctl.enqueue(new TextEncoder().encode('x'.repeat(256))); },
+      cancel() { cancelledStream = true; },
+    });
+    return new Response(endless, { status: 200 });
+  };
+  const c = createAppClient({ transport: fetchTransport({ baseUrl: BASE, fetchImpl, maxBytes: 1000 }), location: () => ({ origin: 'x', pathname: '/', search: '' }) });
+  const s = await c.start('z_t');
+  await rejects(c.act(s.session, { event: 'CHECK' }),
+    /^the backend answered more than 1000 bytes - stopped reading it, nothing of it was adopted .*\. session 'D1' is out of sync: event CHECK ran on the backend/);
+  assert.ok(pulls < 10, `stopped at the cap (${pulls} chunks)`);
+  assert.ok(cancelledStream, 'the stream was cancelled');
+  c.describe(s.session);
+  mode = 'declared';
+  await rejects(c.act(s.session, { event: 'CHECK' }), /^the backend answered more than 1000 bytes/);
+  c.describe(s.session);
+  mode = 'small';
+  assert.equal((await c.act(s.session, { event: 'CHECK' })).session, 'D9', 'an answer within the cap is read as before');
 });
 
 // ------------------------------------------------------ windowed tables ----

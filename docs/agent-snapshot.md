@@ -703,7 +703,7 @@ default:
 
 | Option | Default (local backend) | On a real system |
 | --- | --- | --- |
-| `transport({ method, body, headers, signal, draftId })` → `{ status, headers?, body }` | one `fetch` of `baseUrl` (`fetchImpl`): a POST of `body`, or the CSRF token fetch's HEAD | the embedder's own request: auth, cookies, a proxy |
+| `transport({ method, body, headers, signal, draftId })` → `{ status, headers?, body }` | one `fetch` of `baseUrl` (`fetchImpl`): a POST of `body`, or the CSRF token fetch's HEAD; the answer read up to `RESPONSE_MAX_BYTES` (32 MB), a larger one refused as an answer that ran | the embedder's own request: auth, cookies, a proxy |
 | `location(app)` → `{ origin, pathname, search }` (may be async) | `baseUrl` without the trailing slash, `/`, `?app_start=<app>` | the system's launch URL, never a proxy's |
 | `generation()` | absent: no restart detection (the MCP server passes its backend process id) | absent |
 | `backendHint` | `is it running? backend { action: "status" } says` | the embedder's own pointer, or `''` |

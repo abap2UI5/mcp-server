@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **The app tools read at most 32 MB of an answer.** The default transport
+  read the backend's answer whole (`res.text()`), so a backend or a proxy
+  that streamed without end held the server's memory until the timeout. It
+  now streams up to `RESPONSE_MAX_BYTES`, refuses a larger declared length
+  unread, cancels the stream at the cap and says so - and holds the session
+  like any answer that was not adopted. The system mode's network errors now
+  keep their cause, so a refused connection there blocks nothing either.
 - **An event that may have run is not reported as one that did not.** A
   timeout or a cancel after app_act had sent its POST said "nothing of this
   roundtrip was adopted" or "the backend did not answer", and an agent
