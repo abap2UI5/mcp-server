@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **The scan field of custom-controls is a field of the app snapshot.**
+  `z2ui5_cci.cc.ScanInput` (abap2UI5-addons/custom-controls, an
+  `sap.m.Input` underneath) was listed as "custom control ... - not
+  described", so `app_act` could fire its `submit` but not fill it - an app
+  built around scanning could not be operated without a browser. It is now
+  a text field like the `sap.m.Input` it extends: its `value` binding, its
+  label, enabled and editable state. Other custom controls stay "not
+  described"; `ADDON_FIELDS` in `lib/snapshot.mjs` is the list. Tested in
+  `test/snapshot.test.mjs`.
+
 ## 1.3.0 - 2026-11-27
 
 - **The linter peer range follows the linter: `>=0.8.0 <0.14.0`.** It ended
