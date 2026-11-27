@@ -2,6 +2,57 @@
 
 ## Unreleased
 
+- **System mode can write a class to the system - experimental, opt-in.**
+  The mode could only operate apps; an agent with a gate-green class had no
+  way to put it on the system. With `A2UI5_MCP_SYSTEM_WRITE=1` set in
+  addition to `A2UI5_MCP_SYSTEM_URL`, three more tools are listed, over the
+  ADT REST API: `system_write_class` (create or update a global class from
+  `.clas.abap`, an optional `.clas.testclasses.abap` and the description of
+  `.clas.xml` - lock, write the parts that differ, unlock; the class stays
+  inactive), `system_activate` (the activation messages with abapGit file,
+  line and column) and `system_unit_tests` (the class's ABAP Unit tests).
+  **Only tested against the fake system of the test suite, never against a
+  real SAP system** - the descriptions, the README, SECURITY.md and
+  AGENTS.md say so. Conservative by construction: without the variable the
+  tools are not listed and a call by name is refused unsent; only customer
+  names are taken (`A2UI5_MCP_SYSTEM_WRITE_ALLOW`, default `^Z|^Y|^/\w+/`,
+  narrows them), `Z2UI5_*` and SAP-owned names never; `package` is required
+  and `transport` is required off `$TMP` - a request is never chosen or
+  created, and a class sitting in another one is refused naming it; an
+  existing class last changed by somebody else needs `overwrite: true`; the
+  unlock is in a `finally` with a signal of its own; every answer states
+  what was created, written and left unchanged. Not written: local class
+  includes, other object types. `system_status` reports the write half
+  under `write`. New: `lib/system-write.mjs`, `SYSTEM_WRITE_TOOLS` in
+  `lib/system-tools.mjs`, the ADT endpoints of
+  `test/helpers/fake-system.mjs`, `test/system-write.test.mjs`;
+  `createSystemHttp`'s `send` takes a `jar` option (a conversation's own
+  cookies - the logon, the gate and the breaker stay shared).
+
+- **`addons`: is there an addon for this?** An agent building an app
+  through this server never learned that github.com/abap2UI5-addons exists,
+  and hand-built what an addon already is - a confirm, select, input or file
+  dialog (`abap2UI5-addons/popups`, classes `z2ui5_cl_popup_*`), a user's
+  table layouts (`layout-management`). The new tool reads the catalogue the
+  addons site is built from (`src/data/catalog.ts` and
+  `src/data/addons/<repo>.json` of abap2UI5-addons/abap2ui5-addons.github.io)
+  live: without arguments every addon, grouped, one line each (`useWhen`,
+  else the tagline, and the `entryPoints` app code calls); `query` ranks the
+  addons against keywords - any term may match, weighted by the field it
+  hits, words matched by their stem, paged with `offset`/`more`; `repo`
+  answers one addon in full with its usage snippet and `install.order`, the
+  abapGit repositories to pull with `dependsOn` resolved transitively (the
+  framework first, a dependency outside the catalogue kept and marked), and
+  the `npm run add-addon -- <repo>` hint for a project made from
+  app-template. The three fields written for agents are optional upstream:
+  without them the tool answers from the rest, and a missing `dependsOn` is
+  read out of the requirements text and marked `dependsOnInferred`. Resolved
+  like every sibling - `ADDONS_HOME`, `../abap2ui5-addons.github.io`, else
+  the read-only GitHub mirror, whose file list follows the catalogue - and
+  shown by `setup_status`. The `build-an-abap2ui5-app` prompt names it in
+  its first step. New: `lib/addons.mjs`, `lib/addons-catalog.mjs`,
+  `test/addons.test.mjs`, the `addons` entry of `lib/repo-dirs.json`.
+
 - **The agent client speaks protocol 3 - abap2UI5 1.151.0 - and still
   protocol 2.** `lib/appclient.mjs` refused every answer of 1.151.0 ("the
   backend answered protocol 3, this client speaks protocol 2"), so

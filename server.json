@@ -63,6 +63,12 @@
           "isRequired": false
         },
         {
+          "name": "ADDONS_HOME",
+          "description": "abap2UI5-addons/abap2ui5-addons.github.io checkout whose catalogue the addons tool reads. Default: ../abap2ui5-addons.github.io, else the GitHub mirror.",
+          "format": "filepath",
+          "isRequired": false
+        },
+        {
           "name": "ABAP_CLOUD_GUI_HOME",
           "description": "abap2UI5-addons/abap-cloud-gui checkout (with npm ci done) whose report2UI5 converter migrate_report runs. Default: ../abap-cloud-gui; no mirror.",
           "format": "filepath",
@@ -244,6 +250,18 @@
         {
           "name": "A2UI5_MCP_SYSTEM_INSECURE_TLS",
           "description": "System mode: set to 1 to accept a certificate that cannot be verified. NODE_EXTRA_CA_CERTS with the CA is the better fix.",
+          "format": "string",
+          "isRequired": false
+        },
+        {
+          "name": "A2UI5_MCP_SYSTEM_WRITE",
+          "description": "System mode, experimental: set to 1 to list the tools that write a class to the system over ADT, activate it and run its unit tests. Off by default; tested against a fake system only.",
+          "format": "string",
+          "isRequired": false
+        },
+        {
+          "name": "A2UI5_MCP_SYSTEM_WRITE_ALLOW",
+          "description": "System mode write tools: a regular expression a class name must match (default ^Z|^Y|^/\\w+/). Z2UI5_* and SAP-owned names are refused regardless.",
           "format": "string",
           "isRequired": false
         },

@@ -12,6 +12,7 @@ import { resolveSamplesControls, resolveViewCheck, resolveA2UI5, resolveDocs } f
 import { TOOL_NAMES } from '../lib/tools.mjs';
 import { RESOURCE_URIS, GUIDE_CHAPTER_TEMPLATE } from '../lib/resources.mjs';
 import { PROMPT_NAMES } from '../lib/prompts.mjs';
+import { stripEssentialsMarkers, sliceGuide } from '../lib/guide.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PKG = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
@@ -196,6 +197,7 @@ test(`stdio smoke: initialize, ${TOOL_NAMES.length} tools, a capabilities query`
       assert.match(g.sections[0].heading, /^1\./);
       assert.ok(g.chapters.length > 3, `the whole table of contents comes back with it: ${g.chapters}`);
       assert.ok(g.sections[0].body.length > 100, 'a chapter arrives with its text, not just its name');
+      assert.doesNotMatch(guide.content[0].text, /<!-- \/?essentials:/, 'the essentials markers are the template generator\'s, not the reader\'s');
 
       /* The client API, from the real interface: a queried method must arrive
        * as a signature (parameters, defaults) and not as prose alone. */
@@ -260,6 +262,7 @@ test(`stdio smoke: initialize, ${TOOL_NAMES.length} tools, a capabilities query`
       const chap = await until((m) => m.id === 15);
       assert.ok(!chap.error, `reading a guide chapter errored: ${JSON.stringify(chap.error)}`);
       assert.match(chap.result.contents[0].text, /^## 1\./, 'the asked-for chapter, with its heading');
+      assert.doesNotMatch(chap.result.contents[0].text, /<!-- \/?essentials:/, 'no essentials marker in the resource either');
     }
 
     /* The workflow prompts: the derived list from lib/prompts.mjs, and a get
@@ -292,4 +295,42 @@ test(`stdio smoke: initialize, ${TOOL_NAMES.length} tools, a capabilities query`
   } finally {
     p.kill();
   }
+});
+
+/* The guide marks what app-template's AGENTS.md cuts out of it with comment
+ * lines; app_guide and abap2ui5://guide serve the guide without them. Only a
+ * line that is nothing but a marker goes - the text around it stays as it is. */
+test('the essentials markers are stripped from the served guide, and nothing else is', () => {
+  const md = [
+    '## 1. The model',
+    '',
+    '<!-- essentials:model -->',
+    'One class.',
+    '<!-- /essentials:model -->',
+    '',
+    '- **Do:** one chain.',
+    '  <!-- /essentials:dispatcher -->',
+    '- **Don\'t:** two.',
+    '  <!-- essentials:builder-2 -->',
+    '- Booleans go through `b`.',
+    'A line that mentions <!-- essentials:model --> inline stays.',
+    '<!-- another comment -->',
+    '<!-- essentials:Model -->',
+    '',
+  ].join('\n');
+  assert.equal(stripEssentialsMarkers(md), [
+    '## 1. The model',
+    '',
+    'One class.',
+    '',
+    '- **Do:** one chain.',
+    '- **Don\'t:** two.',
+    '- Booleans go through `b`.',
+    'A line that mentions <!-- essentials:model --> inline stays.',
+    '<!-- another comment -->',
+    '<!-- essentials:Model -->',
+    '',
+  ].join('\n'));
+  assert.equal(stripEssentialsMarkers('a\r\n<!-- essentials:x -->\r\nb\r\n'), 'a\r\nb\r\n', 'CRLF files lose the whole line');
+  assert.equal(sliceGuide(stripEssentialsMarkers(md))[0].body.includes('essentials:dispatcher'), false);
 });

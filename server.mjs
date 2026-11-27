@@ -54,6 +54,7 @@ import { readApiParsed, searchApi, apiSummary, apiFile, API_PATH } from './lib/a
 import { parseSizes, screenshotSource } from './lib/screenshot.mjs';
 import { resolveSamplesControls, resolveAppTemplate, importViewCheck, SERVER_ROOT, workspaceRoot } from './lib/repos.mjs';
 import { searchDocs, docsRoot } from './lib/docs.mjs';
+import { readAddons, findAddon, addonsOverview, addonsSearchAnswer, addonDetail } from './lib/addons.mjs';
 import { scaffold, readSpec, validClassName, classNameRule, templateFiles, SPEC_FILE } from './lib/scaffold.mjs';
 import { agentTargetProblem, planAgentSetup, writePlan, pinProblems, pinWarning, agentSetupNextSteps } from './lib/agent-setup.mjs';
 import { fixSource } from './lib/fixview.mjs';
@@ -105,7 +106,8 @@ import { appCard, cardContent, defaultAppFormat, APP_FORMATS } from './lib/adapt
 import { migrateReport, deployFiles, resolvePopups, validTargetClass, SetupError, KernelEscapeError } from './lib/migrate.mjs';
 import { explicitEnv } from './lib/repos.mjs';
 import { systemConfig, createSystemHttp, createSystemClient, systemClassName, searchClasses, checkSystem, maskedUrl } from './lib/system.mjs';
-import { SYSTEM_TOOLS } from './lib/system-tools.mjs';
+import { SYSTEM_TOOLS, SYSTEM_WRITE_TOOLS } from './lib/system-tools.mjs';
+import { writeConfig, describeWrite, writeDisabledMessage, writeClass, activateClass, runClassUnitTests } from './lib/system-write.mjs';
 
 function text(s) {
   return { content: [{ type: 'text', text: typeof s === 'string' ? s : JSON.stringify(s, null, 2) }] };
@@ -345,7 +347,11 @@ async function snapshotAnswer(run, { format = 'snapshot', client = null } = {}) 
  * without the variable; the two never share a tool name inside one server.
  * Read once: a desktop client restarts the server to change it. */
 const SYSTEM = systemConfig(process.env);
-const ACTIVE_TOOLS = SYSTEM ? SYSTEM_TOOLS : TOOLS;
+/* The write half (lib/system-write.mjs) is a second opt-in on top of the
+ * mode: without A2UI5_MCP_SYSTEM_WRITE=1 its tools are not listed, and a
+ * call by name is refused before anything is sent. */
+const SYSTEM_WRITE = writeConfig(process.env);
+const ACTIVE_TOOLS = SYSTEM ? (SYSTEM_WRITE.enabled ? [...SYSTEM_TOOLS, ...SYSTEM_WRITE_TOOLS] : SYSTEM_TOOLS) : TOOLS;
 
 let systemHttp = null;
 let systemClient = null;
@@ -363,7 +369,34 @@ async function handleSystem(name, args = {}, { signal } = {}) {
   const { sys, client } = await systemSide();
   switch (name) {
     case 'system_status':
-      return text(await checkSystem(SYSTEM, sys));
+      return text({ ...(await checkSystem(SYSTEM, sys)), write: describeWrite(SYSTEM_WRITE) });
+    case 'system_write_class':
+    case 'system_activate':
+    case 'system_unit_tests': {
+      /* The opt-in first: without it nothing below runs and nothing is
+       * sent. A step's refusal or failure is an error result that still
+       * carries what was written until then. */
+      if (!SYSTEM_WRITE.enabled) return toolError(writeDisabledMessage(name));
+      const step = { system_write_class: writeClass, system_activate: activateClass, system_unit_tests: runClassUnitTests }[name];
+      let result;
+      try {
+        result = await step({
+          className: args.class_name,
+          source: args.source,
+          testclasses: args.testclasses,
+          xml: args.xml,
+          description: args.description,
+          packageName: args.package,
+          transport: args.transport,
+          overwrite: args.overwrite,
+        }, { config: SYSTEM, sys, write: SYSTEM_WRITE, signal });
+      } catch (e) {
+        if (e instanceof AgentError) return toolError(e.message);
+        throw e;
+      }
+      const answer = text({ ...result, system: sys.host, user: SYSTEM.user });
+      return result.ok === false ? { ...answer, isError: true } : answer;
+    }
     case 'app_list': {
       const filter = String(args.filter || '').trim();
       let refs;
@@ -742,8 +775,9 @@ async function handle(name, args = {}, ctx = {}) {
           + 'update it (git pull), or point APP_TEMPLATE_HOME at a complete checkout');
       }
 
-      /* Paged (lib/budget.mjs): the whole template is ~280 KB - AGENTS.md and
-       * three skills are most of it - which is over what an MCP client
+      /* Paged (lib/budget.mjs): the whole template is ~470 KB - the four
+       * skills and their references, the app-building guide among them, are
+       * ~300 KB of it - which is over what an MCP client
        * accepts as one answer, and a refused answer is no files at all. The
        * first page carries every file that fits, smallest first so the class,
        * its sidecar and the configs always come; `remaining` names the rest,
@@ -993,6 +1027,41 @@ async function handle(name, args = {}, ctx = {}) {
         entries,
         next: 'fetch the `markdown` URL of the best hit for the whole page — or read docs/<path>.md in the checkout',
       });
+    }
+    case 'addons': {
+      const miss = missingSibling('abap2ui5-addons.github.io');
+      if (miss) return miss;
+      const catalogue = readAddons();
+      // the checkout can be there and the catalogue not what this server reads:
+      // a layout change upstream. Named by path, never answered as "no addons".
+      if (!catalogue || catalogue.problem) {
+        return toolError(`the addons catalogue checkout at ${catalogue && catalogue.root} cannot be read: ${catalogue && catalogue.problem} — update it (git pull)`);
+      }
+      const source = isRemoteCheckout(catalogue.root) ? 'abap2UI5-addons/abap2ui5-addons.github.io (GitHub mirror)' : catalogue.root;
+      const repo = String(args.repo ?? '').trim();
+      if (repo) {
+        const addon = findAddon(catalogue.addons, repo);
+        if (!addon) {
+          return toolError(`no addon '${repo.slice(0, 80)}' in the catalogue — it has: ${catalogue.addons.map((a) => a.repo).join(', ')}`);
+        }
+        return text({ ...addonDetail(catalogue, addon), source });
+      }
+      const query = String(args.query ?? '').trim();
+      if (query) {
+        const answer = addonsSearchAnswer(catalogue, query);
+        if (!answer.entries) return text({ ...answer, source });
+        const { taken, notes } = pageWithin(answer.entries, args, '(same query)');
+        return text({ matches: answer.matches, ...notes, source, entries: taken, next: answer.next });
+      }
+      /* One line per addon fits one answer many times over today; should the
+       * catalogue ever outgrow it, the class lists go first and the answer
+       * says so - `repo` and `query` still carry them. */
+      const overview = addonsOverview(catalogue);
+      if (sizeOf({ ...overview, source }) > ANSWER_BUDGET - 5000) {
+        for (const g of overview.groups) g.addons = g.addons.map(({ entryPoints, ...rest }) => rest);
+        overview.entryPointsCut = 'the catalogue is past one answer, so the entry points (the classes app code calls) were left out - addons { repo } or { query } carries them';
+      }
+      return text({ ...overview, source });
     }
     case 'pitfalls': {
       // the catalogues live in the abap2UI5 checkout, not in the corpus

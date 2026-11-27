@@ -33,6 +33,7 @@ test('every sibling-dependent tool degrades with an actionable error when the ch
       APP_TEMPLATE_HOME: path.join(NOWHERE, 'app-template'),
       DOCS_HOME: path.join(NOWHERE, 'docs'),
       ABAP_CLOUD_GUI_HOME: path.join(NOWHERE, 'abap-cloud-gui'),
+      ADDONS_HOME: path.join(NOWHERE, 'abap2ui5-addons.github.io'),
     },
   });
   let buf = '';
@@ -210,6 +211,10 @@ test('every sibling-dependent tool degrades with an actionable error when the ch
     expectMissing(await call('api_reference', { query: 'toast' }), /abap2UI5 checkout not found/, 'A2UI5_HOME');
     // the documentation site has a checkout of its own
     expectMissing(await call('docs_search', { query: 'value help' }), /docs checkout not found/, 'DOCS_HOME');
+    // the addons catalogue is the addons site's repository
+    for (const addonArgs of [{}, { query: 'confirm dialog' }, { repo: 'popups' }]) {
+      expectMissing(await call('addons', addonArgs), /abap2ui5-addons\.github\.io checkout not found/, 'ADDONS_HOME');
+    }
     expectMissing(await call('backend', { action: 'start' }), /abap2UI5 checkout not found/, 'A2UI5_HOME');
     expectMissing(await call('backend', { action: 'restart' }), /abap2UI5 checkout not found/, 'A2UI5_HOME');
 
@@ -217,7 +222,7 @@ test('every sibling-dependent tool degrades with an actionable error when the ch
     const setup = await call('setup_status', {});
     assert.ok(!setup.isError, `setup_status must not fail: ${JSON.stringify(setup)}`);
     const st = JSON.parse(setup.content[0].text);
-    for (const key of ['a2ui5', 'corpus', 'samples', 'samplesStack', 'appTemplate', 'docs', 'viewCheck']) {
+    for (const key of ['a2ui5', 'corpus', 'samples', 'samplesStack', 'appTemplate', 'docs', 'addons', 'viewCheck']) {
       assert.equal(st.repos[key].missing, true, `${key} must be reported missing`);
       assert.ok(st.repos[key].hint, `${key} needs a hint`);
     }

@@ -17,7 +17,7 @@ import { TOOL_NAMES } from '../lib/tools.mjs';
 import { RESOURCE_URIS } from '../lib/resources.mjs';
 
 const ENV_VARS = ['A2UI5_HOME', 'AI_VIEW_CHECK_HOME', 'SAMPLES_CONTROLS_HOME', 'AI_DEMOKIT_HOME', 'SAMPLES_HOME', 'SAMPLES_STACK_HOME',
-  'APP_TEMPLATE_HOME', 'DOCS_HOME', 'A2UI5_MCP_REMOTE', 'A2UI5_MCP_OFFLINE', 'A2UI5_MCP_REMOTE_TTL_MS'];
+  'APP_TEMPLATE_HOME', 'DOCS_HOME', 'ADDONS_HOME', 'A2UI5_MCP_REMOTE', 'A2UI5_MCP_OFFLINE', 'A2UI5_MCP_REMOTE_TTL_MS'];
 
 /* Every test runs with the mirror in its own temp dir and no repo env var
  * set, and puts the environment back afterwards. */

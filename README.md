@@ -157,7 +157,7 @@ via the committed [`.mcp.json`](.mcp.json); the
 
 **Level 0 — no checkout at all.** The knowledge tools (`app_guide`,
 `api_reference`, `pitfalls`, `capabilities`, `examples`, `read_example`,
-`docs_search`, `scaffold_app`, `generation_rules`) read committed files, so
+`docs_search`, `addons`, `scaffold_app`, `generation_rules`) read committed files, so
 when no checkout resolves and no env var is set they read them from GitHub
 instead: the files land in a per-user cache (`<tmp>/abap2ui5-mcp-remote`, a
 day at a time - used only while it is a directory of the user's own, created
@@ -224,10 +224,11 @@ fix it.
 | `app_guide` | How to build an app, live from the framework checkout | abap2UI5 |
 | `api_reference` | The client API (`z2ui5_if_client`) with its ABAP-Doc: methods, parameters, defaults, the `cs_*` constants | abap2UI5 |
 | `scaffold_app` | The files a new project starts from, live from app-template; `{ class: … }` renames throughout, sidecar `CLSNAME` included | app-template |
-| `add_agent_setup` | Set up an **existing** project for AI work — what `npm create abap2ui5-app -- --agent-setup` does: AGENTS.md, the skills, `.mcp.json`, the allowlist, both gates and the CI job, written into `project_dir`; never overwrites, merges `package.json`/`.gitignore`, follows the `STARTING_FOLDER` | app-template |
+| `add_agent_setup` | Set up an **existing** project for AI work — what `npm create abap2ui5-app -- --agent-setup` does: AGENTS.md (the project's page and the guide's essentials), `docs/project.md`, the skills (the full guide is one file among them), `.mcp.json`, the allowlist, both gates and the CI job, written into `project_dir`; never overwrites, merges `package.json`/`.gitignore`, follows the `STARTING_FOLDER` | app-template |
 | `examples` | Search the three sample catalogues, verification status and all — answers with a class to read, never a snippet to trust | any of samples / samples-controls / samples-stack (or the GitHub mirror) |
 | `read_example` | Read the source of a sample an `examples` hit named — from the checkout, or fetched from GitHub | the sample's repository (or the GitHub mirror) |
 | `docs_search` | Full-text search over the documentation site's pages: page, heading, snippet and the published URL | docs |
+| `addons` | Is there an addon for this? The catalogue of [abap2UI5-addons](https://abap2ui5-addons.github.io/): grouped, ranked against a `query`, or one `repo` in full — entry-point classes, usage snippet, the install order with its dependencies resolved | abap2ui5-addons.github.io (or the GitHub mirror) |
 | `generation_rules` | The rulebook for porting a UI5 demo-kit sample into samples-controls | samples-controls |
 | `pitfalls` | The defects a green run does not catch: `{ area: "abap" }` and `{ area: "view" }` | abap2UI5 |
 | `scope_of` | In/out-of-scope verdict for a UI5 control | samples-controls + an OpenUI5 checkout |
@@ -285,7 +286,7 @@ larger than about 60,000 characters. The tools whose answers grow with
 upstream content page instead of cutting: `matches` counts every hit,
 `returned` the page, and `more` names the exact call for the rest
 (`offset` - `examples`, `capabilities`, `api_reference`, `app_guide`,
-`pitfalls`, `docs_search`; `files` - `scaffold_app`; `from_line` -
+`pitfalls`, `docs_search`, `addons`; `files` - `scaffold_app`; `from_line` -
 `read_app`, `read_example`; `build_log` names its next `offset` under
 `cut`). A list that is shortened rather than paged says so in a `...Cut`
 field (`findingsCut`, `rulesCut`, `errorsCut`, ...), and a last-line backstop trims anything that still
@@ -525,6 +526,56 @@ What to know before switching it on:
   user's authorization for them — `app_start` works without both when the
   class name is known.
 
+### Writing to the system (experimental, opt-in)
+
+Everything above operates apps that are already on the system. With
+`A2UI5_MCP_SYSTEM_WRITE=1` set **in addition to** `A2UI5_MCP_SYSTEM_URL`,
+the mode lists three more tools that put a class there over the ADT REST
+API. Without that variable they are not listed, and a call by name is
+refused before anything is sent.
+
+> **Experimental.** The write tools are written from the ADT request
+> shapes (the ones the VS Code extension's Push and Activate checked against
+> the open-source client abap-adt-api, plus class creation and the ABAP Unit
+> run) and have only been tested against a fake system in this repository's
+> test suite - never against a real SAP system. Expect to find differences
+> on one; use a development system, and read every answer.
+
+| Tool | What it does |
+|---|---|
+| `system_write_class` | Create or update a global class from its abapGit files — `source` (`.clas.abap`), optional `testclasses` (`.clas.testclasses.abap`), the description from `xml` (`.clas.xml`): lock, write the parts that differ, unlock. Leaves the class inactive. `package` is required (`$TMP` for a local object), every other package needs `transport` |
+| `system_activate` | Activate the class and return the activation messages: the abapGit file, `line` (1-based), `column` (0-based), severity and text of each |
+| `system_unit_tests` | Run the class's ABAP Unit tests through ADT: one entry per test method, a failed assertion with its details and stack |
+
+| Variable | |
+|---|---|
+| `A2UI5_MCP_SYSTEM_WRITE` | `1` lists the write tools. Off by default |
+| `A2UI5_MCP_SYSTEM_WRITE_ALLOW` | A regular expression (case-insensitive) a class name has to match to be written, activated or tested; default `^Z\|^Y\|^/\w+/`, the customer namespaces. Narrow it to your project's prefix, e.g. `^ZCL_ACME_` |
+
+What it will not do, whatever it is asked:
+
+- **Write the framework or an SAP object.** `Z2UI5_*` (abap2UI5 itself), a
+  name in SAP's range (one that starts with neither `Z`, `Y` nor a
+  `/NAMESPACE/`) and the namespaces SAP delivers objects in are refused
+  before a request is sent — the allow pattern can narrow the names, never
+  widen them past this.
+- **Choose or create a transport request.** `package` and `transport` are
+  arguments; only `$TMP` needs no request. A class that already sits in
+  another request than the one given is refused, naming it.
+- **Overwrite somebody else's work silently.** An existing class whose last
+  change is not the logged-on user's is refused unless the call says
+  `overwrite: true`; so is one in another package than the one given.
+- **Leave a lock behind.** From the moment the class is locked, the unlock
+  is sent whatever happens — a refused write, a dropped connection, a
+  cancelled call — and the answer says whether the system confirmed it.
+
+Every answer says what happened: `created`, the files `written`, the ones
+left `unchanged`, the package and request used, and that the class is still
+inactive until `system_activate`. Not written: local class includes
+(`.clas.locals_def.abap`, `.clas.locals_imp.abap`), any object that is not a
+class, and the description of a class that already exists. abapGit stays the
+way to bring a whole repository onto a system.
+
 ## Unit tests in CI, without a system
 
 The same runtime runs an app repository's ABAP Unit tests in GitHub Actions
@@ -606,7 +657,8 @@ descriptions alone. Each renders an orchestration script over the tools above an
 duplicates none of their content:
 
 - **`build-an-abap2ui5-app`** (argument: `task`, what the app should do) —
-  orient with `examples`/`capabilities`, learn the shape from `app_guide`,
+  orient with `examples`/`addons`/`capabilities` (has somebody built it
+  already - as a sample to read, or as an addon to call), learn the shape from `app_guide`,
   write the class, iterate through `validate_view`/`screenshot_view` in
   seconds, prove it with `deploy_app` → `build_backend` → `run_app`, close
   with `pitfalls`.
@@ -696,6 +748,10 @@ duplicates none of their content:
   [VS Code extension](https://github.com/abap2UI5/vscode-extension), whose own
   MCP server exposes it as `run_app_on_system`. Both servers are registered in
   the same editor window, which is why that tool is not called `run_app`.
+  The one exception is opt-in and experimental: in system mode with
+  `A2UI5_MCP_SYSTEM_WRITE=1`, `system_write_class` puts a single class on a
+  system over ADT (above) — for the class an agent just wrote, not for a
+  repository.
 
 ## Working on this repository
 

@@ -53,6 +53,7 @@ reads it live like a checkout.
 | `SAMPLES_STACK_HOME` | `../samples-stack`, `../abap2UI5-samples-stack` | `catalogue.json` (preferred) + `SAMPLES.md` (fallback) — the stack-dependent catalogue (OData, RAP, APC, launchpad) |
 | `APP_TEMPLATE_HOME` | `../app-template`, `../abap2UI5-app-template` | `template.json` and the files it lists — what `scaffold_app` serves and renames, and what `add_agent_setup` writes into an existing project by the `agentSetup` key (both are dead without this checkout or its mirror) |
 | `DOCS_HOME` | `../docs` | `docs/**/*.md` — the documentation site's sources, searched live by `docs_search` |
+| `ADDONS_HOME` | `../abap2ui5-addons.github.io` (also spelled `abap2UI5-addons.github.io`) | `src/data/catalog.ts` (the groups and which repository sits in which) and `src/data/addons/<repo>.json` (the facts of each) — the catalogue of abap2UI5-addons the `addons` tool reads; mirrored when absent |
 | `ABAP_CLOUD_GUI_HOME` | `../abap-cloud-gui` | `tools/report2ui5/lib/{convert,textpool,report}.mjs` (`tools/report2cloud/lib` in the addon's 1.0.0) — the report converter `migrate_report` imports in-process, with the checkout's own `node_modules` (`npm ci` there; LOCAL only, no mirror - `resolveCloudGui`, not in `RESOLVERS`); with `deploy: true` also its `src/01`, and the popups beside it (`POPUPS_HOME`, else `.deps/popups` of the checkout, `../popups` beside it, its `build/popups` - in that order, `resolvePopups`) |
 | `AI_VIEW_CHECK_HOME` | `../linter` (legacy aliases: `../abap2UI5-linter`, `../ai-view-check`) — which for an npm/npx install is ALSO where npm hoists the declared peer `@abap2ui5/linter` (`node_modules/@abap2ui5/{mcp-server,linter}`), then an INSTALLED one elsewhere: `<cwd>/node_modules/…` (app-template's devDependency), the server's own `node_modules/…`, then wherever Node's resolver finds the package from `lib/repos.mjs` (`viewCheckCandidates`, `nodeResolvedViewCheck`) | `validate_view` + `fix_view` + `screenshot_view`: dynamic import of the linter's package `exports` entries `.`, `./findings`, `./config`, `./rule-docs` (via `importViewCheck`) |
 
@@ -109,7 +110,8 @@ before it exits; default 10 min, 0 = never), `A2UI5_MCP_UI` (`auto`/`on`/`off`:
 whether the app tools declare their MCP Apps screen, below),
 `A2UI5_MCP_APP_FORMAT` (`snapshot`/`adaptive-card`: the app tools' default
 answer format, below), the system mode's `A2UI5_MCP_SYSTEM_URL` / `_USER` /
-`_PASSWORD` / `_PASSWORD_CMD` / `_INSECURE_TLS` (below), `A2UI5_MCP_BUILD_TIMEOUT_MS`
+`_PASSWORD` / `_PASSWORD_CMD` / `_INSECURE_TLS` (below) and its write half's
+`A2UI5_MCP_SYSTEM_WRITE` / `A2UI5_MCP_SYSTEM_WRITE_ALLOW` (below), `A2UI5_MCP_BUILD_TIMEOUT_MS`
 (default 30 min, also the prebuilt download and the npm install) and
 `A2UI5_MCP_UNIT_TIMEOUT_MS` (default 10 min, the test runner).
 
@@ -117,7 +119,8 @@ answer format, below), the system mode's `A2UI5_MCP_SYSTEM_URL` / `_USER` /
 
 The knowledge tools read committed FILES and nothing else: the guide, the
 interface, the two catalogues of pitfalls, the capability map, the porting
-brief, three sample catalogues, the docs tree, the template. None of that
+brief, three sample catalogues, the docs tree, the template, the addons
+catalogue. None of that
 needs an npm install or a build, and yet every one of those tools was dead
 until three to six repositories had been cloned next to this one — in a fresh
 project that is the whole first hour. So `lib/remote.mjs` gives the cheap half
@@ -723,7 +726,7 @@ act with the session it last saw is refused naming the current one).
   the fixtures with their acts submitted through the card. A card that
   cannot be rendered costs the card, never the act.
 
-### The system mode — `lib/system.mjs`, `lib/system-tools.mjs`
+### The system mode — `lib/system.mjs`, `lib/system-tools.mjs`, `lib/system-write.mjs`
 
 **`A2UI5_MCP_SYSTEM_URL` turns the server into something else**: the app
 tools against a REAL SAP system, for the MCP clients that are not the VS Code
@@ -783,6 +786,71 @@ share a tool name inside one server.
   against the fake system's own URL): one sandbox registration's worth of
   confidence without a system. The breaker test asserts that exactly ONE
   request reached the system.
+
+#### The write half — `lib/system-write.mjs` (experimental, opt-in)
+
+**This half has only been tested against the fake system, not a real one.**
+`test/helpers/fake-system.mjs` answers the ADT endpoints from the same
+request shapes the client was written from, so the tests prove the sequence,
+the refusals and the unlock - and nothing about what a real ADT answers. Keep
+that sentence in the tool descriptions, the README, SECURITY.md and here
+until somebody has run it on a system; `test/tool-surface.test.mjs` fails
+when the README or this file loses it.
+
+With `A2UI5_MCP_SYSTEM_WRITE=1` beside the system URL, `tools/list` answers
+`SYSTEM_WRITE_TOOLS` after `SYSTEM_TOOLS` (`lib/system-tools.mjs`):
+`system_write_class` (create-or-update a global class from `.clas.abap`,
+optional `.clas.testclasses.abap`, the description from `.clas.xml`: lock,
+write what differs, unlock - the class stays inactive), `system_activate`
+(the activation messages with abapGit file, line and column) and
+`system_unit_tests` (ABAP Unit through ADT). Without the variable they are
+not listed, and `handleSystem` refuses a call by name before anything runs.
+
+- **The same logon, a conversation of its own.** Every request goes through
+  `sys.send` (`createSystemHttp`): Basic authentication, the per-request TLS
+  rule, the breaker, `networkProblem`. What an ADT conversation adds
+  (`adtSession`) is a cookie jar of its OWN, passed as `send`'s `jar` option
+  - a stateful ADT session's cookies must not ride on the app tools'
+  roundtrips - the CSRF token (fetched by the first GET, `x-csrf-token:
+  fetch`), and `X-sap-adt-sessiontype`: stateless for the reads, the create
+  and the activation, stateful from the lock to the unlock.
+- **Where the request shapes come from.** Metadata, source read, LOCK,
+  test-include create, source PUT, UNLOCK, session drop and activation are
+  the VS Code extension's Push and Activate (`src/adtwrite.ts`,
+  `src/adtmessages.ts`), which checked each against the open-source client
+  abap-adt-api - read, never run against a system there either. Class
+  CREATION (`POST /sap/bc/adt/oo/classes`) and the ABAP Unit run
+  (`POST /sap/bc/adt/abapunit/testruns`) are not in the extension; they are
+  written from memory of the same library and are the first two things to
+  verify on a system. The module header lists every endpoint.
+- **The safety rules - do not weaken one.** (1) The opt-in. (2) The name
+  gate `writableClassName`: a customer name only, `Z2UI5_*` and SAP names
+  refused BEFORE the allow pattern is looked at, so
+  `A2UI5_MCP_SYSTEM_WRITE_ALLOW` narrows and never widens; a pattern that
+  is no regular expression is a problem every write tool answers with, never
+  a fall back to the default. Every write tool passes the gate. (3) `package`
+  is required, `transport` is required off `$TMP`, and neither is ever
+  chosen: a class the lock reports in another request is refused naming it.
+  (4) An existing class whose `adtcore:changedBy` is not the logged-on user
+  - or is absent - is refused without `overwrite: true`; one in another
+  package is refused always. (5) The unlock is in a `finally` and sent with
+  a signal of its own (`cancellable: false`), so a client's cancel, a
+  refused write or a thrown request still releases the lock; an unconfirmed
+  unlock is said (`lockNotReleased`). (6) The answer states what was
+  created, written and left unchanged, also on a refusal or a failure after
+  a part was written. A refusal or a failed step is an `isError` result
+  that still carries that JSON.
+- **Not built, on purpose:** the local includes (`locals_def`,
+  `locals_imp`), objects other than classes, changing an existing class's
+  description or package, deleting, and anything that picks or creates a
+  transport request. abapGit stays the way to bring a repository onto a
+  system.
+- `test/system-write.test.mjs` runs the pure halves on literals, the
+  sequence against injected requests (a write that throws, a cancel
+  mid-write, an unconfirmed unlock) and the real server over stdio against
+  the fake's ADT endpoints: the happy path, a syntax error on activation, a
+  refused name, the missing opt-in, a lock held by someone else, the unlock
+  after a failed write, the overwrite and transport rules, and the breaker.
 
 ### Vendored code — `lib/vendor/`, `scripts/vendor-adaptive-cards.mjs`
 
@@ -931,6 +999,26 @@ the sibling each tool is dead without, and that column must keep saying what
 this section says. `test/missing-siblings.test.mjs` pins this contract per
 tool by pointing every env var at a nonexistent directory.
 
+**`addons`** (`lib/addons.mjs`, the leaf `lib/addons-catalog.mjs`) answers
+"is there an addon for this?" from the catalogue of abap2UI5-addons - the one
+question none of the other knowledge tools could answer, so an agent hand-built
+the confirm dialog `z2ui5_cl_popup_to_confirm` already is. Three shapes, like
+its neighbours: no argument - the catalogue grouped, one line per addon
+(`useWhen`, else the tagline; `entryPoints`); `query` - ranked, a match on ANY
+term (a question is a sentence, and an AND over its words finds nothing),
+weighted by the field it hits and matched by stem; `repo` - one addon in full,
+with `install.order` (the framework, then every `dependsOn` after its own,
+resolved transitively, a dependency outside the catalogue kept and marked) and
+the `npm run add-addon -- <repo>` hint for a project made from app-template.
+The three fields written for agents (`useWhen`, `entryPoints`, `dependsOn`) are
+OPTIONAL upstream and the tool answers without them; a missing `dependsOn` is
+read out of the requirements text and says `dependsOnInferred`. It reads the
+RAW files, not the site's published `addons.json` projection: the mirror
+fetches committed files of a repository, and a built page is not one. What it
+cannot do is make an addon available in the local sandbox - the description
+says so, and `migrate_report { deploy: true }` stays the one place that
+brings addon classes (the popups) into a build.
+
 `examples` is the ONE exception and deliberately so: it reads three
 catalogues, and one of them missing is not a reason to refuse the other two.
 It answers from what it can read, names what it could not under
@@ -1078,6 +1166,24 @@ changes upstream, this repo must change in the same breath:
   answers no release list of tables and APIs any more. With `deploy: true` also the layout `src/01` and the popup set of
   the addon's `unit.yaml` (`POPUP_FILES`). A renamed export or a moved file
   over there is a broken `migrate_report` here, said by path.
+- abap2UI5-addons/abap2ui5-addons.github.io: **`src/data/catalog.ts`** and
+  **`src/data/addons/<repo>.json`** - the catalogue `addons` reads.
+  catalog.ts is TypeScript read as TEXT (`parseCatalog` in
+  `lib/addons-catalog.mjs`): the `groups` array literal, each group from its
+  `id: "..."` to the next with `title` and `lead`, each entry a flat
+  `{ repo: "...", site?: "...", org?: "..." }` object with string literals.
+  Computed entries, a spread or a renamed key over there are groups this
+  server does not see - reported ("names no group"), and the mirror then
+  refuses to hydrate rather than cache an empty catalogue. Of the facts JSON
+  it reads `title`, `tagline`, `summary`, `features`, `requirements`,
+  `install.abapgit_url` / `install.notes`, `usage`, `cloud`, `nw702`,
+  `status` and the optional `useWhen`, `entryPoints`, `dependsOn`
+  (`"<org>/<repo>"`, the framework not named); a facts file that is missing
+  or not JSON costs that addon its facts, never the catalogue. The mirror
+  lists the facts files off the catalogue (`plan` in `lib/remote.mjs`), the
+  way it lists the template's files off template.json. The hint the tool
+  gives, `npm run add-addon -- <repo>`, is app-template's script: a rename
+  there is a stale sentence here.
 - docs: the `docs/` markdown tree (everything but `.vitepress`, `public` and
   `node_modules` is a page) and the **published URL scheme** its
   `scripts/generate-llms.mjs` derives — `https://abap2ui5.github.io/docs/<path>`
@@ -1441,7 +1547,7 @@ legitimately slower.
   a tool result over 25,000 tokens and the agent then sees nothing at all.
   `lib/budget.mjs` (`ANSWER_BUDGET`, about 60,000 characters) is what the
   tools that can grow past it page against — `scaffold_app` (`files`),
-  `pitfalls`, `app_guide`, `examples`, `capabilities` and `api_reference`
+  `pitfalls`, `app_guide`, `examples`, `capabilities`, `addons` and `api_reference`
   (`offset`, all but `pitfalls` with `limit`; `app_guide` and `pitfalls`
   by chapter / section, never cut) — and each page names the arguments that fetch
   the rest; `read_app` and `read_example` (`from_line`) and `build_log` (`offset`, its `cut`
@@ -1463,7 +1569,8 @@ legitimately slower.
   `lines` and `next` were taken before it paged) and answer a `from_line`
   past the end with `pastEnd`; a list that is cut rather than paged says
   what was left out in a `...Cut` sentence (`findingsCut`, `rulesCut`,
-  `remainingCut`, `fixedCut`, `errorsCut`, `screenshotCut`, `build_log`'s
+  `remainingCut`, `fixedCut`, `errorsCut`, `screenshotCut`, `entryPointsCut`
+  (`addons` without arguments), `build_log`'s
   `cut`; the backstop's `__answerGuardCut`). Older names outside it, kept
   because a client reads them: `scaffold_app`'s `remaining`,
   `migrate_report`'s `files_left_out` (its fields are snake_case),
@@ -1550,5 +1657,6 @@ legitimately slower.
 | [abap2UI5](https://github.com/abap2UI5/abap2UI5) | Runtime substrate: transpiled backend + express server — and the client API `api_reference` parses |
 | [app-template](https://github.com/abap2UI5/app-template) | The starter project `scaffold_app` serves and renames, and the agent setup `add_agent_setup` adds to an existing project, both executing the template's own `template.json` (`APP_TEMPLATE_HOME`) |
 | [docs](https://github.com/abap2UI5/docs) | The documentation site `docs_search` reads, in source form |
+| [abap2ui5-addons.github.io](https://github.com/abap2UI5-addons/abap2ui5-addons.github.io) | The addons site, whose committed `src/data` is the catalogue `addons` reads (`ADDONS_HOME`) |
 | [abap2UI5-linter](https://github.com/abap2UI5/linter) | `validate_view` implementation (imported via its package `exports` map) |
 | [vscode-extension](https://github.com/abap2UI5/vscode-extension) | Registers this server for MCP clients in the editor (`src/mcp.ts`), and vendors `lib/appclient.mjs` for its own system server - the editor-side counterpart of the system mode |
