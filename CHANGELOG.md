@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **api_reference answers what was asked, not everything that mentions it.**
+  A query came back with every matching entry whole: `_bind` was 41,000
+  characters (_bind and every method whose documentation says "bind"),
+  `popup` 42,000. The entries whose NAME carries the query still come whole;
+  the ones that only mention it in their documentation come as one line each
+  under `mentionedIn` - name and first sentence - to ask for by name. When no
+  name matches, nothing changes. Now `_bind` is 14,700 characters, `popup`
+  3,400 (`splitByName` in lib/api.mjs).
+- **examples ranks a term that stands as a word first.** "popup" led with
+  the device model, found by `popup_close` / `popup_display` among its
+  keywords; the popup samples came after. A term that is a keyword of its
+  own or a word of the title now ranks before the same letters inside an
+  identifier.
+- **deploy_app and verify_app take the class name from the source.**
+  `class_name` is optional now: left out, it is the class the source's
+  `CLASS ... DEFINITION` defines (`classNameFromSource` in lib/deploy.mjs).
+  An agent that sent only the source got "invalid class name ''"; a source
+  without any class now gets a sentence saying so.
+
 - **`run_app` photographs the app, not the frontend's empty shell.** The
   boot check (more than three UI5 elements on the page) is met by the
   frontend's own shell, before the app's first roundtrip is answered, its
