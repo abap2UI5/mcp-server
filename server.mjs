@@ -67,7 +67,7 @@ import { TOOLS } from './lib/tools.mjs';
 import { annotate, TOOL_ANNOTATIONS, SYSTEM_TOOL_ANNOTATIONS } from './lib/annotations.mjs';
 import { serverInstructions } from './lib/instructions.mjs';
 import { explainRemoved } from './lib/removed-api.mjs';
-import { classNameFromSource } from './lib/deploy.mjs';
+import { classNameFromSource, blockingDevObjects, blockingSentence } from './lib/deploy.mjs';
 import { RESOURCES, RESOURCE_TEMPLATES, GUIDE_CHAPTER_TEMPLATE, readResource } from './lib/resources.mjs';
 import { PROMPTS, getPrompt } from './lib/prompts.mjs';
 import { missingSiblingMessage, missingLocalSiblingMessage } from './lib/siblings.mjs';
@@ -1180,6 +1180,7 @@ async function handle(name, args = {}, ctx = {}) {
         if (!reply.lint.ok) {
           const removed = await explainRemoved(reply.lint);
           reply.hint = 'fix the lint findings and deploy again; build_backend is only worth running on a clean lint'
+            + ` - the class is in the dev sandbox as it is, and every deployed app is built together: until it is fixed or taken out (remove_app { class_name: "${res.class}" }), build_backend fails for all of them`
             + (removed ? ` - ${removed}` : '');
         }
       }
@@ -1548,7 +1549,10 @@ async function handle(name, args = {}, ctx = {}) {
       const res = await buildBackend({ mode, onLine: progressReporter(ctx), signal: ctx.signal, beforeBuild: stopBackend });
       if (res.joined) return toolError(`build_backend cancelled by the client: ${res.tail}`);
       if (res.aborted) return toolError(`build cancelled by the client (mode ${res.mode || mode}):\n${res.tail}`);
-      if (!res.ok) return toolError(`build failed (exit ${res.code}, mode ${res.mode || mode}):\n${res.tail}`);
+      if (!res.ok) {
+        return toolError(`build failed (exit ${res.code}, mode ${res.mode || mode}):\n${res.tail}`
+          + blockingSentence(blockingDevObjects(res.tail, listDevApps())));
+      }
       return text({
         built: true,
         mode: res.mode,

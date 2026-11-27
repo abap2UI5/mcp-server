@@ -16,6 +16,21 @@
   started its own express app around the backend
   (`lib/icf.mjs`, the host's banner names the route).
 
+- **A dev app left broken no longer blocks every build in silence.** A
+  deploy whose lint fails still writes the class, and every deployed dev app
+  is built together - so verify_app of a clean app stopped at the build on
+  an older one, and the answer named a file of another class with no word
+  that it was another app. A failed build_backend now names the dev objects
+  it stopped at and the `remove_app` call for each (`blockingDevObjects` in
+  lib/deploy.mjs), and deploy_app's lint hint says the class is in the
+  sandbox as it is until fixed or removed.
+- **interact_app says why an element was not found.** A fill by `id: "f1"` -
+  an id from app_start's snapshot, the natural one to reuse - waited ten
+  seconds and answered "locator.evaluate: Timeout 10000ms exceeded.". A
+  timeout now names the element, and a snapshot-shaped id is called one, with
+  the two ways that work: the control's own id from the view, `text` or
+  `selector` - or app_start / app_act (`actionError` in lib/browser.mjs).
+
 - **api_reference answers what was asked, not everything that mentions it.**
   A query came back with every matching entry whole: `_bind` was 41,000
   characters (_bind and every method whose documentation says "bind"),
