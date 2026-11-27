@@ -150,7 +150,7 @@ Four rules, each pinned by `test/remote.test.mjs` and
   the answer to "nothing configured, nothing next to me", and the
   missing-checkout message says so when an env var is the reason.
 - **The mirror is read-only, and the tools that write or build refuse it.**
-  `deploy_app`, `read_app`, `remove_app`, `scope_of`, `build_backend`,
+  `deploy_app`, `deploy_folder`, `read_app`, `remove_app`, `scope_of`, `build_backend`,
   `run_app`, `interact_app`, `run_unit_tests` and `backend start` resolve
   with `{ local: true }` (`missingLocalSiblingMessage` in `lib/siblings.mjs`)
   and never write into or build out of a mirror. `corpus()` and `a2Local()`
@@ -895,7 +895,13 @@ them - source, XML, test include, local-class includes (`writeObjects`,
 under the sandbox's name gate). NOT through `deploy_app`'s gate: that one
 asks for `z2ui5_if_app`, which refused every helper class - its tests never
 ran and the run still exited 0 - and it never deployed an interface or a
-locals include. On the npm backend into a sandbox and a build of the run's
+locals include. The tool for that is `deploy_folder` (`folderObjects` and
+`deployFolder` in `lib/runtime.mjs`): the same file names, collected without
+following symbolic links and at most `FOLDER_MAX_OBJECTS`, every name through
+`classNameOf` and the own-object gate BEFORE the first write (all or nothing),
+each target inside the sandbox and written with O_NOFOLLOW; a redeployed
+object loses the files the folder no longer has; the lint is deploy_app's,
+its findings filtered to the deployed objects (`objectsMatcher`). On the npm backend into a sandbox and a build of the run's
 OWN (`<workspace>/unit-*`, `runtime/<v>/apps-unit-*`: `buildNpm` with an
 `appsName`, which records no `current.json`; `runUnitTests({ appsDir })`),
 removed afterwards - an MCP session's sandbox on the same machine used to
