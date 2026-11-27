@@ -120,7 +120,9 @@ is the whole install. (With npm 6 or `--legacy-peer-deps`, add
 (`-p … abap2ui5-mcp` names the bin explicitly, which every published version
 answers. The shorter `npx --yes @abap2ui5/mcp-server` needs a bin named after
 the package, which 0.2.0 and earlier do not have — npx stops there with "could
-not determine executable to run".)
+not determine executable to run". That bin, `mcp-server`, is deprecated and
+goes with 2.0.0: the name is too generic to own in a project's
+`node_modules/.bin` — register `abap2ui5-mcp`.)
 
 (The install is ~47 MB: 19 MB of it a Playwright driver only `run_app` uses,
 2 MB the linter — paid on the first start, cached after. From a checkout instead:
