@@ -35,6 +35,14 @@ test('resolvedInside: a path is inside only with every symlink on it resolved', 
     // a symlinked directory leading out
     fs.symlinkSync(base, path.join(root, 'up'));
     assert.equal(resolvedInside(root, path.join(root, 'up', 'secret.txt')), false);
+    // a SIBLING whose name merely starts with the root's: <base>/root2/f is not
+    // inside <base>/root - the prefix test has to end at a path separator.
+    // Real directories on purpose: a path that does not exist fails realpath
+    // and is "not inside" for that reason alone, which would hide the bug.
+    fs.mkdirSync(path.join(base, 'root2'));
+    fs.writeFileSync(path.join(base, 'root2', 'f'), 'x');
+    assert.equal(resolvedInside(root, path.join(base, 'root2', 'f')), false, 'a name-prefix sibling is not inside');
+    assert.equal(resolvedInside(root, path.join(base, 'root2', 'new.txt')), false, 'nor a file about to be written there');
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }

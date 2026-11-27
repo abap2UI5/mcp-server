@@ -334,6 +334,69 @@ test('writeClass refuses before a single request: the name, the source, the pack
   assert.equal(seen.length, 0, 'nothing reached the system');
 });
 
+test('writeClass: a lock that is neither local nor in a request, with no transport given, is refused after the lock - nothing written, the lock given back', async () => {
+  // $TMP passes the gate before the first request; it is the LOCK answer that
+  // says the object is transportable and in no request yet
+  const { sys, seen } = scripted(async (r) => {
+    if (r.method === 'GET' && r.path.endsWith('/zcl_x')) return { headers: { 'x-csrf-token': 'T1' }, body: META() };
+    if (r.method === 'GET') return { body: 'old source' };
+    if (r.action === 'LOCK') return { body: '<asx:abap><asx:values><DATA><LOCK_HANDLE>H1</LOCK_HANDLE><CORRNR/><IS_LOCAL/></DATA></asx:values></asx:abap>' };
+    return {};
+  });
+  const res = await writeClass({ className: 'zcl_x', source: SOURCE('zcl_x'), packageName: '$TMP' }, { config: cfg(), sys, write: writeConfig({}) });
+  assert.equal(res.ok, false);
+  assert.match(res.refused, /ZCL_X is not a local object and is in no transport request yet - `transport` is required; this server never picks or creates one/);
+  assert.deepEqual(res.written, []);
+  assert.equal(res.unlocked, true);
+  assert.ok(!seen.some((r) => r.method === 'PUT'), 'no write was tried');
+  assert.ok(!seen.some((r) => r.method === 'POST' && r.path.endsWith('/includes')), 'no include was created');
+  assert.equal(seen.find((r) => r.action === 'UNLOCK')?.lockHandle, 'H1');
+});
+
+test('writeClass: a class whose metadata lists includes but no testclasses gets the test include created before the write', async () => {
+  const metaWithoutTests = '<class:abapClass adtcore:name="ZCL_X" adtcore:changedBy="DEV"><adtcore:packageRef adtcore:name="$TMP"/><class:include class:includeType="main"/></class:abapClass>';
+  const { sys, seen } = scripted(async (r) => {
+    if (r.method === 'GET' && r.path.endsWith('/zcl_x')) return { headers: { 'x-csrf-token': 'T1' }, body: metaWithoutTests };
+    // the include's GET answers (some systems serve an empty include) - the metadata is what says it is missing
+    if (r.method === 'GET') return { body: 'old source' };
+    if (r.action === 'LOCK') return { body: LOCK_LOCAL };
+    return {};
+  });
+  const res = await writeClass({ className: 'zcl_x', source: SOURCE('zcl_x'), testclasses: TESTS(), packageName: '$TMP' }, { config: cfg(), sys, write: writeConfig({}) });
+  assert.equal(res.ok, true, JSON.stringify(res));
+  const order = seen.map((r) => r.action || `${r.method} ${r.path.replace('/sap/bc/adt/', '')}`);
+  const create = order.indexOf('POST oo/classes/zcl_x/includes');
+  assert.ok(create > order.indexOf('LOCK'), `the include is created under the lock: ${order.join(', ')}`);
+  assert.ok(create < order.indexOf('PUT oo/classes/zcl_x/includes/testclasses'), 'and before the test classes are written into it');
+  assert.equal(seen[create].lockHandle, 'H1');
+
+  // ...and a class whose metadata lists it gets no such request
+  const { sys: sys2, seen: seen2 } = scripted(async (r) => {
+    if (r.method === 'GET' && r.path.endsWith('/zcl_x')) return { headers: { 'x-csrf-token': 'T1' }, body: META() };
+    if (r.method === 'GET') return { body: 'old source' };
+    if (r.action === 'LOCK') return { body: LOCK_LOCAL };
+    return {};
+  });
+  assert.equal((await writeClass({ className: 'zcl_x', source: SOURCE('zcl_x'), testclasses: TESTS(), packageName: '$TMP' }, { config: cfg(), sys: sys2, write: writeConfig({}) })).ok, true);
+  assert.ok(!seen2.some((r) => r.method === 'POST' && r.path.endsWith('/includes')));
+});
+
+test('writeClass: a new class\'s description is cut to the 60 characters DESCRIPT holds', async () => {
+  const bodies = [];
+  const { sys, seen } = scripted(async (r, init) => {
+    if (r.method === 'GET' && r.path.endsWith('/zcl_x')) return { status: 404, headers: { 'x-csrf-token': 'T1' }, body: '<exc:exception><message>not found</message></exc:exception>' };
+    if (r.method === 'POST' && r.path.endsWith('/oo/classes')) bodies.push(String(init.body));
+    if (r.action === 'LOCK') return { body: LOCK_LOCAL };
+    return {};
+  });
+  const long = `${'d'.repeat(59)}XYZ and more beyond the limit`;
+  const res = await writeClass({ className: 'zcl_x', source: SOURCE('zcl_x'), description: `  ${long}  `, packageName: '$TMP' }, { config: cfg(), sys, write: writeConfig({}) });
+  assert.equal(res.ok, true, JSON.stringify(res));
+  assert.equal(res.created, true);
+  assert.equal(bodies.length, 1, `one create: ${seen.map((r) => `${r.method} ${r.path}`).join(', ')}`);
+  assert.equal(/adtcore:description="([^"]*)"/.exec(bodies[0])?.[1], `${'d'.repeat(59)}X`, 'trimmed, then the first 60 characters');
+});
+
 test('activateClass refuses a class that does not exist before it asks for an activation', async () => {
   const { sys, seen } = scripted(async () => ({ status: 404, body: '<exc:exception><message>not found</message></exc:exception>' }));
   const res = await activateClass({ className: 'zcl_x' }, { config: cfg(), sys, write: writeConfig({}) });
