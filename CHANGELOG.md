@@ -1,5 +1,49 @@
 # Changelog
 
+## Unreleased
+
+- **System mode: pin the system's certificate instead of accepting any.**
+  `A2UI5_MCP_SYSTEM_INSECURE_TLS=1` was the only way to a system with a
+  self-signed certificate, and it accepted ANY certificate while the Basic
+  logon went out with every request - to whoever answered. The new
+  `A2UI5_MCP_SYSTEM_CERT_SHA256=<fingerprint>` (colons and case do not
+  matter, `openssl x509 -fingerprint -sha256` output is taken as it is)
+  connects without CA verification and compares the peer certificate's
+  SHA-256 on `secureConnect`, before the request - the logon included - is
+  written: any other certificate is refused with both fingerprints and
+  nothing sent (`CERT_PIN_MISMATCH`), on every request, a kept-alive
+  connection too. The VS Code extension's per-origin pin, as an environment
+  variable. A pin that is no fingerprint, a pin beside `INSECURE_TLS` and a
+  pin on an `http:` URL are configuration problems. The blanket flag stays
+  for the read-only mode: with `A2UI5_MCP_SYSTEM_WRITE=1` every write tool
+  answers with the misconfiguration, unsent. `system_status` says what is
+  active in `tls` (verified, pinned, unverified, plain http) and what is
+  unsafe in `warnings`; the certificate error's sentence names the pin.
+  New: `normalizeFingerprint`, `pinMatches`, `describeTls`, `isLoopbackHost`,
+  `PIN_MISMATCH` and `nodeRequest`'s `pin` option in `lib/system.mjs`.
+- **System mode: plain `http:` off the loopback is said, and the write
+  tools refuse it.** Basic authentication over `http:` puts the password on
+  the network in clear text with every request. The app tools still work
+  there (an internal test system may have nothing else), but the
+  configuration carries a warning `system_status` shows, and
+  `A2UI5_MCP_SYSTEM_WRITE` refuses it like `INSECURE_TLS`. The loopback by
+  address (`127.x.x.x`, `[::1]`) is exempt, as for `A2UI5_MCP_PREBUILT_URL`.
+- **The password command's whole process tree ends on its timeout.**
+  `A2UI5_MCP_SYSTEM_PASSWORD_CMD` runs through a shell, and the timeout
+  killed that shell alone: the keychain lookup it had started kept running.
+  The command is now a process-group leader on POSIX, tracked for the
+  shutdown (`adoptChild`), and killed as a tree (`killChildTree`).
+- **A prebuilt backend that could not be checked is not unpacked.** When
+  the `.sha256` sidecar beside the archive answered anything but a 404 - a
+  proxy's 500, a network error, a page that is no sha256sum line - the
+  archive was unpacked unverified, with one line in the build log. Every
+  release after 1.148.0 carries the sidecar, so for those a missing (404),
+  unreadable or malformed sidecar now refuses the download the way a
+  mismatch does (`reason: 'sha256 unverified'`), and the previous build
+  stays; a mirror in `A2UI5_MCP_PREBUILT_URL` has to serve the sidecar too.
+  Only a release up to 1.148.0 still unpacks unverified, and says so. New:
+  `sidecarRequired`, `LAST_RELEASE_WITHOUT_SIDECAR` (`lib/runtime.mjs`).
+
 ## 1.3.0 - 2026-11-27
 
 - **The linter peer range follows the linter: `>=0.8.0 <0.14.0`.** It ended

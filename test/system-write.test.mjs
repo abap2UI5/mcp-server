@@ -69,6 +69,24 @@ test('the write half is off unless A2UI5_MCP_SYSTEM_WRITE is set, and a bad allo
   assert.match(writeDisabledMessage('system_activate'), /system_activate writes to the SAP system and is switched off: set A2UI5_MCP_SYSTEM_WRITE=1.*Nothing was sent/);
 });
 
+test('the write half refuses the blanket INSECURE_TLS and plain http off the loopback - a pinned certificate it takes', () => {
+  const env = (over) => ({ A2UI5_MCP_SYSTEM_USER: 'DEV', A2UI5_MCP_SYSTEM_PASSWORD: 'pw', [WRITE_ENV.on]: '1', ...over });
+  const insecure = writeConfig(env({ A2UI5_MCP_SYSTEM_URL: 'https://h/sap/bc/z2ui5', A2UI5_MCP_SYSTEM_INSECURE_TLS: '1' }));
+  assert.match(insecure.problems.join('\n'), /A2UI5_MCP_SYSTEM_WRITE refuses A2UI5_MCP_SYSTEM_INSECURE_TLS.*A2UI5_MCP_SYSTEM_CERT_SHA256/);
+  assert.throws(() => writableClassName('zcl_ok', insecure), /the write tools are misconfigured: .*INSECURE_TLS/);
+  assert.match(describeWrite(insecure), /MISCONFIGURED: .*INSECURE_TLS/);
+  const plain = writeConfig(env({ A2UI5_MCP_SYSTEM_URL: 'http://sap.example:8000/sap/bc/z2ui5' }));
+  assert.match(plain.problems.join('\n'), /refuses plain http: off the loopback/);
+  assert.throws(() => writableClassName('zcl_ok', plain), /misconfigured/);
+  for (const ok of [
+    { A2UI5_MCP_SYSTEM_URL: 'http://127.0.0.1:8000/sap/bc/z2ui5' },
+    { A2UI5_MCP_SYSTEM_URL: 'https://h/sap/bc/z2ui5', A2UI5_MCP_SYSTEM_CERT_SHA256: 'ab'.repeat(32) },
+    { A2UI5_MCP_SYSTEM_URL: 'https://h/sap/bc/z2ui5' },
+  ]) assert.deepEqual(writeConfig(env(ok)).problems, [], JSON.stringify(ok));
+  // the app tools alone keep the flag: read-only is where it is allowed
+  assert.deepEqual(writeConfig({ ...env({ A2UI5_MCP_SYSTEM_URL: 'https://h/x', A2UI5_MCP_SYSTEM_INSECURE_TLS: '1' }), [WRITE_ENV.on]: '' }).problems, []);
+});
+
 test('writableClassName: customer names only - never Z2UI5_*, never an SAP name, whatever the allow pattern says', () => {
   const dflt = writeConfig({});
   for (const [name, want] of [['zcl_my_app', 'ZCL_MY_APP'], ['YCL_X', 'YCL_X'], [' zcl_spaced ', 'ZCL_SPACED'], ['/acme/cl_app', '/ACME/CL_APP'], ['z2ui5x_cl_mine', 'Z2UI5X_CL_MINE']]) {
@@ -427,6 +445,26 @@ test('without the opt-in the write tools are not listed, and a call by name is r
   } finally {
     sandbox.stop();
   }
+});
+
+test('with INSECURE_TLS the write tools answer the misconfiguration and send nothing; system_status says what is active', async () => {
+  await withSystem({}, async (s, sys) => {
+    const status = (await s.call('system_status')).json;
+    assert.match(status.tls, /loopback/);
+    assert.match(status.write, /MISCONFIGURED: .*refuses A2UI5_MCP_SYSTEM_INSECURE_TLS/);
+    const before = sys.log.length;
+    for (const [name, args] of [
+      ['system_write_class', { class_name: 'zcl_mcp_demo', source: SOURCE(), package: '$TMP' }],
+      ['system_activate', { class_name: 'zcl_mcp_demo' }],
+      ['system_unit_tests', { class_name: 'zcl_mcp_demo' }],
+    ]) {
+      const res = await s.call(name, args);
+      assert.ok(res.isError, name);
+      assert.match(res.text, /the write tools are misconfigured: A2UI5_MCP_SYSTEM_WRITE refuses A2UI5_MCP_SYSTEM_INSECURE_TLS/, name);
+    }
+    assert.equal(sys.log.length, before, 'not one request reached the system');
+    assert.equal(sys.adt.classes.size, 0);
+  }, { A2UI5_MCP_SYSTEM_INSECURE_TLS: '1' });
 });
 
 test('the happy path: create in $TMP, write both files, activate, run the unit tests - and write again changes nothing', async () => {

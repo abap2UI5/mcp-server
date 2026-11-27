@@ -85,7 +85,10 @@ from; default the framework release asset, see below - `https:` only, a
 plain `http:` URL off the loopback is refused unless
 `A2UI5_MCP_PREBUILT_INSECURE=1`; `downloadPrebuilt` verifies the archive
 against the `.sha256` sidecar the framework attaches beside it from the
-release after 1.148.0 on, and says so when a release has none), the mirror knobs
+release after 1.148.0 on, and refuses to unpack such a release when the
+sidecar is missing, unreadable or malformed (`sidecarRequired`; a mirror
+must serve it too) - only a release up to 1.148.0 unpacks unverified, and
+says so), the mirror knobs
 `A2UI5_MCP_REMOTE=0` / `A2UI5_MCP_REMOTE_DIR` / `A2UI5_MCP_REMOTE_TTL_MS`
 (below), `GITHUB_TOKEN`/`GH_TOKEN` (sent to `api.github.com` only — it raises
 the docs tree listing's rate limit; never to `raw.githubusercontent.com`, which
@@ -110,7 +113,7 @@ before it exits; default 10 min, 0 = never), `A2UI5_MCP_UI` (`auto`/`on`/`off`:
 whether the app tools declare their MCP Apps screen, below),
 `A2UI5_MCP_APP_FORMAT` (`snapshot`/`adaptive-card`: the app tools' default
 answer format, below), the system mode's `A2UI5_MCP_SYSTEM_URL` / `_USER` /
-`_PASSWORD` / `_PASSWORD_CMD` / `_INSECURE_TLS` (below) and its write half's
+`_PASSWORD` / `_PASSWORD_CMD` / `_CERT_SHA256` / `_INSECURE_TLS` (below) and its write half's
 `A2UI5_MCP_SYSTEM_WRITE` / `A2UI5_MCP_SYSTEM_WRITE_ALLOW` (below), `A2UI5_MCP_BUILD_TIMEOUT_MS`
 (default 30 min, also the prebuilt download and the npm install) and
 `A2UI5_MCP_UNIT_TIMEOUT_MS` (default 10 min, the test runner).
@@ -776,9 +779,28 @@ share a tool name inside one server.
   `problems` instead of throwing, and every tool answers with them: in a
   desktop client the tool answer is the only place a user sees anything.
 - **node http(s), not fetch**: one system's self-signed certificate is
-  accepted per request (`A2UI5_MCP_SYSTEM_INSECURE_TLS`), never by a global
-  switch; `NODE_EXTRA_CA_CERTS` is the better answer and needs no code.
-  Network failures become sentences (`networkProblem`). No HTTP proxy.
+  accepted per request, never by a global switch; `NODE_EXTRA_CA_CERTS` is
+  the better answer and needs no code. Network failures become sentences
+  (`networkProblem`). No HTTP proxy.
+- **The certificate pin - do not weaken it.** `A2UI5_MCP_SYSTEM_CERT_SHA256`
+  connects without CA verification and compares the peer's
+  `fingerprint256` with the pin on `secureConnect` BEFORE the request is
+  ended (`whenPinned` in `nodeRequest`, the VS Code extension's
+  `whenTrusted`): a `ClientRequest` writes nothing - the Basic header
+  included - until `end( )`, so a mismatch destroys the request with
+  nothing sent (`CERT_PIN_MISMATCH`). Per request, so a kept-alive socket is
+  checked again. Strict: with a pin, a CA-verified certificate that is not
+  the pinned one is refused too. The blanket `A2UI5_MCP_SYSTEM_INSECURE_TLS`
+  stays for the read-only mode: `writeConfig` makes it a problem of every
+  write tool, together with plain `http:` off the loopback (`plainHttp`,
+  also a `warnings` entry of `describeConfig`, i.e. of `system_status`).
+  `describeTls` is the one sentence for what is active. A pin beside the
+  blanket flag, a pin that is no fingerprint, or a pin on an `http:` URL is
+  a `problems` entry, never ignored.
+- **The password command** runs as a process-group leader on POSIX
+  (`detached`), is tracked for the shutdown (`adoptChild`) and its whole
+  tree is killed on the timeout (`killChildTree`, `lib/spawn.mjs`) - the
+  shell alone left the lookup it started running.
 - `test/system.test.mjs` covers the pure halves against injected requests
   and runs the real server over stdio against `test/helpers/fake-system.mjs`
   - Basic logon, a session cookie, a CSRF token layer, the ADT search, and a

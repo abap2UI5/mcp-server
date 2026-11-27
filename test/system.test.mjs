@@ -8,11 +8,15 @@
 // fails on any request that differs from it.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
+import fs from 'node:fs';
 import http from 'node:http';
+import https from 'node:https';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  normalizeFingerprint, pinMatches, nodeRequest, isLoopbackHost, describeTls, PIN_MISMATCH,
   systemEndpoint, maskedUrl, systemLocation, systemConfig, describeConfig, systemClassName, cookieJar, createSystemHttp,
   parseAdtClassRefs, adtSearchUrl, networkProblem, runPasswordCommand, checkSystem, isStartPage, PROBE_CLASS,
 } from '../lib/system.mjs';
@@ -99,6 +103,144 @@ test('the configuration as shown never carries the password or the command', () 
   const shown2 = JSON.stringify(describeConfig(systemConfig({ ...env, A2UI5_MCP_SYSTEM_PASSWORD_CMD: undefined, A2UI5_MCP_SYSTEM_PASSWORD: 'hunter2' })));
   assert.ok(!shown2.includes('hunter2'));
   assert.match(shown2, /set \(A2UI5_MCP_SYSTEM_PASSWORD\)/);
+});
+
+// ------------------------------------------------- the transport's safety ----
+
+const BASE = { A2UI5_MCP_SYSTEM_USER: 'U', A2UI5_MCP_SYSTEM_PASSWORD: 'p' };
+const FP = 'AB:'.repeat(31) + 'AB';
+
+test('a certificate pin is a fingerprint in any spelling; anything else is a problem, never "no pin"', () => {
+  assert.equal(normalizeFingerprint('ab'.repeat(32)), FP);
+  assert.equal(normalizeFingerprint(`SHA256 Fingerprint=${FP.toLowerCase()}`), FP, 'what openssl x509 -fingerprint prints');
+  assert.equal(normalizeFingerprint('ab'.repeat(31)), '');
+  assert.equal(normalizeFingerprint('zz'.repeat(32)), '');
+  assert.ok(pinMatches(FP.toLowerCase().replace(/:/g, ''), FP));
+  assert.ok(!pinMatches(FP, 'CD'.repeat(32)));
+  assert.ok(!pinMatches('', ''), 'no fingerprint never matches');
+  const pinned = systemConfig({ ...BASE, A2UI5_MCP_SYSTEM_URL: 'https://h/x', A2UI5_MCP_SYSTEM_CERT_SHA256: 'ab'.repeat(32) });
+  assert.deepEqual(pinned.problems, []);
+  assert.equal(pinned.certSha256, FP);
+  assert.match(describeConfig(pinned).tls, /PINNED .*AB:AB.*any other is refused before the logon is sent/);
+  const typo = systemConfig({ ...BASE, A2UI5_MCP_SYSTEM_URL: 'https://h/x', A2UI5_MCP_SYSTEM_CERT_SHA256: 'ab:cd' });
+  assert.match(typo.problems.join('\n'), /A2UI5_MCP_SYSTEM_CERT_SHA256 is not a SHA-256 fingerprint/);
+  const both = systemConfig({ ...BASE, A2UI5_MCP_SYSTEM_URL: 'https://h/x', A2UI5_MCP_SYSTEM_CERT_SHA256: FP, A2UI5_MCP_SYSTEM_INSECURE_TLS: '1' });
+  assert.match(both.problems.join('\n'), /CERT_SHA256 or A2UI5_MCP_SYSTEM_INSECURE_TLS, not both/);
+  const plain = systemConfig({ ...BASE, A2UI5_MCP_SYSTEM_URL: 'http://h/x', A2UI5_MCP_SYSTEM_CERT_SHA256: FP });
+  assert.match(plain.problems.join('\n'), /pins a certificate, but A2UI5_MCP_SYSTEM_URL is http:/);
+});
+
+test('the configuration says what is active: verified, pinned, unverified - and plain http off the loopback is a warning', () => {
+  assert.equal(describeTls(systemConfig({ ...BASE, A2UI5_MCP_SYSTEM_URL: 'https://h/x' })), 'certificates verified (the system trust store, plus NODE_EXTRA_CA_CERTS)');
+  const insecure = systemConfig({ ...BASE, A2UI5_MCP_SYSTEM_URL: 'https://h/x', A2UI5_MCP_SYSTEM_INSECURE_TLS: '1' });
+  assert.deepEqual(insecure.problems, [], 'read-only, the blanket flag still starts the mode');
+  assert.match(describeConfig(insecure).tls, /^UNVERIFIED - any certificate accepted .*read-only, the write tools refuse it/);
+  assert.match(describeConfig(insecure).warnings.join('\n'), /accepts ANY certificate.*A2UI5_MCP_SYSTEM_CERT_SHA256/);
+  for (const host of ['sap.example', 'localhost', '10.0.0.1']) {
+    const c = systemConfig({ ...BASE, A2UI5_MCP_SYSTEM_URL: `http://${host}:8000/sap/bc/z2ui5` });
+    assert.deepEqual(c.problems, [], host);
+    assert.equal(c.plainHttp, true, host);
+    assert.match(describeConfig(c).tls, /^NONE - plain http/, host);
+    assert.match(describeConfig(c).warnings[0], /plain http: .*password of U goes over the network in clear text/, host);
+  }
+  for (const host of ['127.0.0.1', '[::1]']) {
+    const c = systemConfig({ ...BASE, A2UI5_MCP_SYSTEM_URL: `http://${host}:8000/sap/bc/z2ui5` });
+    assert.equal(c.plainHttp, false, host);
+    assert.equal(describeConfig(c).warnings, undefined, host);
+    assert.match(describeConfig(c).tls, /loopback/, host);
+  }
+  assert.ok(isLoopbackHost('127.1.2.3') && !isLoopbackHost('127.example'));
+});
+
+/* A real TLS server with a self-signed certificate made by openssl for the
+ * run: the pin is decided by what node's handshake reports, which no
+ * injected request can stand in for. `seen` counts the bytes the server
+ * received after the handshake - the logon must not be among them on a
+ * mismatch. */
+const HAVE_OPENSSL = (() => {
+  try {
+    execFileSync('openssl', ['version'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+async function tlsSystem() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-pin-'));
+  const key = path.join(dir, 'key.pem');
+  const cert = path.join(dir, 'cert.pem');
+  execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert, '-days', '1', '-subj', '/CN=127.0.0.1'], { stdio: 'ignore' });
+  const fingerprint = new (await import('node:crypto')).X509Certificate(fs.readFileSync(cert)).fingerprint256;
+  const seen = { bytes: 0, requests: 0, authorization: [] };
+  const server = https.createServer({ key: fs.readFileSync(key), cert: fs.readFileSync(cert) }, (req, res) => {
+    seen.requests += 1;
+    seen.authorization.push(req.headers.authorization);
+    res.writeHead(200, { 'content-type': 'text/plain' }).end('ok');
+  });
+  server.on('secureConnection', (socket) => socket.on('data', (d) => { seen.bytes += d.length; }));
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const url = `https://127.0.0.1:${server.address().port}/sap/bc/z2ui5`;
+  const close = () => {
+    server.closeAllConnections();
+    server.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  };
+  return { url, fingerprint, seen, close };
+}
+
+test('a pinned certificate is accepted without a CA, any other is refused before a byte - the logon - is written', { skip: !HAVE_OPENSSL && 'needs openssl on PATH' }, async () => {
+  const sys = await tlsSystem();
+  try {
+    // unpinned: node refuses the self-signed certificate
+    await assert.rejects(nodeRequest(sys.url, { headers: { authorization: 'Basic x' } }), (e) => e.code === 'DEPTH_ZERO_SELF_SIGNED_CERT');
+    // pinned: accepted, and again over a kept-alive socket
+    for (let i = 0; i < 2; i++) {
+      const res = await nodeRequest(sys.url, { headers: { authorization: 'Basic x' }, pin: sys.fingerprint.toLowerCase() });
+      assert.equal(res.status, 200);
+      assert.equal(res.body, 'ok');
+    }
+    assert.equal(sys.seen.requests, 2);
+    // another pin: refused with nothing written - not the request line, not the logon
+    sys.seen.bytes = 0;
+    await assert.rejects(
+      nodeRequest(sys.url, { method: 'POST', headers: { authorization: 'Basic c2VjcmV0' }, body: '{"x":1}', pin: 'CD'.repeat(32) }),
+      (e) => e.code === PIN_MISMATCH && e.message.includes(normalizeFingerprint(sys.fingerprint)) && /nothing was sent/.test(e.message),
+    );
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(sys.seen.bytes, 0, 'the server received no byte after the handshake');
+    assert.equal(sys.seen.requests, 2);
+    // the system's sentence, through createSystemHttp and networkProblem
+    const config = systemConfig({ ...BASE, A2UI5_MCP_SYSTEM_URL: sys.url, A2UI5_MCP_SYSTEM_CERT_SHA256: 'CD'.repeat(32) });
+    assert.deepEqual(config.problems, []);
+    await assert.rejects(createSystemHttp(config).send(sys.url), /is not the pinned one: it presented SHA-256 [0-9A-F:]{95}, A2UI5_MCP_SYSTEM_CERT_SHA256 pins CD:CD/);
+    const good = systemConfig({ ...BASE, A2UI5_MCP_SYSTEM_URL: sys.url, A2UI5_MCP_SYSTEM_CERT_SHA256: sys.fingerprint });
+    assert.equal((await createSystemHttp(good).send(sys.url)).status, 200);
+    assert.equal(sys.seen.authorization.at(-1), `Basic ${Buffer.from('U:p').toString('base64')}`);
+    // a pin on a plain http connection is never satisfied
+    await assert.rejects(nodeRequest('http://127.0.0.1:9/x', { pin: sys.fingerprint }), (e) => e.code === PIN_MISMATCH || e.code === 'ECONNREFUSED');
+  } finally {
+    sys.close();
+  }
+});
+
+test('the password command: on a timeout its whole process tree dies, not only the shell', { skip: process.platform === 'win32' && 'POSIX process groups' }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-pwcmd-'));
+  const beat = path.join(dir, 'beat');
+  try {
+    /* `; true` keeps the shell from exec'ing node: node is the shell's CHILD.
+     * It writes a heartbeat every 50 ms - a beat that stops is a process that
+     * is gone (a pid probe would also see a zombie nobody reaps in a container). */
+    const script = `let n = 0; setInterval(() => require('fs').writeFileSync(${JSON.stringify(beat)}, String(++n)), 50)`;
+    await assert.rejects(runPasswordCommand(`"${process.execPath}" -e "${script.replace(/"/g, '\\"')}"; true`, { timeoutMs: 1500 }), /did not finish/);
+    assert.ok(fs.existsSync(beat), 'the grandchild ran');
+    await new Promise((r) => setTimeout(r, 200));
+    const before = fs.readFileSync(beat, 'utf8');
+    await new Promise((r) => setTimeout(r, 400));
+    assert.equal(fs.readFileSync(beat, 'utf8'), before, 'the command the shell started is gone too');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('the password command: stdout without the line break; a failure never shows what it printed', async () => {
@@ -237,7 +379,8 @@ test('a misconfiguration refuses before anything is sent', async () => {
 });
 
 test('network failures read as what to change', () => {
-  assert.match(networkProblem({ code: 'DEPTH_ZERO_SELF_SIGNED_CERT', message: 'x' }, 'h:1'), /NODE_EXTRA_CA_CERTS[\s\S]*A2UI5_MCP_SYSTEM_INSECURE_TLS=1/);
+  assert.match(networkProblem({ code: 'DEPTH_ZERO_SELF_SIGNED_CERT', message: 'x' }, 'h:1'), /NODE_EXTRA_CA_CERTS[\s\S]*A2UI5_MCP_SYSTEM_CERT_SHA256[\s\S]*A2UI5_MCP_SYSTEM_INSECURE_TLS=1/);
+  assert.equal(networkProblem({ code: 'CERT_PIN_MISMATCH', message: 'the certificate is not the pinned one' }, 'h:1'), 'the certificate is not the pinned one');
   assert.match(networkProblem({ code: 'ENOTFOUND', message: 'x' }, 'h:1'), /does not resolve.*VPN/);
   assert.match(networkProblem({ code: 'ECONNREFUSED', message: 'x' }, 'h:1'), /refused the connection/);
   assert.match(networkProblem({ cause: { code: 'ETIMEDOUT' }, message: 'x' }, 'h:1'), /did not answer/);

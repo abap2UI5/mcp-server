@@ -130,7 +130,11 @@ Worth knowing before assessing a report:
   and the SAP namespaces it knows are refused whatever the pattern says. The
   package and the transport request are arguments, never chosen or created;
   a class last changed by another user is refused without `overwrite: true`;
-  the lock is released in a `finally`. This half is **experimental and has
+  the lock is released in a `finally`. The write half refuses the blanket
+  `A2UI5_MCP_SYSTEM_INSECURE_TLS` and plain `http:` off the loopback (the
+  logon in clear text); a system without a trusted CA is reached by pinning
+  its certificate (`A2UI5_MCP_SYSTEM_CERT_SHA256`, compared before the first
+  byte - the Basic logon - is written). This half is **experimental and has
   only been tested against the fake system of the test suite**
   (`test/system-write.test.mjs`), not a real one: the model is that a
   developer, not the server, owns what an agent with these tools does to a
