@@ -14,7 +14,7 @@ import http from 'node:http';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { parseActions, cssAttr, ACTIONS, MAX_ACTIONS, STEP_KEYS } from '../lib/interact.mjs';
-import { parseUnitOutput, downloadPrebuilt, prebuiltUrl, prebuiltUrlProblem, parseSha256Sidecar, prebuiltManifest, RUNNER_LOOP, runUnitTests, backendBuilt, PREBUILT_MAX_BYTES, quietAfter } from '../lib/runtime.mjs';
+import { parseUnitOutput, downloadPrebuilt, prebuiltUrl, prebuiltUrlProblem, parseSha256Sidecar, sidecarRequired, LAST_RELEASE_WITHOUT_SIDECAR, prebuiltManifest, RUNNER_LOOP, runUnitTests, backendBuilt, PREBUILT_MAX_BYTES, quietAfter } from '../lib/runtime.mjs';
 import { resolveA2UI5 } from '../lib/repos.mjs';
 import { TOOLS } from '../lib/tools.mjs';
 
@@ -79,10 +79,13 @@ test('quietAfter gives a busy backend the ceiling it always had, and says it was
  * a slow theme download spent the whole 10 s there on every call, after the
  * actions had already settled. The one wait helper is quietAfter. */
 test('the browser tools never wait for networkidle', () => {
-  const src = fs.readFileSync(new URL('../lib/runtime.mjs', import.meta.url), 'utf8');
-  const code = src.split('\n').filter((l) => !/^\s*(\/\/|\/?\*)/.test(l));
-  const hit = code.findIndex((l) => /networkidle|waitForLoadState/.test(l));
-  assert.equal(hit, -1, `lib/runtime.mjs waits on the network, not the backend: ${code[hit]}`);
+  // lib/runtime.mjs and the modules it is split into (lib/browser.mjs holds the browser tools)
+  for (const file of ['runtime', 'browser', 'ui5-routing', 'backend-process']) {
+    const src = fs.readFileSync(new URL(`../lib/${file}.mjs`, import.meta.url), 'utf8');
+    const code = src.split('\n').filter((l) => !/^\s*(\/\/|\/?\*)/.test(l));
+    const hit = code.findIndex((l) => /networkidle|waitForLoadState/.test(l));
+    assert.equal(hit, -1, `lib/${file}.mjs waits on the network, not the backend: ${code[hit]}`);
+  }
 });
 
 // ---------------------------------------------------------- parseActions ----
@@ -326,12 +329,14 @@ function fakeCheckoutAndArchive(version, { manifest = true, transpiler = null, l
 }
 
 /* `sidecar`: the text served at <url>.sha256 (404 when absent, like a
- *  release before the framework attached one). */
-function serve(file, { status = 200, chunked = false, sidecar = null } = {}) {
+ *  release before the framework attached one); `sidecarStatus`: another
+ *  answer for it (a proxy's 500). */
+function serve(file, { status = 200, chunked = false, sidecar = null, sidecarStatus = null } = {}) {
   return new Promise((resolve) => {
     const srv = http.createServer((req, res) => {
       if (req.url.endsWith('.sha256')) {
-        if (sidecar === null) res.writeHead(404).end('nope');
+        if (sidecarStatus) res.writeHead(sidecarStatus).end('broken');
+        else if (sidecar === null) res.writeHead(404).end('nope');
         else res.writeHead(200, { 'content-type': 'text/plain' }).end(sidecar);
         return;
       }
@@ -423,6 +428,48 @@ test('downloadPrebuilt verifies the archive against its .sha256 sidecar, and kee
     served.srv.close();
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(tampered.root, { recursive: true, force: true });
+  }
+});
+
+/* Every release after 1.148.0 carries the sidecar, so for one of them an
+ * archive that could not be checked is not unpacked - a 404, a proxy's 500
+ * and a text that is no sha256sum line alike. Up to 1.148.0 a 404 (no
+ * sidecar was ever attached) and a failed fetch unpack unverified, said. */
+test('downloadPrebuilt refuses an unverifiable archive of a release that carries the sidecar', { skip: !HAVE_TAR && 'needs tar on PATH' }, async () => {
+  assert.equal(LAST_RELEASE_WITHOUT_SIDECAR, '1.148.0');
+  for (const [v, want] of [['1.148.0', false], ['1.147.9', false], ['1.0.0', false], ['1.148.1', true], ['1.149.0', true], ['2.0.0', true], ['v1.151.0', true], ['1.151.0-702', true], ['', true]]) {
+    assert.equal(sidecarRequired(v), want, v);
+  }
+  for (const [version, sidecarOpts, ok] of [
+    ['1.149.0', {}, false],
+    ['1.149.0', { sidecarStatus: 500 }, false],
+    ['1.149.0', { sidecar: '<html>login</html>' }, false],
+    ['1.148.0', { sidecarStatus: 500 }, true],
+    ['1.148.0', {}, true],
+  ]) {
+    const { root, a2, tar } = fakeCheckoutAndArchive(version);
+    const { srv, url } = await serve(tar, sidecarOpts);
+    process.env.A2UI5_MCP_PREBUILT_URL = url;
+    const lines = [];
+    const label = `${version} ${JSON.stringify(sidecarOpts)}`;
+    try {
+      const res = await downloadPrebuilt({ a2, onLine: (l) => lines.push(l), timeoutMs: 60000 });
+      assert.equal(res.ok, ok, `${label}: ${lines.join('\n')}`);
+      if (ok) {
+        assert.ok(lines.some((l) => /unverified/.test(l)), `${label}: an unverified archive says so`);
+        assert.ok(fs.existsSync(path.join(a2, 'node/output/init.mjs')), label);
+      } else {
+        assert.equal(res.reason, 'sha256 unverified', label);
+        assert.ok(lines.some((l) => /release 1\.149\.0 carries a \.sha256 sidecar .*not unpacked unverified/.test(l)), `${label}: ${lines.join('\n')}`);
+        assert.ok(fs.existsSync(path.join(a2, 'node/output/stale.mjs')), `${label}: the previous build stays`);
+        assert.ok(!fs.existsSync(path.join(a2, 'node/output/init.mjs')), `${label}: nothing of the archive is unpacked`);
+        assert.equal(prebuiltManifest(a2), null, label);
+      }
+    } finally {
+      delete process.env.A2UI5_MCP_PREBUILT_URL;
+      srv.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   }
 });
 

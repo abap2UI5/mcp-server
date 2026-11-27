@@ -126,7 +126,10 @@ startCommand:
         description: "System mode: a shell command that prints the password (a keychain lookup) - instead of A2UI5_MCP_SYSTEM_PASSWORD."
       A2UI5_MCP_SYSTEM_INSECURE_TLS:
         type: string
-        description: "System mode: set to 1 to accept a certificate that cannot be verified. NODE_EXTRA_CA_CERTS with the CA is the better fix."
+        description: "System mode: set to 1 to accept ANY certificate, unverified - read-only, the write tools refuse it. A2UI5_MCP_SYSTEM_CERT_SHA256 or NODE_EXTRA_CA_CERTS with the CA is the better fix."
+      A2UI5_MCP_SYSTEM_CERT_SHA256:
+        type: string
+        description: "System mode: the SHA-256 fingerprint of the system's certificate. Exactly that certificate is accepted without a CA, any other is refused before the logon is sent."
       A2UI5_MCP_SYSTEM_WRITE:
         type: string
         description: "System mode, experimental: set to 1 to list the tools that write a class to the system over ADT, activate it and run its unit tests. Off by default; tested against a fake system only."

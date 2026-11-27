@@ -85,7 +85,10 @@ from; default the framework release asset, see below - `https:` only, a
 plain `http:` URL off the loopback is refused unless
 `A2UI5_MCP_PREBUILT_INSECURE=1`; `downloadPrebuilt` verifies the archive
 against the `.sha256` sidecar the framework attaches beside it from the
-release after 1.148.0 on, and says so when a release has none), the mirror knobs
+release after 1.148.0 on, and refuses to unpack such a release when the
+sidecar is missing, unreadable or malformed (`sidecarRequired`; a mirror
+must serve it too) - only a release up to 1.148.0 unpacks unverified, and
+says so), the mirror knobs
 `A2UI5_MCP_REMOTE=0` / `A2UI5_MCP_REMOTE_DIR` / `A2UI5_MCP_REMOTE_TTL_MS`
 (below), `GITHUB_TOKEN`/`GH_TOKEN` (sent to `api.github.com` only — it raises
 the docs tree listing's rate limit; never to `raw.githubusercontent.com`, which
@@ -110,7 +113,7 @@ before it exits; default 10 min, 0 = never), `A2UI5_MCP_UI` (`auto`/`on`/`off`:
 whether the app tools declare their MCP Apps screen, below),
 `A2UI5_MCP_APP_FORMAT` (`snapshot`/`adaptive-card`: the app tools' default
 answer format, below), the system mode's `A2UI5_MCP_SYSTEM_URL` / `_USER` /
-`_PASSWORD` / `_PASSWORD_CMD` / `_INSECURE_TLS` (below) and its write half's
+`_PASSWORD` / `_PASSWORD_CMD` / `_CERT_SHA256` / `_INSECURE_TLS` (below) and its write half's
 `A2UI5_MCP_SYSTEM_WRITE` / `A2UI5_MCP_SYSTEM_WRITE_ALLOW` (below), `A2UI5_MCP_BUILD_TIMEOUT_MS`
 (default 30 min, also the prebuilt download and the npm install) and
 `A2UI5_MCP_UNIT_TIMEOUT_MS` (default 10 min, the test runner).
@@ -149,7 +152,7 @@ Four rules, each pinned by `test/remote.test.mjs` and
   `run_app`, `interact_app`, `run_unit_tests` and `backend start` resolve
   with `{ local: true }` (`missingLocalSiblingMessage` in `lib/siblings.mjs`)
   and never write into or build out of a mirror. `corpus()` and `a2Local()`
-  in `lib/runtime.mjs` are the two doors to the sandbox and the backend, and
+  in `lib/sandbox.mjs` are the two doors to the sandbox and the backend, and
   both are local-only - a mirror of the framework is simply no checkout, so
   with nothing else there the npm backend runs the apps and the mirror goes
   on serving the guide. `add_agent_setup` is a writer that READS a mirror:
@@ -193,7 +196,7 @@ path whitelist `safeRelPath`), from the checkout when there is one.
 
 The corpus used to be a precondition of every tool past `validate_view`, and
 then the framework checkout was; neither is any more. **Which backend runs
-the apps is decided per call** (`backendKind` in `lib/runtime.mjs`, the pure
+the apps is decided per call** (`backendKind` in `lib/sandbox.mjs`, the pure
 half `decideBackend`), from what is there - nothing is remembered but the
 checkouts themselves:
 
@@ -221,6 +224,28 @@ under `A2UI5_MCP_BACKEND=npm` the package stays the backend in use whatever
 a build makes, so modes `prebuilt`, `transpile` and `full` are refused
 (`npmPreferenceProblem`) instead of building a checkout (or cloning one)
 that run_app then ignores while build_backend reports it built.
+
+**Where the expensive half lives.** `lib/runtime.mjs` is the door: it
+re-exports everything the modules below export, and `server.mjs`,
+`scripts/ci-unit.mjs` and the tests import it and nothing else. It was one
+file of 3,600 lines and is split along its seams; the modules import each
+other directly, never the door (an import of `lib/runtime.mjs` from inside
+would be a cycle through every one of them). A new export lands in the
+module it belongs to and reaches the door by its `export *`.
+
+| Module | What it holds |
+| --- | --- |
+| `lib/sandbox.mjs` | `corpus()`, `a2Local()`, the backend choice (`backendKind`, `decideBackend`), `sandbox()`, the screenshot dir, `PORT` / `BACKEND_HOST` |
+| `lib/deploy.mjs` | the class-name gate, `deployApp` / `removeApp`, the dev copies (`syncDevCopies`), the checkout build fingerprint, `readAppSource`, `listDevApps` |
+| `lib/lint.mjs` | the lint configs per backend, `lintApp` (warm worker or a fresh process), `runScopeOf` |
+| `lib/build.mjs` | `planBuild`, `buildBackend` (single flight), and the build log `build_log` reads - the log is written by the build, so it stays beside it |
+| `lib/prebuilt.mjs` | the release asset (`downloadPrebuilt`, the size cap, the `.sha256` sidecar, the layout check), the framework clone, `transpileFramework` |
+| `lib/backend-process.mjs` | the backend child: `startBackend` / `stopBackend`, liveness, `appChildEnv`, `builtAppClasses` |
+| `lib/ui5-routing.mjs` | the benign console rules, UI5 from the local `@openui5` packages, the CDN cache (`ui5RouteHandler`) |
+| `lib/browser.mjs` | Chromium (`resolveChromium`, `getBrowser`), `runApp`, `interactApp`, the screenshots |
+| `lib/unit.mjs` | `runUnitTests`: the runner filtered to the classes asked for, `parseUnitOutput` |
+| `lib/setup-status.mjs` | `setupStatus`, `scopeOfNote` |
+| `lib/spawn.mjs` | the child processes of all of them: timeouts, tree kills, `localBin` (it was the first module out) |
 
 #### The npm backend - `lib/npm-backend.mjs`, `lib/npm-host.mjs`
 
@@ -396,7 +421,7 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
   DNS rebinding (`loopbackRequest`). Every client of the backend here -
   the start's port wait, run_app's and interact_app's Chromium, the app
   tools - connects to that bound address, `BACKEND_HOST` in
-  `lib/runtime.mjs`, and never to the name `localhost`, which can resolve
+  `lib/sandbox.mjs`, and never to the name `localhost`, which can resolve
   to `::1` first (another local user's port, or none);
   `test/runtime.test.mjs` fails on a `localhost` in the code of
   `server.mjs`, `lib/` or `scripts/`. It prints a banner (release, dev modules,
@@ -413,7 +438,7 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
   port and orphan handling are the checkout's, unchanged. The child's
   environment is an ALLOWLIST (`appChildEnv` - PATH, home, temp, TZ and
   locale, the Node/TLS/proxy variables, the Windows system ones; the list
-  and why each is there sit beside `CHILD_ENV_ALLOW` in `lib/runtime.mjs`),
+  and why each is there sit beside `CHILD_ENV_ALLOW` in `lib/backend-process.mjs`),
   the same for the unit-test runner: both run the app, and `@KERNEL` reaches
   `process.env`. Plus `PORT` and `HOST`, and never `ALLOWED_HOSTS`
   (`backendEnv`): the framework's `express.mjs` reads `*` there as "no
@@ -469,7 +494,7 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
 
 #### With a framework checkout - and what both backends share
 
-- **The dev sandbox has three homes** (`sandbox()` in `lib/runtime.mjs`): the
+- **The dev sandbox has three homes** (`sandbox()` in `lib/sandbox.mjs`): the
   corpus' `src/zz_dev` when a corpus checkout is there, the framework
   checkout's `node/zz_dev` otherwise (the framework gitignores it), the npm
   workspace's `sandbox/` when the npm backend is in use. All answer
@@ -776,9 +801,28 @@ share a tool name inside one server.
   `problems` instead of throwing, and every tool answers with them: in a
   desktop client the tool answer is the only place a user sees anything.
 - **node http(s), not fetch**: one system's self-signed certificate is
-  accepted per request (`A2UI5_MCP_SYSTEM_INSECURE_TLS`), never by a global
-  switch; `NODE_EXTRA_CA_CERTS` is the better answer and needs no code.
-  Network failures become sentences (`networkProblem`). No HTTP proxy.
+  accepted per request, never by a global switch; `NODE_EXTRA_CA_CERTS` is
+  the better answer and needs no code. Network failures become sentences
+  (`networkProblem`). No HTTP proxy.
+- **The certificate pin - do not weaken it.** `A2UI5_MCP_SYSTEM_CERT_SHA256`
+  connects without CA verification and compares the peer's
+  `fingerprint256` with the pin on `secureConnect` BEFORE the request is
+  ended (`whenPinned` in `nodeRequest`, the VS Code extension's
+  `whenTrusted`): a `ClientRequest` writes nothing - the Basic header
+  included - until `end( )`, so a mismatch destroys the request with
+  nothing sent (`CERT_PIN_MISMATCH`). Per request, so a kept-alive socket is
+  checked again. Strict: with a pin, a CA-verified certificate that is not
+  the pinned one is refused too. The blanket `A2UI5_MCP_SYSTEM_INSECURE_TLS`
+  stays for the read-only mode: `writeConfig` makes it a problem of every
+  write tool, together with plain `http:` off the loopback (`plainHttp`,
+  also a `warnings` entry of `describeConfig`, i.e. of `system_status`).
+  `describeTls` is the one sentence for what is active. A pin beside the
+  blanket flag, a pin that is no fingerprint, or a pin on an `http:` URL is
+  a `problems` entry, never ignored.
+- **The password command** runs as a process-group leader on POSIX
+  (`detached`), is tracked for the shutdown (`adoptChild`) and its whole
+  tree is killed on the timeout (`killChildTree`, `lib/spawn.mjs`) - the
+  shell alone left the lookup it started running.
 - `test/system.test.mjs` covers the pure halves against injected requests
   and runs the real server over stdio against `test/helpers/fake-system.mjs`
   - Basic logon, a session cookie, a CSRF token layer, the ADT search, and a
@@ -962,7 +1006,7 @@ Nothing waits on the NETWORK: `interact_app` used to ask Playwright for
 tail, and a page with a long poll or a slow CDN download spent the whole
 10 s there on every call, after its actions had long settled -
 `test/interact.test.mjs` fails on a `networkidle` / `waitForLoadState` in
-`lib/runtime.mjs`.
+`lib/browser.mjs` (and the runtime modules beside it).
 
 The Chromium `run_app` and `interact_app` boot in (`getBrowser`, one for the
 server's life) does not depend on the backend: `stopBackend` - every
@@ -1088,7 +1132,7 @@ changes upstream, this repo must change in the same breath:
   transpiler writes, which auto answers with the framework's own build),
   `node/output/init.mjs`, **`node/output/index.mjs`** (the transpiler's
   generated unit-test runner — `run_unit_tests` filters it on the one loop
-  line `for (const st of getData()) {`, `RUNNER_LOOP` in `lib/runtime.mjs`;
+  line `for (const st of getData()) {`, `RUNNER_LOOP` in `lib/unit.mjs`;
   a template change in `@abaplint/transpiler` costs the filter, reported, not
   the run. The runner prints a test's `running` line AFTER the test class's
   class_setup, constructor and setup ran, so a failure there is read off the
@@ -1266,7 +1310,7 @@ agent) find these artifacts in a dirty sibling worktree, mcp-server caused them:
   `backend-prebuilt.yaml` workflow is what packs them).
 - `<abap2UI5>/node/downport/<class>.clas.*` — the incremental build's copies
   of the deployed dev apps, listed in `node/downport/.abap2ui5-mcp-dev-copies.json`
-  (`syncDevCopies` in `lib/runtime.mjs`). Only files that manifest lists are
+  (`syncDevCopies` in `lib/deploy.mjs`). Only files that manifest lists are
   ever removed — once their sandbox source is gone, by the next incremental
   build or by `remove_app` — because the framework keeps its own sources in
   that directory too.
@@ -1417,7 +1461,7 @@ setTimeout(() => { send({jsonrpc:"2.0",id:3,method:"tools/call",params:{name:"ca
 Expect: an `initialize` result, every tool the TOOLS array defines in
 `tools/list`, and capability rows
 for "popup". Pure units that are testable without any sibling checkout (add
-tests here first): `stripJsonc` (`lib/runtime.mjs`), the CAPABILITIES.md
+tests here first): `stripJsonc` (`lib/lint.mjs`), the CAPABILITIES.md
 table parser (`lib/capabilities.mjs`), the class-name/`z2ui5_if_app`
 validation in `deployApp`, the `BENIGN` console-noise filter.
 
@@ -1612,7 +1656,7 @@ legitimately slower.
   TTY, so npx answers its own install prompt and runs whatever the registry
   holds under that name when the checkout has no local bin — `abap_transpile`
   is an unclaimed npm name, which made the incremental build a
-  dependency-confusion hole. `localBin` in `lib/runtime.mjs` resolves a
+  dependency-confusion hole. `localBin` in `lib/spawn.mjs` resolves a
   checkout's own `node_modules/<pkg>` bin and spawns it with node; a missing
   install is a sentence (`missingBinMessage`), pinned by
   `test/runtime.test.mjs` with an `npx` on PATH that must stay uncalled.
@@ -1643,7 +1687,7 @@ legitimately slower.
   an `npm ci` (that is a third of its old cold time). An import of
   `@modelcontextprotocol/sdk`, of `playwright` or of anything under
   `node_modules` on its path breaks every app repository's CI; the lazy
-  `import('playwright')` in `lib/runtime.mjs` is only reached by `run_app`.
+  `import('playwright')` in `lib/browser.mjs` is only reached by `run_app`.
 - The README's setup section and the sibling-layout table above must stay in
   sync — the README is the user-facing copy, this file is the contract.
 
