@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **A row event argument cannot stall the server.** The
+  `${$parameters>/P} ? <expr> : <literal>` argument was matched by a regex
+  that backtracked cubically on a run of blanks: 3000 of them, in a wire the
+  backend wrote, blocked the event loop for 6.6 s. It is now split by one
+  linear scan (the head, `?`, the last colon outside a quoted string), and an
+  argument longer than 4096 characters is asked for in `args` like any shape
+  the client does not model.
 - **deploy_app names the replacement of removed API.** An app written from
   memory got `Method "_bind_edit" not found` from the lint and nothing else.
   A "not found" whose name is in the docs' deprecations.json (checkout, else

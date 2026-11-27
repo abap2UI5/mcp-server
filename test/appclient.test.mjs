@@ -584,6 +584,28 @@ test('the pick, single select: the picked row selected, the previous selection c
   assert.deepEqual(bodies[1].MODEL, { T: { __delta: { 1: { SEL: false }, 2: { SEL: true } } } });
 });
 
+/* The ternary argument is read by a linear scan: a regex with a lazy middle
+ * and blanks around the colon backtracked cubically on a run of blanks the
+ * backend wrote (3000 of them blocked the event loop for 6.6 s). Quoted
+ * colons stay inside their literal, a non-literal else-branch is not a
+ * ternary, and an argument past the length cap is asked for in args. */
+test('a $parameters ternary is read in linear time: blank runs, quoted colons, the length cap', async () => {
+  const blanks = ' '.repeat(4000);
+  const cases = [
+    ", ${$parameters>/selectedItem} ? ${$parameters>/selectedItem}.getCells()[0].getText() : 'x:y'",
+    ", ${$parameters>/selectedItem}?${$parameters>/selectedItem}.getBindingContext().getProperty('A'):null",
+    `, \${$parameters>/selectedItem} ?${blanks}x`,
+    `, \${$parameters>/selectedItem} ?${': '.repeat(20000)}x`,
+  ];
+  const started = Date.now();
+  const { client, bodies } = fakeApp(DIALOG('false', cases.join('')), ROWS());
+  const s = await client.start('z_t');
+  await rejects(client.act(s.session, { event: 'OK', row: 2 }), /^argument 2 of OK /);
+  await client.act(s.session, { event: 'OK', row: 2, args: [null, null, 'given', 'given2'] });
+  assert.deepEqual(bodies[1].S_FRONT.T_EVENT_ARG, ['a2', 'a2', 'given', 'given2']);
+  assert.ok(Date.now() - started < 2000, `took ${Date.now() - started} ms`);
+});
+
 test('`row` is a non-negative integer: a JSON number or a string of digits; "", false, [], true, 1.5, -1 are refused', async () => {
   /* server.mjs read `row` with Number(): "", false and [] became row 0 and
    * true row 1 - a pick of a row nobody named. The client checks it now. */
