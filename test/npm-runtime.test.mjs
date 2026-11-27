@@ -408,8 +408,21 @@ test('a folder-layout release without setup/own-apps.mjs fails the build instead
 test('a backend start while build_backend runs is refused with the reason', withNpm(async () => {
   deployApp({ className: 'zcl_npm_a', source: APP('zcl_npm_a') });
   const build = buildBackend({ mode: 'auto' });
-  await assert.rejects(startBackend(), /build_backend is running/);
+  await assert.rejects(startBackend(), /^Error: build_backend is running — start the app once it has finished \(the backend would serve the output from before the build\)$/);
   assert.equal((await build).ok, true);
+}));
+
+/* run_unit_tests during build_backend ran the output the build was
+ * replacing (buildApps swaps apps/ at its end). Refused with the same
+ * sentence as the backend start, and runs again once the build is done. */
+test('a unit run while build_backend runs is refused with the reason, and runs after it', withNpm(async () => {
+  deployApp({ className: 'zcl_npm_a', source: APP('zcl_npm_a'), testclasses: TESTS() });
+  assert.equal((await buildBackend({ mode: 'auto' })).ok, true);
+  deployApp({ className: 'zcl_npm_b', source: APP('zcl_npm_b'), testclasses: TESTS() });
+  const build = buildBackend({ mode: 'auto' });
+  await assert.rejects(runUnitTests({ className: 'zcl_npm_a' }), /^Error: build_backend is running — run the unit tests once it has finished \(the tests would run the output the build is replacing\)$/);
+  assert.equal((await build).ok, true);
+  assert.equal((await runUnitTests({ className: 'zcl_npm_a' })).ok, true);
 }));
 
 /* The filtered runner copy was named after the selection alone

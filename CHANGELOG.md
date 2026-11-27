@@ -2,6 +2,53 @@
 
 ## Unreleased
 
+- **A backend stop waits for the backend to be gone.** stopBackend sent
+  SIGTERM and returned, so `backend restart` and a build spawned the next
+  backend while the old process still held the port - for good, when it was
+  busy in a request or ignored the signal. It now waits for the exit, kills
+  the process tree with SIGKILL after 3 s (inside the shutdown's 5 s), and a
+  start waits for a stop in flight.
+- **run_unit_tests waits for build_backend like a backend start does.** A
+  run during a build loaded the output the build was replacing - on the npm
+  backend apps/ is swapped for the fresh build at its end. It is now
+  refused while a build runs, with the backend start's sentence (`build_backend
+  is running — run the unit tests once it has finished (...)`).
+- **A cancelled run_app / interact_app stops where it is.** An abort while
+  the backend was starting, the browser launching or the context being made
+  was not looked at until the boot had run its course - openPage attached
+  its abort listener only after newContext, and an aborted signal fires no
+  second time, so the context stayed open through a boot nobody waited for.
+  openApp now checks the signal after every await, and openPage closes a
+  context made under an aborted signal at once.
+- **The app tools read at most 32 MB of an answer.** The default transport
+  read the backend's answer whole (`res.text()`), so a backend or a proxy
+  that streamed without end held the server's memory until the timeout. It
+  now streams up to `RESPONSE_MAX_BYTES`, refuses a larger declared length
+  unread, cancels the stream at the cap and says so - and holds the session
+  like any answer that was not adopted. The system mode's network errors now
+  keep their cause, so a refused connection there blocks nothing either.
+- **An event that may have run is not reported as one that did not.** A
+  timeout or a cancel after app_act had sent its POST said "nothing of this
+  roundtrip was adopted" or "the backend did not answer", and an agent
+  retried a non-idempotent event. Now the refusal says the request had been
+  sent and the event may have run (ran, when the answer arrived after the
+  cancel), and the session takes no further event or window request until
+  app_describe resyncs it or a fresh app_start replaces it. A connection
+  that was never made (`ECONNREFUSED`, no such host) blocks nothing.
+- **A deeply nested view no longer breaks the session.** The snapshot's
+  walk is recursive, and a view nested 2000 levels deep overflowed the stack
+  after the client had already adopted the response: app_start never
+  returned the id and every later call on the session threw. The tree is now
+  cut below 256 levels (`MAX_VIEW_DEPTH`, named in `unsupported`), and an
+  analysis that fails after a response was adopted names the session the app
+  is at.
+- **A row event argument cannot stall the server.** The
+  `${$parameters>/P} ? <expr> : <literal>` argument was matched by a regex
+  that backtracked cubically on a run of blanks: 3000 of them, in a wire the
+  backend wrote, blocked the event loop for 6.6 s. It is now split by one
+  linear scan (the head, `?`, the last colon outside a quoted string), and an
+  argument longer than 4096 characters is asked for in `args` like any shape
+  the client does not model.
 - **call_handler: the HTTP handlers of an app, tested without a system.**
   An app is not only screens: a REST endpoint for a device, a webhook, the
   door a middleware polls are classes implementing `if_http_extension`,

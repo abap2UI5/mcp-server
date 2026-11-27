@@ -52,6 +52,7 @@ if (K.FAIL_EADDRINUSE) {
 }
 setTimeout(listen, Number(K.LISTEN_DELAY_MS || 0));
 process.on('SIGTERM', () => {
+  if (K.IGNORE_SIGTERM) return; // a backend stuck in a request: only SIGKILL ends it
   stopping = true;
   s.close();
   setTimeout(() => process.exit(0), 1000);
@@ -149,28 +150,50 @@ test('the checkout backend is started on the loopback interface only', async () 
   }
 });
 
-test('a stale child exiting late does not orphan the live backend', async () => {
+/* stopBackend used to kill and return at once: the killed child freed the
+ * port but lived on, and its exit event could land after the next backend
+ * was live (the stale-exit guard in the exit handler is for that). A stop
+ * now waits for the process to be gone, so a restart never runs beside the
+ * old one. The fake lingers a second after SIGTERM, on purpose. */
+test('a stop waits for the backend process to exit before it returns; the next start is the only backend', async () => {
   fs.writeFileSync(marker, '');
   await startBackend();
   assert.equal(backendStatus().running, true);
   const [old] = bootedPids();
-  // kill the first child; its listener closes now, its exit event comes later
+  const t0 = Date.now();
   await stopBackend();
-  await portFree();
-  assert.equal(alive(old), true, 'the fake lingers after it freed the port - the window the bug needs');
-  // a NEW backend is live before the old child's process has fully exited
+  assert.ok(Date.now() - t0 >= 800, `the stop returned after ${Date.now() - t0} ms, before the lingering child exited`);
+  assert.equal(alive(old), false, 'the old backend is gone when the stop returns');
   await startBackend();
   assert.equal(backendStatus().running, true);
-  // now the old child's exit event lands - it must not clear the live slot
-  await exited(old);
-  assert.equal(backendStatus().running, true,
-    'the stale exit cleared the live server reference (the orphan bug)');
-  // and because the reference survived, stop still reaches the live child
   const [, live] = bootedPids();
   await stopBackend();
   assert.equal(backendStatus().running, false);
-  await exited(live);
+  assert.equal(alive(live), false);
   assert.equal(await portOpen(), false, 'the backend survived stopBackend as an orphan');
+});
+
+/* A backend that does not end on SIGTERM (busy, or ignoring it) held the
+ * port past a restart for good. After backendTiming.stopMs the stop kills
+ * its tree with SIGKILL and returns once it is gone. */
+test('a backend that ignores SIGTERM is killed with SIGKILL after the bound, and the stop waits for it', async () => {
+  const saved = backendTiming.stopMs;
+  backendTiming.stopMs = 400;
+  setKnob('IGNORE_SIGTERM', true);
+  fs.writeFileSync(marker, '');
+  try {
+    await startBackend();
+    const [pid] = bootedPids();
+    const t0 = Date.now();
+    await stopBackend();
+    const took = Date.now() - t0;
+    assert.ok(took >= 350 && took < 3000, `the stop took ${took} ms`);
+    assert.equal(alive(pid), false, 'SIGKILL ended it');
+    assert.equal(await portOpen(), false);
+  } finally {
+    backendTiming.stopMs = saved;
+    clearKnob('IGNORE_SIGTERM');
+  }
 });
 
 /* A node that cannot be spawned (the program gone - a node upgrade under a
