@@ -10,10 +10,17 @@ import { sandbox } from '../lib/sandbox.mjs';
 
 function withNpmSandbox(fn) {
   return () => {
-    const saved = { A2UI5_MCP_BACKEND: process.env.A2UI5_MCP_BACKEND, A2UI5_MCP_WORKSPACE: process.env.A2UI5_MCP_WORKSPACE };
+    const saved = {
+      A2UI5_MCP_BACKEND: process.env.A2UI5_MCP_BACKEND,
+      A2UI5_MCP_WORKSPACE: process.env.A2UI5_MCP_WORKSPACE,
+      SAMPLES_CONTROLS_HOME: process.env.SAMPLES_CONTROLS_HOME,
+    };
     const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-lint-abap-'));
     process.env.A2UI5_MCP_BACKEND = 'npm';
     process.env.A2UI5_MCP_WORKSPACE = ws;
+    // a samples-controls checkout - a sibling, as in a dev setup - would be
+    // the sandbox (its src/zz_dev) and the classes below would land there
+    process.env.SAMPLES_CONTROLS_HOME = path.join(ws, 'no-corpus');
     try {
       const dir = sandbox().dir;
       fs.mkdirSync(dir, { recursive: true });
