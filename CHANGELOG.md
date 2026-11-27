@@ -14,6 +14,13 @@
   (whose documentation mentions a toast) and an answer cut at the budget
   could drop the method itself. Hits are now ordered by how well the NAME
   matches - exact, prefix, every term, docs only - source order within each.
+- **add_agent_setup merges package.json as text, like the create package.**
+  app-template's create/agent-setup.mjs (app-template#107) now inserts the
+  missing entries into the project's package.json text instead of writing
+  the parsed object back - key order, inline objects, CRLF and a `1.0` stay
+  as the project wrote them. This server re-serialised, so the two executors
+  of agentSetup wrote different bytes and test/agent-setup.test.mjs's parity
+  test failed on main. `mergePackageJson` is now that file's code.
 - **The repository's lockfile installs the linter users get.** It still
   held `@abap2ui5/linter` 0.8.5, the bottom of the peer range, so `npm test`
   and a local run validated against a linter without `obsolete-binder`,

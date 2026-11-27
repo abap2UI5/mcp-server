@@ -199,6 +199,17 @@ test('package.json only gains entries, keeps every value it has, and keeps its i
   assert.throws(() => mergePackageJson('{ nope', '{}', ['scripts']));
 });
 
+test('package.json is merged as text: the project\'s formatting, order and line endings stay', () => {
+  // an object written on one line stays on one line, and nothing else moves
+  const inline = '{\r\n  "name": "mine",\r\n  "version": "1.0",\r\n  "scripts": { "check": "x" }\r\n}\r\n';
+  const r = mergePackageJson(inline, JSON.stringify({ scripts: { check: 'y', fix: 'z' }, engines: { node: '>=22' } }), ['scripts', 'engines']);
+  assert.equal(r.text, '{\r\n  "name": "mine",\r\n  "version": "1.0",\r\n  "scripts": { "check": "x", "fix": "z" },\r\n  "engines": {\r\n    "node": ">=22"\r\n  }\r\n}\r\n');
+  assert.deepEqual(r.added, ['scripts.fix', 'engines.node']);
+  // "1.0" as written: a re-serialisation would not change it, a number would
+  const num = '{ "n": 1.0, "scripts": {} }';
+  assert.match(mergePackageJson(num, JSON.stringify({ scripts: { a: 'b' } }), ['scripts']).text, /"n": 1\.0/);
+});
+
 test('.gitignore gains the missing patterns with their comments, nothing reordered', () => {
   const tpl = '# the gates\nnode_modules/\n\n# the browser\n.playwright/\n';
   const r = mergeLines('/node_modules\n*.log', tpl);
