@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **A backend stop waits for the backend to be gone.** stopBackend sent
+  SIGTERM and returned, so `backend restart` and a build spawned the next
+  backend while the old process still held the port - for good, when it was
+  busy in a request or ignored the signal. It now waits for the exit, kills
+  the process tree with SIGKILL after 3 s (inside the shutdown's 5 s), and a
+  start waits for a stop in flight.
 - **run_unit_tests waits for build_backend like a backend start does.** A
   run during a build loaded the output the build was replacing - on the npm
   backend apps/ is swapped for the fresh build at its end. It is now
