@@ -69,7 +69,12 @@ no GitHub mirror either), `A2UI5_MCP_CHROMIUM` (browser path; `CHROMIUM_BIN`,
 the linter's variable, is read after it — then Playwright's managed browser,
 then a system binary, `resolveChromium`), `A2UI5_MCP_UI5_CACHE_MB` (how many MB of the
 CDN's UI5 answers `run_app`/`interact_app` keep in memory across calls;
-default 64, 0 = off, `ui5RouteHandler` below), `A2UI5_MCP_RENDER_PAGES` (the
+default 64, 0 = off, `ui5RouteHandler` below), `A2UI5_MCP_BSP_DIRS` (the directories, separated like `PATH`, whose abapGit
+WAPA files `run_app` and `interact_app` serve for `/sap/bc/ui5_ui5/sap/<bsp>/`
+- the controls of an addon such as custom-controls, which the backend does not
+serve; authoritative when set, else the working directory and a
+`custom-controls`/`custom-controls-customer` sibling, `lib/bsp.mjs`),
+`A2UI5_MCP_RENDER_PAGES` (the
 pages of `validate_view`'s warm render gate - concurrent calls queue on the
 pool; default 2, 1 to 8, `renderPages` in `lib/renderer.mjs`),
 `A2UI5_MCP_SCREENSHOT_DIR` (where `run_app` and `interact_app` write their

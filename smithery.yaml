@@ -79,6 +79,9 @@ startCommand:
       A2UI5_MCP_UI5_CACHE_MB:
         type: number
         description: "How many MB of UI5 answers from the CDN (sdk.openui5.org) run_app and interact_app keep in memory across calls, so a second boot does not download them again. 0 switches the cache off. Default: 64."
+      A2UI5_MCP_BSP_DIRS:
+        type: string
+        description: "Directories (separated like PATH) whose abapGit BSP files run_app and interact_app serve for /sap/bc/ui5_ui5/sap/<bsp>/ - the controls of an addon such as custom-controls, which the Node backend does not serve. Default: the working directory and a custom-controls or custom-controls-customer checkout beside the server."
       A2UI5_MCP_RENDER_PAGES:
         type: number
         description: "Pages (Chromium tabs) of validate_view's warm render gate, which concurrent calls queue on. Default: 2 (1 to 8)."

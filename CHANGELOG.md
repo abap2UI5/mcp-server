@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- **`run_app` and `interact_app` serve the controls of addons.** An app that
+  used a control of abap2UI5-addons/custom-controls (`z2ui5_cci.cc.ScanInput`,
+  `FloorPlan`, `Gauge`, ...) terminated at its first view: the frontend loads
+  the control from `/sap/bc/ui5_ui5/sap/z2ui5_cci/`, the Node backend answers
+  every such URL with its start page (HTTP 200), and the only trace was
+  "ModuleError: failed to load z2ui5_cci/cc/ScanInput.js" on the screenshot -
+  `errors` stayed empty. The page now answers those requests from the addon's
+  abapGit BSP files (`<bsp>.wapa.<path>`, `/` written as `_-`, lower case) in
+  a local checkout: `A2UI5_MCP_BSP_DIRS` when set (authoritative, separated
+  like `PATH`), else the working directory and a `custom-controls` or
+  `custom-controls-customer` checkout beside the server. Only files found by
+  walking those directories are served - a request names an index key, never
+  a path. A BSP that no checkout carries is reported in `errors` once, with
+  the remedy; a file a carried BSP lacks, too. New: `lib/bsp.mjs`,
+  `test/bsp.test.mjs`.
+
 ## 1.3.0 - 2026-11-27
 
 - **The linter peer range follows the linter: `>=0.8.0 <0.14.0`.** It ended

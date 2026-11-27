@@ -721,6 +721,16 @@ duplicates none of their content:
   in memory across calls (`A2UI5_MCP_UI5_CACHE_MB`, default 64; 0 switches
   it off), so a second boot does not download UI5 again.
   `A2UI5_MCP_OFFLINE=1` forces the hermetic behaviour.
+- **Addon controls:** an app that uses the controls of an addon (for example
+  `z2ui5_cci.cc.ScanInput` of
+  [custom-controls](https://github.com/abap2UI5-addons/custom-controls))
+  loads their files from `/sap/bc/ui5_ui5/sap/<bsp>/`, which the Node backend
+  does not serve. `run_app` and `interact_app` answer those requests from the
+  addon's abapGit BSP files in a local checkout: the directories in
+  `A2UI5_MCP_BSP_DIRS` (separated like `PATH`) when it is set, else the
+  directory the server runs in and a `custom-controls` or
+  `custom-controls-customer` checkout beside the server. A file nobody
+  carries is reported in `errors` with that remedy.
 - **Chromium:** `A2UI5_MCP_CHROMIUM` (or `CHROMIUM_BIN`, which the linter
   reads too) names the executable; otherwise the Playwright-managed browser
   (`npx playwright install chromium`); otherwise a system chromium.
