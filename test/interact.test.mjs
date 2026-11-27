@@ -632,3 +632,42 @@ test('run_unit_tests runs one object\'s test classes in the transpiled backend',
   assert.equal(none.tests.length, 0);
   assert.equal(none.ok, true);
 });
+
+// ------------------------------------------------------ firstViewSettled ----
+
+/* A page whose DOM changes at the times `changes` names, on the fake clock:
+ * evaluate installs the observer (the first call) or answers the age of the
+ * last change; waitForTimeout advances the clock. */
+function fakePage(clock, changes) {
+  return {
+    evaluate: async (fn) => {
+      if (String(fn).includes('MutationObserver')) return undefined;
+      const last = Math.max(-1000, ...changes.filter((at) => at <= clock.now()));
+      return clock.now() - last;
+    },
+    waitForTimeout: clock.sleep,
+  };
+}
+
+test('firstViewSettled waits for the first view: the page quiet AND the DOM unchanged, within the ceiling', async () => {
+  const { firstViewSettled } = await import('../lib/browser.mjs');
+  // the shell is there, the view is built at 900 ms and its libraries load until 1500 ms
+  const late = fakeClock([{ at: 0, d: 1 }, { at: 1500, d: -1 }]);
+  const page = fakePage(late, [100, 900, 1600]);
+  assert.equal(await firstViewSettled(page, late.inflight, { now: late.now }), true);
+  assert.ok(late.now() >= 1900, `not before the last change and request have been quiet 300 ms (at ${late.now()})`);
+  assert.ok(late.now() < 2100, `and not much later (at ${late.now()})`);
+
+  // a small app: quiet at once - the minimum, no more
+  const idle = fakeClock();
+  idle.inflight.last = -1000;
+  assert.equal(await firstViewSettled(fakePage(idle, []), idle.inflight, { now: idle.now }), true);
+  assert.equal(idle.now(), 300);
+
+  // a page that never quiets (a clock ticking) is let go at the ceiling, not refused
+  const ticking = fakeClock();
+  ticking.inflight.last = -1000;
+  const ticks = Array.from({ length: 300 }, (_, i) => i * 100);
+  assert.equal(await firstViewSettled(fakePage(ticking, ticks), ticking.inflight, { now: ticking.now, maxMs: 2000 }), false);
+  assert.equal(ticking.now(), 2000);
+});

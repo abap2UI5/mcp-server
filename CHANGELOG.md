@@ -16,6 +16,31 @@
   started its own express app around the backend
   (`lib/icf.mjs`, the host's banner names the route).
 
+- **`run_app` photographs the app, not the frontend's empty shell.** The
+  boot check (more than three UI5 elements on the page) is met by the
+  frontend's own shell, before the app's first roundtrip is answered, its
+  XML view built and the libraries the view needs loaded; the 600 ms after
+  it covered a small app. A large view - a page of tables and a custom
+  control - was photographed as an empty grey page and reported `ok: true`.
+  After the boot, `run_app` and `interact_app` now wait until no request of
+  the page has been in flight and the DOM has not changed for 300 ms (at
+  least 300 ms, at most 10 s; a page that never quiets is photographed when
+  the time is up, as before). New: `firstViewSettled` in `lib/browser.mjs`.
+- **Start parameters for the tools that start an app.** `run_app`,
+  `interact_app`, `app_start` (sandbox and system mode) and `verify_app`'s
+  boot stage take an optional `params` object - `{ "source": "demo" }`
+  starts `?app_start=<class>&source=demo`, what the app reads with
+  `client->get_start_param( )`. Until now only the class could be named
+  (`app_start` encoded `zcl_app&source=demo` into the class name), so an app
+  that decides by a start parameter - a demo switch, a key to open, a mode -
+  could only be run and operated on its default branch. A name is letters,
+  digits and `_ - .` (at most 60), never `app_start`; a value a string, a
+  number or a boolean (at most 1000 characters); at most 20 - refused naming
+  what is wrong otherwise, and in `verify_app` before the deploy. The query is
+  encoded, so a value cannot add a parameter of its own. New:
+  `startParams` in `lib/args.mjs`; `appStartUrl` takes the query, and the app
+  client's `start` appends it to the location's own `SEARCH`.
+
 - **deploy_app names the replacement of removed API.** An app written from
   memory got `Method "_bind_edit" not found` from the lint and nothing else.
   A "not found" whose name is in the docs' deprecations.json (checkout, else
