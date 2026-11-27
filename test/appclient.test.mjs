@@ -1284,19 +1284,79 @@ test('signal: a caller\'s cancel aborts the roundtrip in flight, refuses the act
   const t0 = Date.now();
   const acting = c.act(s.session, { values: { '/NAME': 'Ann' }, event: 'CHECK', signal: ctl.signal });
   setTimeout(() => ctl.abort(), 30);
-  await rejects(acting, /^cancelled by the caller - nothing of this roundtrip was adopted$/);
+  await rejects(acting, /^cancelled by the caller after the request had been sent - nothing of this roundtrip was adopted\. session 'D1' is out of sync: event CHECK may have run on the backend/);
   assert.ok(Date.now() - t0 < 5000, 'not the 120 s timeout');
   assert.ok(signals[1].aborted, 'the transport\'s signal aborted with the caller\'s');
+  const sent = n;
+  await rejects(c.act(s.session, { event: 'CHECK' }), /^nothing was sent - session 'D1' is out of sync/);
   const after = c.describe(s.session);
   assert.equal(after.session, 'D1');
   assert.deepEqual(after.pending || [], [], 'the act\'s edits are taken back');
   // an already-cancelled signal sends nothing
-  const sent = n;
   const gone = new AbortController();
   gone.abort();
   await rejects(c.act(s.session, { event: 'CHECK', signal: gone.signal }), /^cancelled by the caller/);
   await rejects(c.start('z_t', { signal: gone.signal }), /^cancelled by the caller/);
   assert.equal(n, sent, 'nothing reached the transport');
+});
+
+/* A roundtrip that ends without an adopted answer once the POST was handed
+ * over may have run the event: the refusal says so, and the session takes no
+ * further event until app_describe resyncs it - an agent read "nothing
+ * adopted" as "nothing happened" and sent a non-idempotent event twice. A
+ * connection that was never made proves nothing ran and blocks nothing. */
+test('an event that may have run (timeout, cancel, a lost answer) leaves the session out of sync until app_describe', async () => {
+  let mode = 'answer';
+  let n = 0;
+  const transport = (req) => {
+    n += 1;
+    if (n === 1) return Promise.resolve({ status: 200, body: JSON.stringify(startAnswer()) });
+    if (mode === 'refused') return Promise.reject(Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:1'), { code: 'ECONNREFUSED' }) }));
+    if (mode === 'reset') return Promise.reject(Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }) }));
+    if (mode === 'hang') {
+      // AbortSignal.timeout's timer does not hold the event loop open
+      const keep = setTimeout(() => {}, 5000);
+      return new Promise((resolve, reject) => req.signal.addEventListener('abort', () => { clearTimeout(keep); reject(req.signal.reason); }, { once: true }));
+    }
+    return Promise.resolve({ status: 200, body: JSON.stringify(eventAnswer(n)) });
+  };
+  const c = createAppClient({ transport, location: () => ({ origin: 'x', pathname: '/', search: '' }), timeoutMs: 50 });
+  const s = await c.start('z_t');
+  // never connected: nothing ran, the session stays usable
+  mode = 'refused';
+  await rejects(c.act(s.session, { event: 'CHECK' }), /^the backend did not answer \(fetch failed\) - is it running/);
+  // the timeout after the request was sent
+  mode = 'hang';
+  await rejects(c.act(s.session, { event: 'CHECK' }),
+    /^the backend did not answer \(.*\) after the request had been sent - .*\. session 'D1' is out of sync: event CHECK may have run on the backend and its answer was not adopted - do not repeat it blindly\. app_describe \{ session: "D1" \} resyncs .*, app_start Z_T starts afresh$/);
+  mode = 'answer';
+  const before = n;
+  await rejects(c.act(s.session, { event: 'OTHER' }), /^nothing was sent - session 'D1' is out of sync/);
+  await rejects(c.act(s.session, { window: { table: 't1' } }), /^nothing was sent - session 'D1' is out of sync/);
+  assert.equal(n, before, 'refused while out of sync');
+  const typed = await c.act(s.session, { values: { '/NAME': 'Ann' } });
+  assert.deepEqual(typed.pending, ['/NAME'], 'values without an event are typing, still taken');
+  assert.equal(c.describe(s.session).session, 'D1');
+  const next = await c.act(s.session, { event: 'CHECK' });
+  assert.equal(next.session, `D${n}`, 'app_describe resynced it');
+  // a connection lost after sending
+  mode = 'reset';
+  await rejects(c.act(next.session, { event: 'CHECK' }), /after the request had been sent .*is out of sync: event CHECK may have run/);
+  c.describe(next.session);
+  // the answer arrived, the caller had cancelled meanwhile: the event ran
+  mode = 'answer';
+  const ctl = new AbortController();
+  const late = createAppClient({
+    transport: async (req) => {
+      if (!JSON.parse(req.body).value.S_FRONT.EVENT) return { status: 200, body: JSON.stringify(startAnswer()) };
+      ctl.abort();
+      return { status: 200, body: JSON.stringify(eventAnswer(2)) };
+    },
+    location: () => ({ origin: 'x', pathname: '/', search: '' }),
+  });
+  const ls = await late.start('z_t');
+  await rejects(late.act(ls.session, { event: 'CHECK', signal: ctl.signal }),
+    /^cancelled by the caller after the backend had answered - nothing of the answer was adopted\. session '.+' is out of sync: event CHECK ran on the backend/);
 });
 
 // ------------------------------------------------------ windowed tables ----

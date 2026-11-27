@@ -724,7 +724,15 @@ default:
   answer is `{ status, headers?, body }`; the client reads `sap-contextid`
   and `x-csrf-token` from `headers` (any case, a repeated header joined), a
   status outside 2xx is the backend's refusal (its body shown verbatim), and
-  a throw is *the backend did not answer (…)*. **The client does both
+  a throw is *the backend did not answer (…)*. A timeout, a cancel or a
+  throw AFTER the POST was handed over says that the request had been sent:
+  the event may have run (an answer that arrived after a cancel: it ran), the
+  refusal says so, and the session takes no further event or window request
+  until `describe(session)` (app_describe) resyncs it to the last screen the
+  client knows - or a fresh start; a throw whose `code` (or `cause.code`) is
+  a connection never made (`ECONNREFUSED`, `ENOTFOUND`, `EAI_AGAIN`,
+  `ENETUNREACH`, `EHOSTUNREACH`, `UND_ERR_CONNECT_TIMEOUT`) proves nothing
+  ran and blocks nothing. **The client does both
   handshakes itself** — the stateful session id per session, and a token
   layer's `403` + `X-CSRF-Token: Required` answered by the HEAD and one
   re-send of the same body, the token then sent with every POST (a `403`

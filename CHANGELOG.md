@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **An event that may have run is not reported as one that did not.** A
+  timeout or a cancel after app_act had sent its POST said "nothing of this
+  roundtrip was adopted" or "the backend did not answer", and an agent
+  retried a non-idempotent event. Now the refusal says the request had been
+  sent and the event may have run (ran, when the answer arrived after the
+  cancel), and the session takes no further event or window request until
+  app_describe resyncs it or a fresh app_start replaces it. A connection
+  that was never made (`ECONNREFUSED`, no such host) blocks nothing.
 - **A deeply nested view no longer breaks the session.** The snapshot's
   walk is recursive, and a view nested 2000 levels deep overflowed the stack
   after the client had already adopted the response: app_start never
