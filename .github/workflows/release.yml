@@ -47,8 +47,8 @@ name: Publish to npm and the MCP Registry
 # `move-major-tag` job (contents: write) cannot mint one.
 #
 # The `publish` job runs in the GitHub environment `release`. Create it under
-# Settings -> Environments with a deployment rule (tags `v*.*.*`, plus
-# required reviewers if wanted), and name it as the environment in the npm
+# Settings -> Environments with a deployment rule (tags `v*.*.*`, and the
+# branch `main` for the dispatched dry run; required reviewers if wanted), and name it as the environment in the npm
 # Trusted Publisher settings, so npm accepts an OIDC token only from a run
 # that passed those rules.
 #
