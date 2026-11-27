@@ -42,7 +42,15 @@ name: Publish to npm and the MCP Registry
 #
 # Trusted publishing (OIDC) is deliberate: no NPM_TOKEN to leak or rotate, and
 # npm records an attestation tying the tarball to this run and commit.
-# `id-token: write` below is what mints that token.
+# `id-token: write` is what mints that token - granted to the two jobs that
+# trade one (`publish`, `mcp-registry`), never workflow-wide, so the
+# `move-major-tag` job (contents: write) cannot mint one.
+#
+# The `publish` job runs in the GitHub environment `release`. Create it under
+# Settings -> Environments with a deployment rule (tags `v*.*.*`, plus
+# required reviewers if wanted), and name it as the environment in the npm
+# Trusted Publisher settings, so npm accepts an OIDC token only from a run
+# that passed those rules.
 #
 # The MCP Registry needs no setup and no secret either: `mcp-publisher login
 # github-oidc` trades the same kind of GitHub OIDC token for a registry token
@@ -62,12 +70,15 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
