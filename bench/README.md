@@ -325,6 +325,65 @@ Say these next to any number this produces.
 - **Contamination detection is a heuristic.** It catches a tool call naming
   the bench's path, not an agent that found the reference another way.
 
+## Not measured: addons and the system mode
+
+Two capabilities of the MCP server have no task here, on purpose. Neither
+fits the design above without changing it, and a change to the grading or
+the conditions is a new experiment, not a twenty-first task.
+
+**An addon task** (the server's `addons` tool: "ask for confirmation before
+deleting a row" answered with `z2ui5_cl_popup_to_confirm` of
+abap2UI5-addons/popups instead of a hand-built dialog). What stands in the
+way, each checked against the pins:
+
+- **At the pinned release there is no addon to find.** The tasks target
+  abap2UI5 1.145.0 (the template's pin), and that release still ships the
+  popups itself (`src/99/02/z2ui5_cl_pop_to_confirm` and its siblings). They
+  became abap2UI5-addons/popups later, under new names (`z2ui5_cl_popup_*`).
+  The natural solution at the pin is a framework class, or the message box
+  task `03-confirm-delete` already asks for.
+- **The addons have no pin that matches.** popups and layout-management cut
+  no release tags; popups' own `abaplint.jsonc` pins the core at 1.151.0 and
+  layout-management at `main`. The bench pins the template by commit and
+  takes the framework from it; an addon would be a third and fourth pin by
+  commit, judged against a core six releases older than the one it was
+  linted with.
+- **The abaplint check would stop being the template's.** It is the
+  template's `abaplint.jsonc`, unchanged except that the framework dependency
+  is local, and the headline is "what `npm run check` in a project made from
+  the template decides". A class that calls an addon fails that config
+  (the addon's classes are unknown to it) until the addon repositories are
+  among its dependencies - so the grader would need a per-task dependency set, or
+  would have to judge by the abaplint.jsonc the AGENT edited. Either is a
+  different abaplint check than the other twenty tasks get. In `template`
+  and `full` the agent's own `npm run check` fails the same way; the
+  template's `npm run add-addon` is not in the template at `templateRef`.
+- **`expect.json` cannot ask for it.** `calls` sees `z2ui5_if_client`
+  methods; there is no check for "the source uses class X". And it could not
+  be required without failing a correct message-box solution, nor named in
+  the task text without giving the answer to all four conditions.
+- **`full` would not have the tool.** The condition registers the published
+  server at the version resolved for the run; until a release carries
+  `addons`, only `--mcp-server local` does.
+
+What it would take: move `templateRef` to a template whose framework pin is
+a release without the popups in the core and which ships `add-addon` (a new
+series for all tasks, see "Moving the pins"); pin popups and
+layout-management by commit in `bench.config.json` and clone them like the
+framework (`lib/pins.mjs`), with `verify.mjs` checking that those commits
+lint against the pinned core; extend `stage` in `lib/grade.mjs` to add a
+task's declared addon dependencies to the staged config, and say in "What is
+measured" that the abaplint check then differs per task; add a `uses` check
+to `lib/expect.mjs` with a broken variant; and write the task so that the
+addon is the only reasonable answer without naming it (a dialog no single
+`client->` call gives - a file download, a value help over a search help),
+with every alternative that satisfies the text listed.
+
+**The system mode's write tools** (`system_write_class`, `system_activate`,
+`system_unit_tests`) need an SAP system. The bench has none, its conditions
+are the sandbox's, and those tools have themselves only been tested against a
+fake system - there is nothing here to measure them with.
+
 ## Moving the pins
 
 `bench.config.json` pins app-template by commit; the abap2UI5 release follows
