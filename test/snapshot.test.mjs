@@ -668,6 +668,13 @@ test('a repeating START_TIMER stays an action until STOP_TIMER or another app; a
   assert.equal(byEvent(buildSnapshot({ state: st }), 'POLL').trigger, 'timer');
   st = applyResponse(st, asApp(respond(xml, {}), 'ZCL_B'));
   assert.equal(byEvent(buildSnapshot({ state: st }), 'POLL'), undefined);
+test('the scan field of custom-controls is a text field; other custom controls stay not described', () => {
+  const xml = view('<Label text="Scan"/><cci:ScanInput id="BIN" value="{/SCAN}" submit=".eB([\'BIN\'])"/><cci:FloorPlan items="{/T}"/>', 'xmlns:cci="z2ui5_cci.cc"');
+  const s = buildSnapshot({ response: respond(xml, { SCAN: 'C05', T: [] }) });
+  assert.deepEqual(s.fields.map((f) => `${f.id}:${f.control}:${f.kind}:${f.value}:${f.path}`), ['f1:z2ui5_cci.cc.ScanInput:text:C05:/SCAN']);
+  assert.equal(byEvent(s, 'BIN').trigger, 'submit');
+  assert.ok(s.unsupported.some((u) => u.startsWith('custom control z2ui5_cci.cc.FloorPlan')), s.unsupported.join(' | '));
+  assert.ok(!s.unsupported.some((u) => u.includes('ScanInput')), s.unsupported.join(' | '));
 });
 
 test('maxRows bounds the rows, and the linter metadata classifies an unmapped subclass', () => {
