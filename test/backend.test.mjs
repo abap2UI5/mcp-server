@@ -52,6 +52,7 @@ if (K.FAIL_EADDRINUSE) {
 }
 setTimeout(listen, Number(K.LISTEN_DELAY_MS || 0));
 process.on('SIGTERM', () => {
+  if (K.SIGTERM_MARKER) fs.appendFileSync(K.SIGTERM_MARKER, process.pid + '\\n');
   if (K.IGNORE_SIGTERM) return; // a backend stuck in a request: only SIGKILL ends it
   stopping = true;
   s.close();
@@ -177,22 +178,32 @@ test('a stop waits for the backend process to exit before it returns; the next s
  * port past a restart for good. After backendTiming.stopMs the stop kills
  * its tree with SIGKILL and returns once it is gone. */
 test('a backend that ignores SIGTERM is killed with SIGKILL after the bound, and the stop waits for it', async () => {
+  /* What is asserted is the sequence, not a window of milliseconds: the
+   * SIGTERM reached the backend first and was ignored (the knob), and when
+   * the stop returns the process is gone - which, for a process that
+   * ignores SIGTERM, only the SIGKILL can have done. The one clock left is a
+   * LOWER bound (the SIGKILL is not sent before stopMs), which load can only
+   * lengthen; "< 3000 ms" failed on a loaded runner without a bug. */
   const saved = backendTiming.stopMs;
   backendTiming.stopMs = 400;
+  const terms = path.join(base, 'sigterm.txt');
+  fs.writeFileSync(terms, '');
   setKnob('IGNORE_SIGTERM', true);
+  setKnob('SIGTERM_MARKER', terms);
   fs.writeFileSync(marker, '');
   try {
     await startBackend();
     const [pid] = bootedPids();
-    const t0 = Date.now();
+    const t0 = performance.now();
     await stopBackend();
-    const took = Date.now() - t0;
-    assert.ok(took >= 350 && took < 3000, `the stop took ${took} ms`);
-    assert.equal(alive(pid), false, 'SIGKILL ended it');
+    assert.equal(fs.readFileSync(terms, 'utf8'), `${pid}\n`, 'the SIGTERM came first, and the backend (ignoring it) lived on');
+    assert.ok(performance.now() - t0 >= backendTiming.stopMs - 5, 'the SIGKILL waited for the bound');
+    assert.equal(alive(pid), false, 'SIGKILL ended it, and the stop returned only after');
     assert.equal(await portOpen(), false);
   } finally {
     backendTiming.stopMs = saved;
     clearKnob('IGNORE_SIGTERM');
+    clearKnob('SIGTERM_MARKER');
   }
 });
 
