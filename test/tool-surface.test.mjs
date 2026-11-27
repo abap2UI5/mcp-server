@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TOOLS, TOOL_NAMES } from '../lib/tools.mjs';
-import { SYSTEM_TOOLS, SYSTEM_TOOL_NAMES } from '../lib/system-tools.mjs';
+import { SYSTEM_TOOLS, SYSTEM_TOOL_NAMES, SYSTEM_WRITE_TOOLS, SYSTEM_WRITE_TOOL_NAMES } from '../lib/system-tools.mjs';
 import { RESOURCES, RESOURCE_URIS, RESOURCE_TEMPLATES } from '../lib/resources.mjs';
 import { PROMPTS, PROMPT_NAMES } from '../lib/prompts.mjs';
 
@@ -59,7 +59,7 @@ test('every array in a tool schema declares its items', () => {
     if (schema.items) walk(schema.items, `${at}[]`);
     for (const key of ['anyOf', 'oneOf', 'allOf']) (schema[key] || []).forEach((s, i) => walk(s, `${at}.${key}[${i}]`));
   };
-  for (const t of [...TOOLS, ...SYSTEM_TOOLS]) walk(t.inputSchema, t.name);
+  for (const t of [...TOOLS, ...SYSTEM_TOOLS, ...SYSTEM_WRITE_TOOLS]) walk(t.inputSchema, t.name);
 });
 
 test('the README tool table lists exactly the TOOLS names', () => {
@@ -67,12 +67,32 @@ test('the README tool table lists exactly the TOOLS names', () => {
     'README.md "Tools" table and lib/tools.mjs disagree - update the table (one row per tool, `name` in backticks)');
 });
 
-test('the README system-mode table lists exactly the SYSTEM_TOOLS names, and no other section has a tool table', () => {
+test('the README system-mode tables list exactly the SYSTEM_TOOLS and the write tools\' names, and no other section has a tool table', () => {
   const readme = read('README.md');
-  assert.deepEqual(tableNames(section(readme, 'System mode')), SYSTEM_TOOL_NAMES,
+  const systemSection = section(readme, 'System mode');
+  /* Two tables in the one section: the tools the mode always lists, and -
+   * under its own heading, which says experimental - the write half that
+   * A2UI5_MCP_SYSTEM_WRITE=1 adds (lib/system-tools.mjs SYSTEM_WRITE_TOOLS). */
+  const at = systemSection.indexOf('\n### Writing to the system');
+  assert.ok(at > 0, 'README.md "System mode" has no "### Writing to the system" subsection for the write tools');
+  assert.deepEqual(tableNames(systemSection.slice(0, at)), SYSTEM_TOOL_NAMES,
     'README.md "System mode" table and lib/system-tools.mjs disagree - update the table (one row per tool, `name` in backticks)');
-  assert.equal(tableNames(readme).length, TOOL_NAMES.length + SYSTEM_TOOL_NAMES.length,
+  const writeSection = systemSection.slice(at);
+  assert.deepEqual(tableNames(writeSection), SYSTEM_WRITE_TOOL_NAMES,
+    'README.md "Writing to the system" table and SYSTEM_WRITE_TOOLS disagree - update the table');
+  assert.match(writeSection, /experimental/i, 'the README marks the write tools experimental');
+  assert.match(writeSection, /A2UI5_MCP_SYSTEM_WRITE=1/, 'the README names the opt-in');
+  assert.match(writeSection.replace(/\s+/g, ' '), /fake system[^.]*never against a real/i, 'the README says what the write half was tested against');
+  assert.equal(tableNames(readme).length, TOOL_NAMES.length + SYSTEM_TOOL_NAMES.length + SYSTEM_WRITE_TOOL_NAMES.length,
     'a tool table row outside the "Tools" and "System mode" sections is checked by nothing');
+});
+
+/* The same statement where an agent working on this repository reads it. */
+test('AGENTS.md says the write half is opt-in, experimental and only tested against the fake system', () => {
+  const agents = read('AGENTS.md').replace(/\s+/g, ' ');
+  assert.match(agents, /A2UI5_MCP_SYSTEM_WRITE=1/);
+  assert.match(agents, /only been tested against the fake system[^.]*not[^.]*real/i);
+  for (const name of SYSTEM_WRITE_TOOL_NAMES) assert.ok(agents.includes(`\`${name}\``), `AGENTS.md names ${name}`);
 });
 
 /* Anywhere a document writes the COUNT out ("14 tools"), it is making a claim
@@ -304,7 +324,7 @@ test('the stdio suites derive their name lists instead of keeping copies', () =>
  * its tool's description, and every `...Cut` field the code answers with is
  * in AGENTS.md's vocabulary and in some tool's description. */
 test('every paging argument a tool declares is named in its description', () => {
-  for (const t of [...TOOLS, ...SYSTEM_TOOLS]) {
+  for (const t of [...TOOLS, ...SYSTEM_TOOLS, ...SYSTEM_WRITE_TOOLS]) {
     for (const arg of ['offset', 'from_line', 'files']) {
       if (!(t.inputSchema.properties || {})[arg]) continue;
       assert.match(t.description, new RegExp(`\\b${arg}\\b`), `${t.name} declares ${arg} and its description never says it pages`);
@@ -320,7 +340,7 @@ test('every ...Cut field the answers carry is in the AGENTS.md vocabulary and in
   const agents = fs.readFileSync(path.join(ROOT, 'AGENTS.md'), 'utf8');
   const vocabulary = /One vocabulary for it, in every tool[\s\S]*?A new paging field takes one of these names/.exec(agents);
   assert.ok(vocabulary, 'AGENTS.md lost its paging vocabulary paragraph');
-  const descriptions = [...TOOLS, ...SYSTEM_TOOLS].map((t) => t.description).join('\n');
+  const descriptions = [...TOOLS, ...SYSTEM_TOOLS, ...SYSTEM_WRITE_TOOLS].map((t) => t.description).join('\n');
   for (const f of fields) {
     assert.ok(vocabulary[0].includes(`\`${f}\``), `${f} is answered but missing from AGENTS.md's paging vocabulary`);
     assert.ok(descriptions.includes(`\`${f}\``), `${f} is answered but no tool description names it`);

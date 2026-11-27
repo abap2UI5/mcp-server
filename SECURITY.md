@@ -118,6 +118,24 @@ Worth knowing before assessing a report:
   evaluates the condition with `eval()`, so one built from user input is
   code injection on the backend - an upstream property of the runtime this
   server reports rather than fixes.
+- **The system mode writes to a system only on a second opt-in, and only
+  what the operator's pattern allows.** With `A2UI5_MCP_SYSTEM_URL` the app
+  tools act on a real SAP system as the configured user. Putting SOURCE
+  there (`system_write_class`, `system_activate`, `system_unit_tests` -
+  `lib/system-write.mjs`, over the ADT REST API) needs
+  `A2UI5_MCP_SYSTEM_WRITE=1` as well; without it the tools are not listed
+  and a call by name is refused unsent. A name is written only when it is a
+  customer name (`Z...`, `Y...`, `/NAMESPACE/...`) that matches
+  `A2UI5_MCP_SYSTEM_WRITE_ALLOW`; `Z2UI5_*` (the framework), SAP's name range
+  and the SAP namespaces it knows are refused whatever the pattern says. The
+  package and the transport request are arguments, never chosen or created;
+  a class last changed by another user is refused without `overwrite: true`;
+  the lock is released in a `finally`. This half is **experimental and has
+  only been tested against the fake system of the test suite**
+  (`test/system-write.test.mjs`), not a real one: the model is that a
+  developer, not the server, owns what an agent with these tools does to a
+  development system - the authorizations of the configured user are the
+  boundary that holds.
 - **It runs with the privileges of whoever started it**, over the checkouts
   beside it, and the expensive half of its tool loop (`build_backend`,
   `run_app`) **executes code**: it transpiles the ABAP and boots the resulting

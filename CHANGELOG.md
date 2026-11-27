@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+- **System mode can write a class to the system - experimental, opt-in.**
+  The mode could only operate apps; an agent with a gate-green class had no
+  way to put it on the system. With `A2UI5_MCP_SYSTEM_WRITE=1` set in
+  addition to `A2UI5_MCP_SYSTEM_URL`, three more tools are listed, over the
+  ADT REST API: `system_write_class` (create or update a global class from
+  `.clas.abap`, an optional `.clas.testclasses.abap` and the description of
+  `.clas.xml` - lock, write the parts that differ, unlock; the class stays
+  inactive), `system_activate` (the activation messages with abapGit file,
+  line and column) and `system_unit_tests` (the class's ABAP Unit tests).
+  **Only tested against the fake system of the test suite, never against a
+  real SAP system** - the descriptions, the README, SECURITY.md and
+  AGENTS.md say so. Conservative by construction: without the variable the
+  tools are not listed and a call by name is refused unsent; only customer
+  names are taken (`A2UI5_MCP_SYSTEM_WRITE_ALLOW`, default `^Z|^Y|^/\w+/`,
+  narrows them), `Z2UI5_*` and SAP-owned names never; `package` is required
+  and `transport` is required off `$TMP` - a request is never chosen or
+  created, and a class sitting in another one is refused naming it; an
+  existing class last changed by somebody else needs `overwrite: true`; the
+  unlock is in a `finally` with a signal of its own; every answer states
+  what was created, written and left unchanged. Not written: local class
+  includes, other object types. `system_status` reports the write half
+  under `write`. New: `lib/system-write.mjs`, `SYSTEM_WRITE_TOOLS` in
+  `lib/system-tools.mjs`, the ADT endpoints of
+  `test/helpers/fake-system.mjs`, `test/system-write.test.mjs`;
+  `createSystemHttp`'s `send` takes a `jar` option (a conversation's own
+  cookies - the logon, the gate and the breaker stay shared).
+
 - **`addons`: is there an addon for this?** An agent building an app
   through this server never learned that github.com/abap2UI5-addons exists,
   and hand-built what an addon already is - a confirm, select, input or file

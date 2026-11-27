@@ -110,7 +110,8 @@ before it exits; default 10 min, 0 = never), `A2UI5_MCP_UI` (`auto`/`on`/`off`:
 whether the app tools declare their MCP Apps screen, below),
 `A2UI5_MCP_APP_FORMAT` (`snapshot`/`adaptive-card`: the app tools' default
 answer format, below), the system mode's `A2UI5_MCP_SYSTEM_URL` / `_USER` /
-`_PASSWORD` / `_PASSWORD_CMD` / `_INSECURE_TLS` (below), `A2UI5_MCP_BUILD_TIMEOUT_MS`
+`_PASSWORD` / `_PASSWORD_CMD` / `_INSECURE_TLS` (below) and its write half's
+`A2UI5_MCP_SYSTEM_WRITE` / `A2UI5_MCP_SYSTEM_WRITE_ALLOW` (below), `A2UI5_MCP_BUILD_TIMEOUT_MS`
 (default 30 min, also the prebuilt download and the npm install) and
 `A2UI5_MCP_UNIT_TIMEOUT_MS` (default 10 min, the test runner).
 
@@ -725,7 +726,7 @@ act with the session it last saw is refused naming the current one).
   the fixtures with their acts submitted through the card. A card that
   cannot be rendered costs the card, never the act.
 
-### The system mode — `lib/system.mjs`, `lib/system-tools.mjs`
+### The system mode — `lib/system.mjs`, `lib/system-tools.mjs`, `lib/system-write.mjs`
 
 **`A2UI5_MCP_SYSTEM_URL` turns the server into something else**: the app
 tools against a REAL SAP system, for the MCP clients that are not the VS Code
@@ -785,6 +786,71 @@ share a tool name inside one server.
   against the fake system's own URL): one sandbox registration's worth of
   confidence without a system. The breaker test asserts that exactly ONE
   request reached the system.
+
+#### The write half — `lib/system-write.mjs` (experimental, opt-in)
+
+**This half has only been tested against the fake system, not a real one.**
+`test/helpers/fake-system.mjs` answers the ADT endpoints from the same
+request shapes the client was written from, so the tests prove the sequence,
+the refusals and the unlock - and nothing about what a real ADT answers. Keep
+that sentence in the tool descriptions, the README, SECURITY.md and here
+until somebody has run it on a system; `test/tool-surface.test.mjs` fails
+when the README or this file loses it.
+
+With `A2UI5_MCP_SYSTEM_WRITE=1` beside the system URL, `tools/list` answers
+`SYSTEM_WRITE_TOOLS` after `SYSTEM_TOOLS` (`lib/system-tools.mjs`):
+`system_write_class` (create-or-update a global class from `.clas.abap`,
+optional `.clas.testclasses.abap`, the description from `.clas.xml`: lock,
+write what differs, unlock - the class stays inactive), `system_activate`
+(the activation messages with abapGit file, line and column) and
+`system_unit_tests` (ABAP Unit through ADT). Without the variable they are
+not listed, and `handleSystem` refuses a call by name before anything runs.
+
+- **The same logon, a conversation of its own.** Every request goes through
+  `sys.send` (`createSystemHttp`): Basic authentication, the per-request TLS
+  rule, the breaker, `networkProblem`. What an ADT conversation adds
+  (`adtSession`) is a cookie jar of its OWN, passed as `send`'s `jar` option
+  - a stateful ADT session's cookies must not ride on the app tools'
+  roundtrips - the CSRF token (fetched by the first GET, `x-csrf-token:
+  fetch`), and `X-sap-adt-sessiontype`: stateless for the reads, the create
+  and the activation, stateful from the lock to the unlock.
+- **Where the request shapes come from.** Metadata, source read, LOCK,
+  test-include create, source PUT, UNLOCK, session drop and activation are
+  the VS Code extension's Push and Activate (`src/adtwrite.ts`,
+  `src/adtmessages.ts`), which checked each against the open-source client
+  abap-adt-api - read, never run against a system there either. Class
+  CREATION (`POST /sap/bc/adt/oo/classes`) and the ABAP Unit run
+  (`POST /sap/bc/adt/abapunit/testruns`) are not in the extension; they are
+  written from memory of the same library and are the first two things to
+  verify on a system. The module header lists every endpoint.
+- **The safety rules - do not weaken one.** (1) The opt-in. (2) The name
+  gate `writableClassName`: a customer name only, `Z2UI5_*` and SAP names
+  refused BEFORE the allow pattern is looked at, so
+  `A2UI5_MCP_SYSTEM_WRITE_ALLOW` narrows and never widens; a pattern that
+  is no regular expression is a problem every write tool answers with, never
+  a fall back to the default. Every write tool passes the gate. (3) `package`
+  is required, `transport` is required off `$TMP`, and neither is ever
+  chosen: a class the lock reports in another request is refused naming it.
+  (4) An existing class whose `adtcore:changedBy` is not the logged-on user
+  - or is absent - is refused without `overwrite: true`; one in another
+  package is refused always. (5) The unlock is in a `finally` and sent with
+  a signal of its own (`cancellable: false`), so a client's cancel, a
+  refused write or a thrown request still releases the lock; an unconfirmed
+  unlock is said (`lockNotReleased`). (6) The answer states what was
+  created, written and left unchanged, also on a refusal or a failure after
+  a part was written. A refusal or a failed step is an `isError` result
+  that still carries that JSON.
+- **Not built, on purpose:** the local includes (`locals_def`,
+  `locals_imp`), objects other than classes, changing an existing class's
+  description or package, deleting, and anything that picks or creates a
+  transport request. abapGit stays the way to bring a repository onto a
+  system.
+- `test/system-write.test.mjs` runs the pure halves on literals, the
+  sequence against injected requests (a write that throws, a cancel
+  mid-write, an unconfirmed unlock) and the real server over stdio against
+  the fake's ADT endpoints: the happy path, a syntax error on activation, a
+  refused name, the missing opt-in, a lock held by someone else, the unlock
+  after a failed write, the overwrite and transport rules, and the breaker.
 
 ### Vendored code — `lib/vendor/`, `scripts/vendor-adaptive-cards.mjs`
 

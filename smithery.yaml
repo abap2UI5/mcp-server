@@ -127,6 +127,12 @@ startCommand:
       A2UI5_MCP_SYSTEM_INSECURE_TLS:
         type: string
         description: "System mode: set to 1 to accept a certificate that cannot be verified. NODE_EXTRA_CA_CERTS with the CA is the better fix."
+      A2UI5_MCP_SYSTEM_WRITE:
+        type: string
+        description: "System mode, experimental: set to 1 to list the tools that write a class to the system over ADT, activate it and run its unit tests. Off by default; tested against a fake system only."
+      A2UI5_MCP_SYSTEM_WRITE_ALLOW:
+        type: string
+        description: "System mode write tools: a regular expression a class name must match (default ^Z|^Y|^/\\w+/). Z2UI5_* and SAP-owned names are refused regardless."
       GITHUB_TOKEN:
         type: string
         description: "Optional token sent to api.github.com only, to raise the rate limit of the docs tree listing (GH_TOKEN is read too)."

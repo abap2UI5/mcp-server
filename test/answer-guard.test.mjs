@@ -22,7 +22,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TOOL_NAMES } from '../lib/tools.mjs';
-import { SYSTEM_TOOL_NAMES } from '../lib/system-tools.mjs';
+import { SYSTEM_TOOL_NAMES, SYSTEM_WRITE_TOOL_NAMES } from '../lib/system-tools.mjs';
 import { ANSWER_BUDGET, IMAGE_BUDGET } from '../lib/budget.mjs';
 import { PROBE_MARK } from './helpers/guard-probe-hooks.mjs';
 
@@ -152,6 +152,12 @@ test('every sandbox tool, called over stdio, answers through guardAnswer within 
 
 test('every system-mode tool, called over stdio, answers through guardAnswer within the budgets', { timeout: 120_000 }, async () => {
   await sweep(SYSTEM_TOOL_NAMES, { A2UI5_MCP_SYSTEM_URL: 'http://127.0.0.1:9/sap/bc/z2ui5', A2UI5_MCP_SYSTEM_USER: 'u', A2UI5_MCP_SYSTEM_PASSWORD: 'p' });
+});
+
+test('the system mode with the write half on: its tools answer through guardAnswer too', { timeout: 120_000 }, async () => {
+  await sweep([...SYSTEM_TOOL_NAMES, ...SYSTEM_WRITE_TOOL_NAMES], {
+    A2UI5_MCP_SYSTEM_URL: 'http://127.0.0.1:9/sap/bc/z2ui5', A2UI5_MCP_SYSTEM_USER: 'u', A2UI5_MCP_SYSTEM_PASSWORD: 'p', A2UI5_MCP_SYSTEM_WRITE: '1',
+  });
 });
 
 /* The same over the real checkouts beside this one, where they are: the

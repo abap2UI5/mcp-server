@@ -254,6 +254,18 @@
           "isRequired": false
         },
         {
+          "name": "A2UI5_MCP_SYSTEM_WRITE",
+          "description": "System mode, experimental: set to 1 to list the tools that write a class to the system over ADT, activate it and run its unit tests. Off by default; tested against a fake system only.",
+          "format": "string",
+          "isRequired": false
+        },
+        {
+          "name": "A2UI5_MCP_SYSTEM_WRITE_ALLOW",
+          "description": "System mode write tools: a regular expression a class name must match (default ^Z|^Y|^/\\w+/). Z2UI5_* and SAP-owned names are refused regardless.",
+          "format": "string",
+          "isRequired": false
+        },
+        {
           "name": "GITHUB_TOKEN",
           "description": "Optional token sent to api.github.com only, to raise the rate limit of the docs tree listing (GH_TOKEN is read too).",
           "format": "string",

@@ -106,7 +106,8 @@ import { appCard, cardContent, defaultAppFormat, APP_FORMATS } from './lib/adapt
 import { migrateReport, deployFiles, resolvePopups, validTargetClass, SetupError, KernelEscapeError } from './lib/migrate.mjs';
 import { explicitEnv } from './lib/repos.mjs';
 import { systemConfig, createSystemHttp, createSystemClient, systemClassName, searchClasses, checkSystem, maskedUrl } from './lib/system.mjs';
-import { SYSTEM_TOOLS } from './lib/system-tools.mjs';
+import { SYSTEM_TOOLS, SYSTEM_WRITE_TOOLS } from './lib/system-tools.mjs';
+import { writeConfig, describeWrite, writeDisabledMessage, writeClass, activateClass, runClassUnitTests } from './lib/system-write.mjs';
 
 function text(s) {
   return { content: [{ type: 'text', text: typeof s === 'string' ? s : JSON.stringify(s, null, 2) }] };
@@ -346,7 +347,11 @@ async function snapshotAnswer(run, { format = 'snapshot', client = null } = {}) 
  * without the variable; the two never share a tool name inside one server.
  * Read once: a desktop client restarts the server to change it. */
 const SYSTEM = systemConfig(process.env);
-const ACTIVE_TOOLS = SYSTEM ? SYSTEM_TOOLS : TOOLS;
+/* The write half (lib/system-write.mjs) is a second opt-in on top of the
+ * mode: without A2UI5_MCP_SYSTEM_WRITE=1 its tools are not listed, and a
+ * call by name is refused before anything is sent. */
+const SYSTEM_WRITE = writeConfig(process.env);
+const ACTIVE_TOOLS = SYSTEM ? (SYSTEM_WRITE.enabled ? [...SYSTEM_TOOLS, ...SYSTEM_WRITE_TOOLS] : SYSTEM_TOOLS) : TOOLS;
 
 let systemHttp = null;
 let systemClient = null;
@@ -364,7 +369,34 @@ async function handleSystem(name, args = {}, { signal } = {}) {
   const { sys, client } = await systemSide();
   switch (name) {
     case 'system_status':
-      return text(await checkSystem(SYSTEM, sys));
+      return text({ ...(await checkSystem(SYSTEM, sys)), write: describeWrite(SYSTEM_WRITE) });
+    case 'system_write_class':
+    case 'system_activate':
+    case 'system_unit_tests': {
+      /* The opt-in first: without it nothing below runs and nothing is
+       * sent. A step's refusal or failure is an error result that still
+       * carries what was written until then. */
+      if (!SYSTEM_WRITE.enabled) return toolError(writeDisabledMessage(name));
+      const step = { system_write_class: writeClass, system_activate: activateClass, system_unit_tests: runClassUnitTests }[name];
+      let result;
+      try {
+        result = await step({
+          className: args.class_name,
+          source: args.source,
+          testclasses: args.testclasses,
+          xml: args.xml,
+          description: args.description,
+          packageName: args.package,
+          transport: args.transport,
+          overwrite: args.overwrite,
+        }, { config: SYSTEM, sys, write: SYSTEM_WRITE, signal });
+      } catch (e) {
+        if (e instanceof AgentError) return toolError(e.message);
+        throw e;
+      }
+      const answer = text({ ...result, system: sys.host, user: SYSTEM.user });
+      return result.ok === false ? { ...answer, isError: true } : answer;
+    }
     case 'app_list': {
       const filter = String(args.filter || '').trim();
       let refs;
