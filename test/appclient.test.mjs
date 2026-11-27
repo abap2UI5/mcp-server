@@ -299,7 +299,7 @@ test('a long session keeps the last EARLIER_IDS draft ids as earlier states, not
   assert.throws(() => client.describe(first.session), /unknown session /);
 });
 
-test('a backend error is a refusal with the backend\'s text, and the session is unchanged', async () => {
+test('a backend error is a refusal with the backend\'s text, the session unchanged - and held until app_describe: the event ran', async () => {
   let fail = false;
   const r = replay('popup-009');
   const fetchImpl = async (url, init) => (fail
@@ -308,7 +308,8 @@ test('a backend error is a refusal with the backend\'s text, and the session is 
   const client = createAppClient({ baseUrl: BASE, fetchImpl });
   const s0 = await client.start('z2ui5_cl_smp_app_009');
   fail = true;
-  await rejects(client.act(s0.session, { values: { f4: 'Smith' }, event: 'BUTTON_SEND' }), /the backend refused the roundtrip - HTTP 500: Error: Void type: <Z_X>\nat y$/);
+  await rejects(client.act(s0.session, { values: { f4: 'Smith' }, event: 'BUTTON_SEND' }),
+    /the backend refused the roundtrip - HTTP 500: Error: Void type: <Z_X>\nat y\. session '.+' is out of sync: event BUTTON_SEND ran on the backend/);
   const after = client.describe(s0.session);
   assert.equal(after.session, s0.session);
   assert.equal(after.pending, undefined, 'the refused act rolled its values back');
@@ -1029,7 +1030,8 @@ test('one roundtrip at a time: a failed or refused act does not block the queue'
   let fail = true;
   const be = scripted((req, n, value) => {
     if (!value.S_FRONT.ID) return startAnswer();
-    if (fail) { fail = false; return { status: 500, body: 'boom' }; }
+    // a connection never made: nothing ran, the session takes the next act
+    if (fail) { fail = false; throw Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:1'), { code: 'ECONNREFUSED' }); }
     return eventAnswer(n);
   });
   const c = be.client();
@@ -1040,7 +1042,7 @@ test('one roundtrip at a time: a failed or refused act does not block the queue'
   const refused = c.act(s.session, { event: 'NOPE' });
   const second = c.act(s.session, { event: 'OTHER' });
   held.release();
-  await rejects(first, /HTTP 500: boom/);
+  await rejects(first, /the backend did not answer \(connect ECONNREFUSED/);
   await rejects(refused, /no action 'NOPE' on this screen/);
   assert.equal((await second).session, 'D3');
   assert.equal(be.posts[2].value.S_FRONT.ID, 'D1', 'the failed roundtrip adopted nothing: the next continues D1');
@@ -1368,6 +1370,52 @@ test('an event that may have run (timeout, cancel, a lost answer) leaves the ses
   const ls = await late.start('z_t');
   await rejects(late.act(ls.session, { event: 'CHECK', signal: ctl.signal }),
     /^cancelled by the caller after the backend had answered - nothing of the answer was adopted\. session '.+' is out of sync: event CHECK ran on the backend/);
+});
+
+/* How far a failed roundtrip got decides what the refusal says: a
+ * transport error before the body was written (`written: false` - a timeout
+ * while connecting or in the TLS handshake) ran nothing; an answer - an
+ * ABAP dump's 500, any other non-2xx, a body cut off after its status line
+ * (`answered: true`) - ran the event; a gateway's 502/503/504 may have. */
+test('what a failed roundtrip ran: nothing before the body was written, the event on any answer, maybe behind a gateway', async () => {
+  let mode = 'answer';
+  let n = 0;
+  const transport = async (req) => {
+    n += 1;
+    if (n === 1) return { status: 200, body: JSON.stringify(startAnswer()) };
+    if (mode === 'unwritten') throw Object.assign(new Error('The operation was aborted'), { name: 'AbortError', code: 'ABORT_ERR', written: false });
+    if (mode === 'unwritten-wrapped') throw new Error('the system did not answer', { cause: Object.assign(new Error('aborted'), { code: 'ABORT_ERR', written: false }) });
+    if (mode === 'cut') throw new Error('the system did not answer', { cause: Object.assign(new Error('aborted'), { code: 'ECONNRESET', answered: true }) });
+    if (mode === 'dump') return { status: 500, body: 'ABAP runtime error: COMPUTE_INT_ZERODIVIDE' };
+    if (mode === 'not-found') return { status: 404, body: 'no such service' };
+    if (mode === 'gateway') return { status: 504, body: 'Gateway Timeout' };
+    if (mode === 'logon') return { status: 401, body: 'rejected the logon' };
+    return { status: 200, body: JSON.stringify(eventAnswer(n)) };
+  };
+  const c = createAppClient({ transport, location: () => ({ origin: 'x', pathname: '/', search: '' }) });
+  const s = await c.start('z_t');
+  for (const m of ['unwritten', 'unwritten-wrapped', 'logon']) {
+    mode = m;
+    const e = await c.act(s.session, { event: 'CHECK' }).then(() => null, (x) => x);
+    assert.ok(e, m);
+    assert.doesNotMatch(e.message, /out of sync|after the request had been sent/, m);
+    assert.equal(e.sent, undefined, m);
+  }
+  mode = 'answer';
+  let at = (await c.act(s.session, { event: 'CHECK' })).session;
+  for (const [m, said, pattern] of [
+    ['dump', 'ran', /^the backend refused the roundtrip - HTTP 500: ABAP runtime error: COMPUTE_INT_ZERODIVIDE\. session '.+' is out of sync: event CHECK ran on the backend/],
+    ['not-found', 'ran', /HTTP 404: no such service\. session '.+' is out of sync: event CHECK ran on the backend/],
+    ['cut', 'ran', /^the backend did not answer \(the system did not answer\) after the request had been sent - .*\. session '.+' is out of sync: event CHECK ran on the backend/],
+    ['gateway', 'may have run', /HTTP 504: Gateway Timeout\. session '.+' is out of sync: event CHECK may have run on the backend/],
+  ]) {
+    mode = m;
+    await rejects(c.act(at, { event: 'CHECK' }), pattern, `${m}: ${said}`);
+    mode = 'answer';
+    await rejects(c.act(at, { event: 'CHECK' }), /^nothing was sent - session '.+' is out of sync/);
+    c.describe(at);
+    at = (await c.act(at, { event: 'CHECK' })).session;
+  }
 });
 
 /* The default transport read the answer whole (res.text()): a backend or a

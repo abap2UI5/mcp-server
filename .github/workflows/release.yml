@@ -90,8 +90,13 @@ jobs:
       # Node 22 ships npm 10.x, which has no OIDC support - it would fall
       # through to asking for a token and fail confusingly. Trusted publishing
       # needs 11.5.1 or newer.
+      #
+      # PINNED, not `@latest`: this job holds a publishing identity, and
+      # `@latest` hands whatever npm published this morning the right to run
+      # inside it. The same version abap2UI5/linter publishes with; raise the
+      # pin deliberately, like any other.
       - name: Use an npm that can publish via OIDC
-        run: npm install -g npm@latest
+        run: npm install -g npm@12.0.2
 
       - run: npm ci
 

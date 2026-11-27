@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **"May have run" says what a failed roundtrip ran.** A timeout or a
+  cancel before the request body was handed to the socket (still
+  connecting, in the TLS handshake, the pin refused) ran nothing: the
+  system transport (`nodeRequest`) now marks such a failure `written:
+  false`, and the session stays usable instead of out of sync. An answer
+  that is not a 2xx - an ABAP dump's 500 - ran the event (`'did'`), as does
+  an answer cut off after its status line and one over the system
+  transport's 32 MB cap (now an AgentError marked `sent: 'did'`, it was
+  "may have run"); a gateway's 502/503/504 may have. A refused logon (401)
+  and a token layer that still asks for a token ran nothing. Before, only
+  a transport error marked the session out of sync, so a 500 left it
+  usable although the backend had run the event.
+- **The release workflow pins npm** (`npm@12.0.2`, the version
+  abap2UI5/linter publishes with) instead of installing `npm@latest` in the
+  job that holds the publishing identity.
 - **Deprecated: the `mcp-server` bin.** The package installs three bins, and
   `mcp-server` is a name any other MCP server's package may install as well -
   in one project's `node_modules/.bin` the last install wins, and a
