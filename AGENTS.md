@@ -1466,7 +1466,20 @@ app tools over stdio (about 25 s). The agent snapshot's pure halves are
 the recorded sample sessions of `test/fixtures/agent/`, the contract shape)
 and `test/appclient.test.mjs` (the replay of those sessions, every
 validation path). CI (`.github/workflows/ci.yml`) runs `npm test`
-on every push/PR. **`bench/`** is abap2UI5-bench, a separate package (own
+on every push/PR, and its `browser` job runs the three files the other jobs
+skip - `test/interact-browser.test.mjs` and `test/mcp-app.test.mjs` with
+Playwright's Chromium installed, `test/vendor.test.mjs` with the protocol
+commit `lib/vendor/adaptive-cards/source.json` records fetched by sha
+(`PROTOCOL_HOME`) - and fails when any of them still skips a test. A test
+that cannot run says so with `t.skip(reason)`, never with a bare `return`
+that counts as a pass. **No wall-clock windows in a test**: `node --test`
+runs the files in parallel, and "took < 1000 ms" fails on a loaded runner
+without a bug. A speed test asks whether the work scales linearly
+(`scalesLinearly` / `scalesLinearlyAsync` in `test/helpers/timing.mjs`, n
+against 4n, from abap2UI5/linter's `test/timing.mjs`); a test of a cancel,
+a stop or a race asserts the order of events (a gate file the fake waits
+for, a marker the fake writes), with at most a lower bound, which load
+can only lengthen. **`bench/`** is abap2UI5-bench, a separate package (own
 `package.json`, not shipped, not in `npm test`) that measures agents with and
 without this server; [bench/README.md](bench/README.md) is its contract, and
 `bench-verify.yml` gates changes to it. Manual stdio driving, when a test is not enough:

@@ -259,18 +259,34 @@ test('buildBackend joins a same-mode call and fails fast on a conflicting mode',
  * own cancel: the request stayed open to the end of the build. The joiner
  * stops waiting on its cancel; the build goes on for the call that started it. */
 test('buildBackend: a joined call stops waiting on its own cancel and leaves the build running', async () => {
+  /* No clocks: the build runs until the test releases it (a file appearing),
+   * the joiner cancels once it has HEARD the build running, and what is
+   * asserted is the order - the joiner answered while the build was still
+   * going. A "< 1000 ms" window failed on a loaded runner without a bug. */
+  const gate = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui5-gate-'));
+  const release = path.join(gate, 'release');
   await withFakeRepos(
-    'console.log("slow build"); setTimeout(() => process.exit(0), 1500);',
+    `import fs from 'fs'; console.log("slow build"); const t = setInterval(() => { if (fs.existsSync(${JSON.stringify(release)})) { clearInterval(t); process.exit(0); } }, 20);`,
     {},
     async () => {
       const first = new AbortController();
       const p1 = buildBackend({ mode: 'full', signal: first.signal });
+      let buildSettled = false;
+      p1.then(() => { buildSettled = true; }, () => { buildSettled = true; });
       const joiner = new AbortController();
-      const p2 = buildBackend({ mode: 'full', signal: joiner.signal });
-      const t0 = Date.now();
-      setTimeout(() => joiner.abort(), 100);
-      const left = await p2;
-      assert.ok(Date.now() - t0 < 1000, `the joiner answered after ${Date.now() - t0} ms`);
+      const p2 = buildBackend({ mode: 'full', signal: joiner.signal, onLine: (line) => { if (/slow build/.test(line)) joiner.abort(); } });
+      // a deadlock breaker, not a bound: a joiner that ignored its cancel would
+      // wait for a build that waits for the test - this ends it, and the
+      // assertion below then fails on the order instead of the run hanging
+      const backstop = setTimeout(() => fs.writeFileSync(release, ''), 30000);
+      let left;
+      try {
+        left = await p2;
+        assert.equal(buildSettled, false, 'the joiner answered while the build was still running');
+      } finally {
+        clearTimeout(backstop);
+        fs.writeFileSync(release, ''); // whatever happened: the build may end
+      }
       assert.equal(left.ok, false);
       assert.equal(left.aborted, true);
       assert.equal(left.joined, true);
@@ -288,6 +304,7 @@ test('buildBackend: a joined call stops waiting on its own cancel and leaves the
       await p3;
     },
   );
+  fs.rmSync(gate, { recursive: true, force: true });
 });
 
 /* build_backend's progress notifications are the build's lines through

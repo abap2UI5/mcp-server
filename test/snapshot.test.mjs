@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { scalesLinearly } from './helpers/timing.mjs';
 import { parseViewXml, parseBinding, evalExpression, parseWire, describeArg, controlName } from '../lib/viewxml.mjs';
 import {
   buildSnapshot, analyzeScreen, applyResponse, emptyState, nameOfPath, FRONTEND_EVENTS, SNAPSHOT_VERSION, BINDING_CALL_EVENT,
@@ -105,10 +106,12 @@ test('parseWire reads eB, eBP and eF handlers and describes every argument kind'
 test('parseWire takes linear time over a run of blanks after a parenthesis, and still takes one semicolon', () => {
   // \)\s*;?\s*$ retried both \s* splits of the run after every ')'
   const blanks = ' '.repeat(100000);
-  const t0 = Date.now();
   assert.equal(parseWire(`.eB(['X'])${blanks}x`), null);
   assert.equal(parseWire(`.eB(['X']${') '.repeat(50000)}x`), null);
-  assert.ok(Date.now() - t0 < 1000, `took ${Date.now() - t0} ms`);
+  for (const make of [(n) => `.eB(['X'])${' '.repeat(n)}x`, (n) => `.eB(['X']${') '.repeat(n / 2)}x`]) {
+    const linear = scalesLinearly(make, parseWire, 25000);
+    assert.ok(linear.ok, `n: ${linear.small} ms, 4n: ${linear.big} ms - not linear`);
+  }
   for (const ok of [".eB(['X'])", ".eB(['X']);", ".eB(['X']) \t;", ` .eB(['X'])${blanks};${blanks}`, ".eB(['X'], 'a)') ;"]) assert.equal(parseWire(ok)?.event, 'X', JSON.stringify(ok.slice(0, 30)));
   for (const no of [".eB(['X']);;", ".eB(['X']) ; ;", ".eB(['X'])x", ".eB(['X']) ;x"]) assert.equal(parseWire(no), null, no);
 });
@@ -756,10 +759,10 @@ test('an out-of-range character reference stays as written; model markup of uncl
   const at = (xml, model) => buildSnapshot({ state: applyResponse(emptyState(), { S_FRONT: { ID: '1', APP: 'Z_A', S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'display', 'MAIN', xml]] } }, MODEL: model }) });
   const snap = at(view('<Text text="a &#99999999; b &#x110000; c &#x41;"/>'), {});
   assert.match(JSON.stringify(snap), /a &#99999999; b &#x110000; c A/);
-  const started = Date.now();
   const big = at(view('<FormattedText htmlText="{/H}"/>'), { H: `${'<'.repeat(80000)}<b>x</b>` });
-  assert.ok(Date.now() - started < 1500, `${Date.now() - started} ms`);
   assert.ok(big);
+  const linear = scalesLinearly((n) => ({ H: `${'<'.repeat(n)}<b>x</b>` }), (model) => at(view('<FormattedText htmlText="{/H}"/>'), model), 20000);
+  assert.ok(linear.ok, `n: ${linear.small} ms, 4n: ${linear.big} ms - not linear`);
 });
 
 /* The walk is recursive: a view nested 2000 levels deep threw a RangeError

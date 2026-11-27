@@ -27,6 +27,16 @@
 # of run_app/interact_app and the render half of validate_view. They need UI5
 # (the CDN, or a corpus' @openui5 packages) and a Chromium; the screenshot
 # loop - half of what this server is for - is therefore verified by hand.
+#
+#   browser — the tests the other two jobs SKIP for want of a Chromium or a
+#           protocol checkout: test/interact-browser.test.mjs (the four
+#           page actions in a real page), test/mcp-app.test.mjs (the MCP Apps
+#           page in Chromium under the default CSP) and test/vendor.test.mjs
+#           (the vendored renderer regenerated from the protocol commit its
+#           source.json records). Playwright's Chromium is installed, the
+#           protocol commit is fetched by its sha, and the job fails when any
+#           of the three files still skips a test - a job that silently
+#           covers nothing would be worse than none.
 name: ci
 
 on:
@@ -112,3 +122,61 @@ jobs:
         working-directory: mcp-server
         env:
           A2UI5_MCP_NETWORK_TESTS: '1'
+
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: mcp-server
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+      - run: npm ci
+        working-directory: mcp-server
+      - name: Get Playwright version
+        id: playwright-version
+        working-directory: mcp-server
+        run: echo "version=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-chromium-${{ steps.playwright-version.outputs.version }}
+      - name: Install Playwright browser
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        working-directory: mcp-server
+        run: npx playwright install --with-deps chromium
+      - name: Install Playwright OS dependencies
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        working-directory: mcp-server
+        run: npx playwright install-deps chromium
+      # the commit lib/vendor/adaptive-cards/source.json records, fetched by
+      # its sha (it need not be on protocol's main - a squash merge leaves the
+      # commit only on its pull request's ref, which GitHub still serves)
+      - name: Fetch the protocol commit the vendored renderer was made from
+        run: |
+          set -euo pipefail
+          COMMIT=$(node -p "require('./mcp-server/lib/vendor/adaptive-cards/source.json').commit")
+          git init -q protocol
+          git -C protocol remote add origin https://github.com/abap2UI5/protocol
+          git -C protocol fetch -q --depth 1 origin "$COMMIT"
+          git -C protocol cat-file -e "$COMMIT^{commit}"
+          echo "protocol at $COMMIT"
+      - name: The browser and vendor tests run, and none of them skips
+        working-directory: mcp-server
+        env:
+          PROTOCOL_HOME: ${{ github.workspace }}/protocol
+        run: |
+          set -euo pipefail
+          node --test --test-reporter=spec --test-reporter-destination=stdout \
+            --test-reporter=tap --test-reporter-destination=/tmp/browser.tap \
+            test/interact-browser.test.mjs test/mcp-app.test.mjs test/vendor.test.mjs
+          if ! grep -q '^# skipped 0$' /tmp/browser.tap; then
+            grep -E '# SKIP|^# skipped' /tmp/browser.tap >&2 || true
+            echo "a browser or vendor test skipped itself - the job exists so that none does" >&2
+            exit 1
+          fi
