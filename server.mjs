@@ -50,7 +50,7 @@ import { searchCapabilities, capabilitySummary } from './lib/capabilities.mjs';
 import { searchExamples, exampleSummary, catalogueFiles, findExample } from './lib/examples.mjs';
 import { searchPitfalls } from './lib/pitfalls.mjs';
 import { readGuide, sliceGuide, guideChapters, guideFile, GUIDE_PATH } from './lib/guide.mjs';
-import { readApiParsed, searchApi, apiSummary, apiFile, API_PATH } from './lib/api.mjs';
+import { readApiParsed, searchApi, apiSummary, apiFile, API_PATH, splitByName } from './lib/api.mjs';
 import { parseSizes, screenshotSource } from './lib/screenshot.mjs';
 import { resolveSamplesControls, resolveAppTemplate, importViewCheck, SERVER_ROOT, workspaceRoot } from './lib/repos.mjs';
 import { searchDocs, docsRoot } from './lib/docs.mjs';
@@ -67,6 +67,7 @@ import { TOOLS } from './lib/tools.mjs';
 import { annotate, TOOL_ANNOTATIONS, SYSTEM_TOOL_ANNOTATIONS } from './lib/annotations.mjs';
 import { serverInstructions } from './lib/instructions.mjs';
 import { explainRemoved } from './lib/removed-api.mjs';
+import { classNameFromSource } from './lib/deploy.mjs';
 import { RESOURCES, RESOURCE_TEMPLATES, GUIDE_CHAPTER_TEMPLATE, readResource } from './lib/resources.mjs';
 import { PROMPTS, getPrompt } from './lib/prompts.mjs';
 import { missingSiblingMessage, missingLocalSiblingMessage } from './lib/siblings.mjs';
@@ -981,8 +982,20 @@ async function handle(name, args = {}, ctx = {}) {
        * against the answer budget: "e" matched almost the whole interface,
        * ~75,000 characters. An entry is never cut (a signature belongs with
        * its documentation). */
-      const { notes, groups } = paged(found, '(same query and kind)');
-      return text({ matches: total, ...notes, source: 'abap2UI5/' + API_PATH.join('/'), ...groups });
+      /* What the NAME answers comes whole; what only mentions the query in
+       * its docs comes as one line each (lib/api.mjs splitByName). */
+      const { named, mentioned } = splitByName(found, args.query);
+      const { notes, groups } = paged(named, '(same query and kind)');
+      return text({
+        matches: total,
+        ...notes,
+        source: 'abap2UI5/' + API_PATH.join('/'),
+        ...groups,
+        ...(mentioned.length ? {
+          mentionedIn: mentioned,
+          mentionedHint: 'these only mention the query in their documentation - ask for one by its name for the whole entry',
+        } : {}),
+      });
     }
     case 'generation_rules': {
       const miss = missingSibling('samples-controls');
@@ -1130,6 +1143,15 @@ async function handle(name, args = {}, ctx = {}) {
     case 'deploy_app': {
       const miss = missingSandbox();
       if (miss) return miss;
+      // the name is in the source: taken from there when it was left out
+      if ((args.class_name === undefined || args.class_name === null || args.class_name === '') && typeof args.abap_source === 'string') {
+        const inferred = classNameFromSource(args.abap_source);
+        if (!inferred) {
+          return toolError('class_name is missing and the source defines no class (no `CLASS <name> DEFINITION`) - '
+            + 'pass the whole class source, or class_name');
+        }
+        args = { ...args, class_name: inferred };
+      }
       const res = deployApp({
         className: args.class_name,
         source: args.abap_source,
@@ -1546,6 +1568,9 @@ async function handle(name, args = {}, ctx = {}) {
       });
     }
     case 'verify_app': {
+      if ((args.class_name === undefined || args.class_name === null || args.class_name === '') && typeof args.abap_source === 'string') {
+        args = { ...args, class_name: classNameFromSource(args.abap_source) || '' };
+      }
       /* Composed out of the single tools' handlers, so a stage answers
        * exactly what its tool answers and there is one implementation of
        * each. A stage's tool error is the stage's failure; the loop stops
