@@ -66,6 +66,7 @@ import { closeLintWorker } from './lib/lint-host.mjs';
 import { TOOLS } from './lib/tools.mjs';
 import { annotate, TOOL_ANNOTATIONS, SYSTEM_TOOL_ANNOTATIONS } from './lib/annotations.mjs';
 import { serverInstructions } from './lib/instructions.mjs';
+import { explainRemoved } from './lib/removed-api.mjs';
 import { RESOURCES, RESOURCE_TEMPLATES, GUIDE_CHAPTER_TEMPLATE, readResource } from './lib/resources.mjs';
 import { PROMPTS, getPrompt } from './lib/prompts.mjs';
 import { missingSiblingMessage, missingLocalSiblingMessage } from './lib/siblings.mjs';
@@ -1153,7 +1154,9 @@ async function handle(name, args = {}, ctx = {}) {
             + 'dev sandbox; deploy again to lint it, or remove_app to take it back out');
         }
         if (!reply.lint.ok) {
-          reply.hint = 'fix the lint findings and deploy again; build_backend is only worth running on a clean lint';
+          const removed = await explainRemoved(reply.lint);
+          reply.hint = 'fix the lint findings and deploy again; build_backend is only worth running on a clean lint'
+            + (removed ? ` - ${removed}` : '');
         }
       }
       if (!reply.lint || reply.lint.ok) {
@@ -1186,7 +1189,11 @@ async function handle(name, args = {}, ctx = {}) {
           return toolError('deploy_folder cancelled during the lint - the objects were already written to the dev sandbox; '
             + 'deploy the folder again to lint them');
         }
-        if (!reply.lint.ok) reply.hint = 'fix the lint findings and deploy the folder again; build_backend is only worth running on a clean lint';
+        if (!reply.lint.ok) {
+          const removed = await explainRemoved(reply.lint);
+          reply.hint = 'fix the lint findings and deploy the folder again; build_backend is only worth running on a clean lint'
+            + (removed ? ` - ${removed}` : '');
+        }
       }
       if (!reply.lint || reply.lint.ok) {
         reply.next = res.apps.length

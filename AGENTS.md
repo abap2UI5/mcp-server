@@ -1578,6 +1578,15 @@ legitimately slower.
   called no tool. They carry the order of the loop and the renames a model
   gets wrong most, and nothing else: every agent pays for them in every turn.
   `test/instructions.test.mjs` holds every tool they name to the surface.
+- **A "not found" on removed API names the replacement** -
+  `lib/removed-api.mjs`. deploy_app and deploy_folder hand their abaplint
+  findings through `explainRemoved`: a `Method "x" not found` / `Class x not
+  found` whose name is in the docs' `docs/public/api/deprecations.json`
+  (the docs checkout, else the mirror; the file the linter vendors too)
+  carries `removed: { status, replacement, since, note }`, and the hint says
+  so. An app written from memory used to get `Method "_bind_edit" not found`
+  and nothing else - a typo and an API that left the framework looked the
+  same. Nothing answers, nothing is added: never a guess.
 - **The annotations decide what a client runs unasked** -
   `lib/annotations.mjs` (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
   `openWorldHint`), one map per surface because `app_act` on a real system can
