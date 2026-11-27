@@ -157,7 +157,7 @@ via the committed [`.mcp.json`](.mcp.json); the
 
 **Level 0 — no checkout at all.** The knowledge tools (`app_guide`,
 `api_reference`, `pitfalls`, `capabilities`, `examples`, `read_example`,
-`docs_search`, `scaffold_app`, `generation_rules`) read committed files, so
+`docs_search`, `addons`, `scaffold_app`, `generation_rules`) read committed files, so
 when no checkout resolves and no env var is set they read them from GitHub
 instead: the files land in a per-user cache (`<tmp>/abap2ui5-mcp-remote`, a
 day at a time - used only while it is a directory of the user's own, created
@@ -228,6 +228,7 @@ fix it.
 | `examples` | Search the three sample catalogues, verification status and all — answers with a class to read, never a snippet to trust | any of samples / samples-controls / samples-stack (or the GitHub mirror) |
 | `read_example` | Read the source of a sample an `examples` hit named — from the checkout, or fetched from GitHub | the sample's repository (or the GitHub mirror) |
 | `docs_search` | Full-text search over the documentation site's pages: page, heading, snippet and the published URL | docs |
+| `addons` | Is there an addon for this? The catalogue of [abap2UI5-addons](https://abap2ui5-addons.github.io/): grouped, ranked against a `query`, or one `repo` in full — entry-point classes, usage snippet, the install order with its dependencies resolved | abap2ui5-addons.github.io (or the GitHub mirror) |
 | `generation_rules` | The rulebook for porting a UI5 demo-kit sample into samples-controls | samples-controls |
 | `pitfalls` | The defects a green run does not catch: `{ area: "abap" }` and `{ area: "view" }` | abap2UI5 |
 | `scope_of` | In/out-of-scope verdict for a UI5 control | samples-controls + an OpenUI5 checkout |
@@ -285,7 +286,7 @@ larger than about 60,000 characters. The tools whose answers grow with
 upstream content page instead of cutting: `matches` counts every hit,
 `returned` the page, and `more` names the exact call for the rest
 (`offset` - `examples`, `capabilities`, `api_reference`, `app_guide`,
-`pitfalls`, `docs_search`; `files` - `scaffold_app`; `from_line` -
+`pitfalls`, `docs_search`, `addons`; `files` - `scaffold_app`; `from_line` -
 `read_app`, `read_example`; `build_log` names its next `offset` under
 `cut`). A list that is shortened rather than paged says so in a `...Cut`
 field (`findingsCut`, `rulesCut`, `errorsCut`, ...), and a last-line backstop trims anything that still
@@ -606,7 +607,8 @@ descriptions alone. Each renders an orchestration script over the tools above an
 duplicates none of their content:
 
 - **`build-an-abap2ui5-app`** (argument: `task`, what the app should do) —
-  orient with `examples`/`capabilities`, learn the shape from `app_guide`,
+  orient with `examples`/`addons`/`capabilities` (has somebody built it
+  already - as a sample to read, or as an addon to call), learn the shape from `app_guide`,
   write the class, iterate through `validate_view`/`screenshot_view` in
   seconds, prove it with `deploy_app` → `build_backend` → `run_app`, close
   with `pitfalls`.

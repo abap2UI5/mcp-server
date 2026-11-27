@@ -54,6 +54,7 @@ import { readApiParsed, searchApi, apiSummary, apiFile, API_PATH } from './lib/a
 import { parseSizes, screenshotSource } from './lib/screenshot.mjs';
 import { resolveSamplesControls, resolveAppTemplate, importViewCheck, SERVER_ROOT, workspaceRoot } from './lib/repos.mjs';
 import { searchDocs, docsRoot } from './lib/docs.mjs';
+import { readAddons, findAddon, addonsOverview, addonsSearchAnswer, addonDetail } from './lib/addons.mjs';
 import { scaffold, readSpec, validClassName, classNameRule, templateFiles, SPEC_FILE } from './lib/scaffold.mjs';
 import { agentTargetProblem, planAgentSetup, writePlan, pinProblems, pinWarning, agentSetupNextSteps } from './lib/agent-setup.mjs';
 import { fixSource } from './lib/fixview.mjs';
@@ -993,6 +994,41 @@ async function handle(name, args = {}, ctx = {}) {
         entries,
         next: 'fetch the `markdown` URL of the best hit for the whole page — or read docs/<path>.md in the checkout',
       });
+    }
+    case 'addons': {
+      const miss = missingSibling('abap2ui5-addons.github.io');
+      if (miss) return miss;
+      const catalogue = readAddons();
+      // the checkout can be there and the catalogue not what this server reads:
+      // a layout change upstream. Named by path, never answered as "no addons".
+      if (!catalogue || catalogue.problem) {
+        return toolError(`the addons catalogue checkout at ${catalogue && catalogue.root} cannot be read: ${catalogue && catalogue.problem} — update it (git pull)`);
+      }
+      const source = isRemoteCheckout(catalogue.root) ? 'abap2UI5-addons/abap2ui5-addons.github.io (GitHub mirror)' : catalogue.root;
+      const repo = String(args.repo ?? '').trim();
+      if (repo) {
+        const addon = findAddon(catalogue.addons, repo);
+        if (!addon) {
+          return toolError(`no addon '${repo.slice(0, 80)}' in the catalogue — it has: ${catalogue.addons.map((a) => a.repo).join(', ')}`);
+        }
+        return text({ ...addonDetail(catalogue, addon), source });
+      }
+      const query = String(args.query ?? '').trim();
+      if (query) {
+        const answer = addonsSearchAnswer(catalogue, query);
+        if (!answer.entries) return text({ ...answer, source });
+        const { taken, notes } = pageWithin(answer.entries, args, '(same query)');
+        return text({ matches: answer.matches, ...notes, source, entries: taken, next: answer.next });
+      }
+      /* One line per addon fits one answer many times over today; should the
+       * catalogue ever outgrow it, the class lists go first and the answer
+       * says so - `repo` and `query` still carry them. */
+      const overview = addonsOverview(catalogue);
+      if (sizeOf({ ...overview, source }) > ANSWER_BUDGET - 5000) {
+        for (const g of overview.groups) g.addons = g.addons.map(({ entryPoints, ...rest }) => rest);
+        overview.entryPointsCut = 'the catalogue is past one answer, so the entry points (the classes app code calls) were left out - addons { repo } or { query } carries them';
+      }
+      return text({ ...overview, source });
     }
     case 'pitfalls': {
       // the catalogues live in the abap2UI5 checkout, not in the corpus

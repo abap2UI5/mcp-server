@@ -105,6 +105,18 @@
         }
       ]
     },
+    "addons": {
+      "repository": "abap2UI5-addons/abap2ui5-addons.github.io",
+      "why": "The catalogue of abap2UI5-addons, committed in the repository of the addons site: src/data/catalog.ts places every addon in a group, src/data/addons/<repo>.json carries its facts (what it is for, the classes app code calls, what it depends on, how it is installed). The addons tool reads both.",
+      "dirs": [
+        "abap2ui5-addons.github.io",
+        "abap2UI5-addons.github.io"
+      ],
+      "env": [
+        "ADDONS_HOME"
+      ],
+      "probe": "src/data/catalog.ts"
+    },
     "viewCheck": {
       "repository": "abap2UI5/linter",
       "why": "The abap2UI5 linter: the property and render gates, imported through its package.json exports map.",

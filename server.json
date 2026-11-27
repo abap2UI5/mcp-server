@@ -63,6 +63,12 @@
           "isRequired": false
         },
         {
+          "name": "ADDONS_HOME",
+          "description": "abap2UI5-addons/abap2ui5-addons.github.io checkout whose catalogue the addons tool reads. Default: ../abap2ui5-addons.github.io, else the GitHub mirror.",
+          "format": "filepath",
+          "isRequired": false
+        },
+        {
           "name": "ABAP_CLOUD_GUI_HOME",
           "description": "abap2UI5-addons/abap-cloud-gui checkout (with npm ci done) whose report2UI5 converter migrate_report runs. Default: ../abap-cloud-gui; no mirror.",
           "format": "filepath",

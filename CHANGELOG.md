@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- **`addons`: is there an addon for this?** An agent building an app
+  through this server never learned that github.com/abap2UI5-addons exists,
+  and hand-built what an addon already is - a confirm, select, input or file
+  dialog (`abap2UI5-addons/popups`, classes `z2ui5_cl_popup_*`), a user's
+  table layouts (`layout-management`). The new tool reads the catalogue the
+  addons site is built from (`src/data/catalog.ts` and
+  `src/data/addons/<repo>.json` of abap2UI5-addons/abap2ui5-addons.github.io)
+  live: without arguments every addon, grouped, one line each (`useWhen`,
+  else the tagline, and the `entryPoints` app code calls); `query` ranks the
+  addons against keywords - any term may match, weighted by the field it
+  hits, words matched by their stem, paged with `offset`/`more`; `repo`
+  answers one addon in full with its usage snippet and `install.order`, the
+  abapGit repositories to pull with `dependsOn` resolved transitively (the
+  framework first, a dependency outside the catalogue kept and marked), and
+  the `npm run add-addon -- <repo>` hint for a project made from
+  app-template. The three fields written for agents are optional upstream:
+  without them the tool answers from the rest, and a missing `dependsOn` is
+  read out of the requirements text and marked `dependsOnInferred`. Resolved
+  like every sibling - `ADDONS_HOME`, `../abap2ui5-addons.github.io`, else
+  the read-only GitHub mirror, whose file list follows the catalogue - and
+  shown by `setup_status`. The `build-an-abap2ui5-app` prompt names it in
+  its first step. New: `lib/addons.mjs`, `lib/addons-catalog.mjs`,
+  `test/addons.test.mjs`, the `addons` entry of `lib/repo-dirs.json`.
+
 - **The agent client speaks protocol 3 - abap2UI5 1.151.0 - and still
   protocol 2.** `lib/appclient.mjs` refused every answer of 1.151.0 ("the
   backend answered protocol 3, this client speaks protocol 2"), so

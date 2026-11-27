@@ -53,6 +53,7 @@ reads it live like a checkout.
 | `SAMPLES_STACK_HOME` | `../samples-stack`, `../abap2UI5-samples-stack` | `catalogue.json` (preferred) + `SAMPLES.md` (fallback) — the stack-dependent catalogue (OData, RAP, APC, launchpad) |
 | `APP_TEMPLATE_HOME` | `../app-template`, `../abap2UI5-app-template` | `template.json` and the files it lists — what `scaffold_app` serves and renames, and what `add_agent_setup` writes into an existing project by the `agentSetup` key (both are dead without this checkout or its mirror) |
 | `DOCS_HOME` | `../docs` | `docs/**/*.md` — the documentation site's sources, searched live by `docs_search` |
+| `ADDONS_HOME` | `../abap2ui5-addons.github.io` (also spelled `abap2UI5-addons.github.io`) | `src/data/catalog.ts` (the groups and which repository sits in which) and `src/data/addons/<repo>.json` (the facts of each) — the catalogue of abap2UI5-addons the `addons` tool reads; mirrored when absent |
 | `ABAP_CLOUD_GUI_HOME` | `../abap-cloud-gui` | `tools/report2ui5/lib/{convert,textpool,report}.mjs` (`tools/report2cloud/lib` in the addon's 1.0.0) — the report converter `migrate_report` imports in-process, with the checkout's own `node_modules` (`npm ci` there; LOCAL only, no mirror - `resolveCloudGui`, not in `RESOLVERS`); with `deploy: true` also its `src/01`, and the popups beside it (`POPUPS_HOME`, else `.deps/popups` of the checkout, `../popups` beside it, its `build/popups` - in that order, `resolvePopups`) |
 | `AI_VIEW_CHECK_HOME` | `../linter` (legacy aliases: `../abap2UI5-linter`, `../ai-view-check`) — which for an npm/npx install is ALSO where npm hoists the declared peer `@abap2ui5/linter` (`node_modules/@abap2ui5/{mcp-server,linter}`), then an INSTALLED one elsewhere: `<cwd>/node_modules/…` (app-template's devDependency), the server's own `node_modules/…`, then wherever Node's resolver finds the package from `lib/repos.mjs` (`viewCheckCandidates`, `nodeResolvedViewCheck`) | `validate_view` + `fix_view` + `screenshot_view`: dynamic import of the linter's package `exports` entries `.`, `./findings`, `./config`, `./rule-docs` (via `importViewCheck`) |
 
@@ -117,7 +118,8 @@ answer format, below), the system mode's `A2UI5_MCP_SYSTEM_URL` / `_USER` /
 
 The knowledge tools read committed FILES and nothing else: the guide, the
 interface, the two catalogues of pitfalls, the capability map, the porting
-brief, three sample catalogues, the docs tree, the template. None of that
+brief, three sample catalogues, the docs tree, the template, the addons
+catalogue. None of that
 needs an npm install or a build, and yet every one of those tools was dead
 until three to six repositories had been cloned next to this one — in a fresh
 project that is the whole first hour. So `lib/remote.mjs` gives the cheap half
@@ -931,6 +933,26 @@ the sibling each tool is dead without, and that column must keep saying what
 this section says. `test/missing-siblings.test.mjs` pins this contract per
 tool by pointing every env var at a nonexistent directory.
 
+**`addons`** (`lib/addons.mjs`, the leaf `lib/addons-catalog.mjs`) answers
+"is there an addon for this?" from the catalogue of abap2UI5-addons - the one
+question none of the other knowledge tools could answer, so an agent hand-built
+the confirm dialog `z2ui5_cl_popup_to_confirm` already is. Three shapes, like
+its neighbours: no argument - the catalogue grouped, one line per addon
+(`useWhen`, else the tagline; `entryPoints`); `query` - ranked, a match on ANY
+term (a question is a sentence, and an AND over its words finds nothing),
+weighted by the field it hits and matched by stem; `repo` - one addon in full,
+with `install.order` (the framework, then every `dependsOn` after its own,
+resolved transitively, a dependency outside the catalogue kept and marked) and
+the `npm run add-addon -- <repo>` hint for a project made from app-template.
+The three fields written for agents (`useWhen`, `entryPoints`, `dependsOn`) are
+OPTIONAL upstream and the tool answers without them; a missing `dependsOn` is
+read out of the requirements text and says `dependsOnInferred`. It reads the
+RAW files, not the site's published `addons.json` projection: the mirror
+fetches committed files of a repository, and a built page is not one. What it
+cannot do is make an addon available in the local sandbox - the description
+says so, and `migrate_report { deploy: true }` stays the one place that
+brings addon classes (the popups) into a build.
+
 `examples` is the ONE exception and deliberately so: it reads three
 catalogues, and one of them missing is not a reason to refuse the other two.
 It answers from what it can read, names what it could not under
@@ -1078,6 +1100,24 @@ changes upstream, this repo must change in the same breath:
   answers no release list of tables and APIs any more. With `deploy: true` also the layout `src/01` and the popup set of
   the addon's `unit.yaml` (`POPUP_FILES`). A renamed export or a moved file
   over there is a broken `migrate_report` here, said by path.
+- abap2UI5-addons/abap2ui5-addons.github.io: **`src/data/catalog.ts`** and
+  **`src/data/addons/<repo>.json`** - the catalogue `addons` reads.
+  catalog.ts is TypeScript read as TEXT (`parseCatalog` in
+  `lib/addons-catalog.mjs`): the `groups` array literal, each group from its
+  `id: "..."` to the next with `title` and `lead`, each entry a flat
+  `{ repo: "...", site?: "...", org?: "..." }` object with string literals.
+  Computed entries, a spread or a renamed key over there are groups this
+  server does not see - reported ("names no group"), and the mirror then
+  refuses to hydrate rather than cache an empty catalogue. Of the facts JSON
+  it reads `title`, `tagline`, `summary`, `features`, `requirements`,
+  `install.abapgit_url` / `install.notes`, `usage`, `cloud`, `nw702`,
+  `status` and the optional `useWhen`, `entryPoints`, `dependsOn`
+  (`"<org>/<repo>"`, the framework not named); a facts file that is missing
+  or not JSON costs that addon its facts, never the catalogue. The mirror
+  lists the facts files off the catalogue (`plan` in `lib/remote.mjs`), the
+  way it lists the template's files off template.json. The hint the tool
+  gives, `npm run add-addon -- <repo>`, is app-template's script: a rename
+  there is a stale sentence here.
 - docs: the `docs/` markdown tree (everything but `.vitepress`, `public` and
   `node_modules` is a page) and the **published URL scheme** its
   `scripts/generate-llms.mjs` derives — `https://abap2ui5.github.io/docs/<path>`
@@ -1441,7 +1481,7 @@ legitimately slower.
   a tool result over 25,000 tokens and the agent then sees nothing at all.
   `lib/budget.mjs` (`ANSWER_BUDGET`, about 60,000 characters) is what the
   tools that can grow past it page against — `scaffold_app` (`files`),
-  `pitfalls`, `app_guide`, `examples`, `capabilities` and `api_reference`
+  `pitfalls`, `app_guide`, `examples`, `capabilities`, `addons` and `api_reference`
   (`offset`, all but `pitfalls` with `limit`; `app_guide` and `pitfalls`
   by chapter / section, never cut) — and each page names the arguments that fetch
   the rest; `read_app` and `read_example` (`from_line`) and `build_log` (`offset`, its `cut`
@@ -1463,7 +1503,8 @@ legitimately slower.
   `lines` and `next` were taken before it paged) and answer a `from_line`
   past the end with `pastEnd`; a list that is cut rather than paged says
   what was left out in a `...Cut` sentence (`findingsCut`, `rulesCut`,
-  `remainingCut`, `fixedCut`, `errorsCut`, `screenshotCut`, `build_log`'s
+  `remainingCut`, `fixedCut`, `errorsCut`, `screenshotCut`, `entryPointsCut`
+  (`addons` without arguments), `build_log`'s
   `cut`; the backstop's `__answerGuardCut`). Older names outside it, kept
   because a client reads them: `scaffold_app`'s `remaining`,
   `migrate_report`'s `files_left_out` (its fields are snake_case),
@@ -1550,5 +1591,6 @@ legitimately slower.
 | [abap2UI5](https://github.com/abap2UI5/abap2UI5) | Runtime substrate: transpiled backend + express server — and the client API `api_reference` parses |
 | [app-template](https://github.com/abap2UI5/app-template) | The starter project `scaffold_app` serves and renames, and the agent setup `add_agent_setup` adds to an existing project, both executing the template's own `template.json` (`APP_TEMPLATE_HOME`) |
 | [docs](https://github.com/abap2UI5/docs) | The documentation site `docs_search` reads, in source form |
+| [abap2ui5-addons.github.io](https://github.com/abap2UI5-addons/abap2ui5-addons.github.io) | The addons site, whose committed `src/data` is the catalogue `addons` reads (`ADDONS_HOME`) |
 | [abap2UI5-linter](https://github.com/abap2UI5/linter) | `validate_view` implementation (imported via its package `exports` map) |
 | [vscode-extension](https://github.com/abap2UI5/vscode-extension) | Registers this server for MCP clients in the editor (`src/mcp.ts`), and vendors `lib/appclient.mjs` for its own system server - the editor-side counterpart of the system mode |

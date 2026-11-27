@@ -118,6 +118,7 @@ const isolated = (extra = {}) => {
     APP_TEMPLATE_HOME: path.join(NOWHERE, 'app-template'),
     DOCS_HOME: path.join(NOWHERE, 'docs'),
     ABAP_CLOUD_GUI_HOME: path.join(NOWHERE, 'abap-cloud-gui'),
+    ADDONS_HOME: path.join(NOWHERE, 'abap2ui5-addons.github.io'),
     A2UI5_MCP_OFFLINE: '1',
     A2UI5_MCP_REMOTE: '0',
     A2UI5_MCP_WORKSPACE: path.join(ws, 'workspace'),

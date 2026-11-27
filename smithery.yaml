@@ -33,6 +33,9 @@ startCommand:
       DOCS_HOME:
         type: string
         description: "abap2UI5/docs checkout that docs_search reads. Default: ../docs, else the GitHub mirror."
+      ADDONS_HOME:
+        type: string
+        description: "abap2UI5-addons/abap2ui5-addons.github.io checkout whose catalogue the addons tool reads. Default: ../abap2ui5-addons.github.io, else the GitHub mirror."
       ABAP_CLOUD_GUI_HOME:
         type: string
         description: "abap2UI5-addons/abap-cloud-gui checkout (with npm ci done) whose report2UI5 converter migrate_report runs. Default: ../abap-cloud-gui; no mirror."
