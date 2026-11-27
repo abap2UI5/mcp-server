@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **run_unit_tests waits for build_backend like a backend start does.** A
+  run during a build loaded the output the build was replacing - on the npm
+  backend apps/ is swapped for the fresh build at its end. It is now
+  refused while a build runs, with the backend start's sentence (`build_backend
+  is running — run the unit tests once it has finished (...)`).
 - **A cancelled run_app / interact_app stops where it is.** An abort while
   the backend was starting, the browser launching or the context being made
   was not looked at until the boot had run its course - openPage attached
