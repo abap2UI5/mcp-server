@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createAppClient, buildDelta, errorText, AgentError, PROTOCOL, PROTOCOLS, EARLIER_IDS, headerOf, validContextId } from '../lib/appclient.mjs';
+import { createAppClient, buildDelta, errorText, AgentError, PROTOCOL, PROTOCOLS, EARLIER_IDS, headerOf, validContextId, fetchTransport, RESPONSE_MAX_BYTES } from '../lib/appclient.mjs';
 import { setAt } from '../lib/snapshot.mjs';
 
 const FIX = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'agent');
@@ -582,6 +582,47 @@ test('the pick, single select: the picked row selected, the previous selection c
   await client.act(s.session, { event: 'OK', row: 2 });
   assert.deepEqual(bodies[1].S_FRONT.T_EVENT_ARG, ['/T/2', 'b2', '20', 'a2', '/T/2', 'a2', 'Active', 1, null]);
   assert.deepEqual(bodies[1].MODEL, { T: { __delta: { 1: { SEL: false }, 2: { SEL: true } } } });
+});
+
+/* The ternary argument is read by a linear scan: a regex with a lazy middle
+ * and blanks around the colon backtracked cubically on a run of blanks the
+ * backend wrote (3000 of them blocked the event loop for 6.6 s). Quoted
+ * colons stay inside their literal, a non-literal else-branch is not a
+ * ternary, and an argument past the length cap is asked for in args. */
+test('a $parameters ternary is read in linear time: blank runs, quoted colons, the length cap', async () => {
+  const blanks = ' '.repeat(4000);
+  const cases = [
+    ", ${$parameters>/selectedItem} ? ${$parameters>/selectedItem}.getCells()[0].getText() : 'x:y'",
+    ", ${$parameters>/selectedItem}?${$parameters>/selectedItem}.getBindingContext().getProperty('A'):null",
+    `, \${$parameters>/selectedItem} ?${blanks}x`,
+    `, \${$parameters>/selectedItem} ?${': '.repeat(20000)}x`,
+  ];
+  const started = Date.now();
+  const { client, bodies } = fakeApp(DIALOG('false', cases.join('')), ROWS());
+  const s = await client.start('z_t');
+  await rejects(client.act(s.session, { event: 'OK', row: 2 }), /^argument 2 of OK /);
+  await client.act(s.session, { event: 'OK', row: 2, args: [null, null, 'given', 'given2'] });
+  assert.deepEqual(bodies[1].S_FRONT.T_EVENT_ARG, ['a2', 'a2', 'given', 'given2']);
+  assert.ok(Date.now() - started < 2000, `took ${Date.now() - started} ms`);
+});
+
+/* A view nested 5000 levels deep overflowed the snapshot's walk after the
+ * response was adopted: start never returned the id and every later call on
+ * the session threw. Now start and act answer a snapshot that names the cut. */
+test('a view nested 5000 levels deep: start and act still answer a usable snapshot', async () => {
+  const deep = `<mvc:View xmlns="sap.m" xmlns:mvc="sap.ui.core.mvc"><Button text="Go" press=".eB(['GO'])"/>${'<VBox>'.repeat(5000)}<Text text="x"/>${'</VBox>'.repeat(5000)}</mvc:View>`;
+  const bodies = [];
+  const transport = async ({ body }) => {
+    bodies.push(JSON.parse(body).value);
+    return { status: 200, body: JSON.stringify({ S_FRONT: { ID: `D${bodies.length}`, APP: 'Z_T', S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'display', 'MAIN', deep]] } }, MODEL: {} }) };
+  };
+  const client = createAppClient({ transport, location: () => ({ origin: 'x', pathname: '/', search: '' }) });
+  const s = await client.start('z_t');
+  assert.equal(s.session, 'D1');
+  assert.match(s.unsupported.join(' '), /nested deeper than/);
+  const s2 = await client.act(s.session, { event: 'GO' });
+  assert.equal(s2.session, 'D2');
+  assert.equal(client.describe('D2').actions[0].event, 'GO');
 });
 
 test('`row` is a non-negative integer: a JSON number or a string of digits; "", false, [], true, 1.5, -1 are refused', async () => {
@@ -1243,19 +1284,114 @@ test('signal: a caller\'s cancel aborts the roundtrip in flight, refuses the act
   const t0 = Date.now();
   const acting = c.act(s.session, { values: { '/NAME': 'Ann' }, event: 'CHECK', signal: ctl.signal });
   setTimeout(() => ctl.abort(), 30);
-  await rejects(acting, /^cancelled by the caller - nothing of this roundtrip was adopted$/);
+  await rejects(acting, /^cancelled by the caller after the request had been sent - nothing of this roundtrip was adopted\. session 'D1' is out of sync: event CHECK may have run on the backend/);
   assert.ok(Date.now() - t0 < 5000, 'not the 120 s timeout');
   assert.ok(signals[1].aborted, 'the transport\'s signal aborted with the caller\'s');
+  const sent = n;
+  await rejects(c.act(s.session, { event: 'CHECK' }), /^nothing was sent - session 'D1' is out of sync/);
   const after = c.describe(s.session);
   assert.equal(after.session, 'D1');
   assert.deepEqual(after.pending || [], [], 'the act\'s edits are taken back');
   // an already-cancelled signal sends nothing
-  const sent = n;
   const gone = new AbortController();
   gone.abort();
   await rejects(c.act(s.session, { event: 'CHECK', signal: gone.signal }), /^cancelled by the caller/);
   await rejects(c.start('z_t', { signal: gone.signal }), /^cancelled by the caller/);
   assert.equal(n, sent, 'nothing reached the transport');
+});
+
+/* A roundtrip that ends without an adopted answer once the POST was handed
+ * over may have run the event: the refusal says so, and the session takes no
+ * further event until app_describe resyncs it - an agent read "nothing
+ * adopted" as "nothing happened" and sent a non-idempotent event twice. A
+ * connection that was never made proves nothing ran and blocks nothing. */
+test('an event that may have run (timeout, cancel, a lost answer) leaves the session out of sync until app_describe', async () => {
+  let mode = 'answer';
+  let n = 0;
+  const transport = (req) => {
+    n += 1;
+    if (n === 1) return Promise.resolve({ status: 200, body: JSON.stringify(startAnswer()) });
+    if (mode === 'refused') return Promise.reject(Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:1'), { code: 'ECONNREFUSED' }) }));
+    if (mode === 'reset') return Promise.reject(Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }) }));
+    if (mode === 'hang') {
+      // AbortSignal.timeout's timer does not hold the event loop open
+      const keep = setTimeout(() => {}, 5000);
+      return new Promise((resolve, reject) => req.signal.addEventListener('abort', () => { clearTimeout(keep); reject(req.signal.reason); }, { once: true }));
+    }
+    return Promise.resolve({ status: 200, body: JSON.stringify(eventAnswer(n)) });
+  };
+  const c = createAppClient({ transport, location: () => ({ origin: 'x', pathname: '/', search: '' }), timeoutMs: 50 });
+  const s = await c.start('z_t');
+  // never connected: nothing ran, the session stays usable
+  mode = 'refused';
+  await rejects(c.act(s.session, { event: 'CHECK' }), /^the backend did not answer \(fetch failed\) - is it running/);
+  // the timeout after the request was sent
+  mode = 'hang';
+  await rejects(c.act(s.session, { event: 'CHECK' }),
+    /^the backend did not answer \(.*\) after the request had been sent - .*\. session 'D1' is out of sync: event CHECK may have run on the backend and its answer was not adopted - do not repeat it blindly\. app_describe \{ session: "D1" \} resyncs .*, app_start Z_T starts afresh$/);
+  mode = 'answer';
+  const before = n;
+  await rejects(c.act(s.session, { event: 'OTHER' }), /^nothing was sent - session 'D1' is out of sync/);
+  await rejects(c.act(s.session, { window: { table: 't1' } }), /^nothing was sent - session 'D1' is out of sync/);
+  assert.equal(n, before, 'refused while out of sync');
+  const typed = await c.act(s.session, { values: { '/NAME': 'Ann' } });
+  assert.deepEqual(typed.pending, ['/NAME'], 'values without an event are typing, still taken');
+  assert.equal(c.describe(s.session).session, 'D1');
+  const next = await c.act(s.session, { event: 'CHECK' });
+  assert.equal(next.session, `D${n}`, 'app_describe resynced it');
+  // a connection lost after sending
+  mode = 'reset';
+  await rejects(c.act(next.session, { event: 'CHECK' }), /after the request had been sent .*is out of sync: event CHECK may have run/);
+  c.describe(next.session);
+  // the answer arrived, the caller had cancelled meanwhile: the event ran
+  mode = 'answer';
+  const ctl = new AbortController();
+  const late = createAppClient({
+    transport: async (req) => {
+      if (!JSON.parse(req.body).value.S_FRONT.EVENT) return { status: 200, body: JSON.stringify(startAnswer()) };
+      ctl.abort();
+      return { status: 200, body: JSON.stringify(eventAnswer(2)) };
+    },
+    location: () => ({ origin: 'x', pathname: '/', search: '' }),
+  });
+  const ls = await late.start('z_t');
+  await rejects(late.act(ls.session, { event: 'CHECK', signal: ctl.signal }),
+    /^cancelled by the caller after the backend had answered - nothing of the answer was adopted\. session '.+' is out of sync: event CHECK ran on the backend/);
+});
+
+/* The default transport read the answer whole (res.text()): a backend or a
+ * proxy that streamed without end held the server's memory until the
+ * timeout. It reads up to RESPONSE_MAX_BYTES, refuses a larger declared
+ * length unread and cancels a stream at the cap - and since an answer came,
+ * the event ran: the session is held like any lost answer's. */
+test('fetchTransport reads at most RESPONSE_MAX_BYTES: a declared or streamed excess is refused, the stream cancelled', async () => {
+  assert.equal(RESPONSE_MAX_BYTES, 32 * 1024 * 1024);
+  let pulls = 0;
+  let cancelledStream = false;
+  let mode = 'stream';
+  const fetchImpl = async (url, init) => {
+    const value = JSON.parse(init.body).value;
+    if (!value.S_FRONT.EVENT) return new Response(JSON.stringify(startAnswer()), { status: 200 });
+    if (mode === 'declared') return new Response('x'.repeat(10), { status: 200, headers: { 'content-length': '5000' } });
+    if (mode === 'small') return new Response(JSON.stringify(eventAnswer(9)), { status: 200 });
+    const endless = new ReadableStream({
+      pull(ctl) { pulls += 1; ctl.enqueue(new TextEncoder().encode('x'.repeat(256))); },
+      cancel() { cancelledStream = true; },
+    });
+    return new Response(endless, { status: 200 });
+  };
+  const c = createAppClient({ transport: fetchTransport({ baseUrl: BASE, fetchImpl, maxBytes: 1000 }), location: () => ({ origin: 'x', pathname: '/', search: '' }) });
+  const s = await c.start('z_t');
+  await rejects(c.act(s.session, { event: 'CHECK' }),
+    /^the backend answered more than 1000 bytes - stopped reading it, nothing of it was adopted .*\. session 'D1' is out of sync: event CHECK ran on the backend/);
+  assert.ok(pulls < 10, `stopped at the cap (${pulls} chunks)`);
+  assert.ok(cancelledStream, 'the stream was cancelled');
+  c.describe(s.session);
+  mode = 'declared';
+  await rejects(c.act(s.session, { event: 'CHECK' }), /^the backend answered more than 1000 bytes/);
+  c.describe(s.session);
+  mode = 'small';
+  assert.equal((await c.act(s.session, { event: 'CHECK' })).session, 'D9', 'an answer within the cap is read as before');
 });
 
 // ------------------------------------------------------ windowed tables ----

@@ -332,7 +332,8 @@ describe: custom controls (any namespace outside `sap.*`, except
 wires other than the popup/popover close, `T_CUSTOM` entries other than
 messages, timers and benign ones such as `SET_FOCUS`), tables or fields
 bound to a named model, element-bound fields, cut choice lists, unreadable
-event handlers.
+event handlers, and the controls of a view nested deeper than 256 levels
+(`MAX_VIEW_DEPTH`; what lies below is not walked).
 
 ## Operations
 
@@ -702,7 +703,7 @@ default:
 
 | Option | Default (local backend) | On a real system |
 | --- | --- | --- |
-| `transport({ method, body, headers, signal, draftId })` → `{ status, headers?, body }` | one `fetch` of `baseUrl` (`fetchImpl`): a POST of `body`, or the CSRF token fetch's HEAD | the embedder's own request: auth, cookies, a proxy |
+| `transport({ method, body, headers, signal, draftId })` → `{ status, headers?, body }` | one `fetch` of `baseUrl` (`fetchImpl`): a POST of `body`, or the CSRF token fetch's HEAD; the answer read up to `RESPONSE_MAX_BYTES` (32 MB), a larger one refused as an answer that ran | the embedder's own request: auth, cookies, a proxy |
 | `location(app)` → `{ origin, pathname, search }` (may be async) | `baseUrl` without the trailing slash, `/`, `?app_start=<app>` | the system's launch URL, never a proxy's |
 | `generation()` | absent: no restart detection (the MCP server passes its backend process id) | absent |
 | `backendHint` | `is it running? backend { action: "status" } says` | the embedder's own pointer, or `''` |
@@ -723,7 +724,15 @@ default:
   answer is `{ status, headers?, body }`; the client reads `sap-contextid`
   and `x-csrf-token` from `headers` (any case, a repeated header joined), a
   status outside 2xx is the backend's refusal (its body shown verbatim), and
-  a throw is *the backend did not answer (…)*. **The client does both
+  a throw is *the backend did not answer (…)*. A timeout, a cancel or a
+  throw AFTER the POST was handed over says that the request had been sent:
+  the event may have run (an answer that arrived after a cancel: it ran), the
+  refusal says so, and the session takes no further event or window request
+  until `describe(session)` (app_describe) resyncs it to the last screen the
+  client knows - or a fresh start; a throw whose `code` (or `cause.code`) is
+  a connection never made (`ECONNREFUSED`, `ENOTFOUND`, `EAI_AGAIN`,
+  `ENETUNREACH`, `EHOSTUNREACH`, `UND_ERR_CONNECT_TIMEOUT`) proves nothing
+  ran and blocks nothing. **The client does both
   handshakes itself** — the stateful session id per session, and a token
   layer's `403` + `X-CSRF-Token: Required` answered by the HEAD and one
   re-send of the same body, the token then sent with every POST (a `403`
