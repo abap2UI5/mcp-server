@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+- **`run_app` and `interact_app` serve the controls of addons.** An app that
+  used a control of abap2UI5-addons/custom-controls (`z2ui5_cci.cc.ScanInput`,
+  `FloorPlan`, `Gauge`, ...) terminated at its first view: the frontend loads
+  the control from `/sap/bc/ui5_ui5/sap/z2ui5_cci/`, the Node backend answers
+  every such URL with its start page (HTTP 200), and the only trace was
+  "ModuleError: failed to load z2ui5_cci/cc/ScanInput.js" on the screenshot -
+  `errors` stayed empty. The page now answers those requests from the addon's
+  abapGit BSP files (`<bsp>.wapa.<path>`, `/` written as `_-`, lower case) in
+  a local checkout: `A2UI5_MCP_BSP_DIRS` when set (authoritative, separated
+  like `PATH`), else the working directory and a `custom-controls` or
+  `custom-controls-customer` checkout beside the server. Only files found by
+  walking those directories are served - a request names an index key, never
+  a path. A BSP that no checkout carries is reported in `errors` once, with
+  the remedy; a file a carried BSP lacks, too. New: `lib/bsp.mjs`,
+  `test/bsp.test.mjs`.
+
+- **A repeating timer stays an action of the app snapshot.** A poll armed
+  with `start_timer` and the repeat flag (the fourth `t_arg`) was listed by
+  `app_start`/`app_act` only in the snapshot of the response that armed it.
+  The browser arms such a timer again after every response, but the
+  snapshot did not, so an agent could fire the first tick and then had no
+  way to wait for what the poll was waiting for. The snapshot state now
+  keeps a repeating timer the way the frontend does (`actions/ViewOps`
+  `evStartTimer`, `state.timerRepeat`): it is listed in every later snapshot
+  as `timer (<ms> ms, repeating)` until a `STOP_TIMER`, a plain
+  `START_TIMER` that replaces it, or a response of another app. A plain
+  timer still lasts one response. Tested in `test/snapshot.test.mjs`.
+
+- **The scan field of custom-controls is a field of the app snapshot.**
+  `z2ui5_cci.cc.ScanInput` (abap2UI5-addons/custom-controls, an
+  `sap.m.Input` underneath) was listed as "custom control ... - not
+  described", so `app_act` could fire its `submit` but not fill it - an app
+  built around scanning could not be operated without a browser. It is now
+  a text field like the `sap.m.Input` it extends: its `value` binding, its
+  label, enabled and editable state. Other custom controls stay "not
+  described"; `ADDON_FIELDS` in `lib/snapshot.mjs` is the list. Tested in
+  `test/snapshot.test.mjs`.
+
 - **`deploy_folder`: the ABAP objects of a folder into the dev sandbox in
   one call.** `deploy_app` takes one class, and only one that implements
   `z2ui5_if_app` - so an app with a helper class, an interface, a table it

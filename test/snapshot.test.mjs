@@ -668,6 +668,8 @@ test('a repeating START_TIMER stays an action until STOP_TIMER or another app; a
   assert.equal(byEvent(buildSnapshot({ state: st }), 'POLL').trigger, 'timer');
   st = applyResponse(st, asApp(respond(xml, {}), 'ZCL_B'));
   assert.equal(byEvent(buildSnapshot({ state: st }), 'POLL'), undefined);
+});
+
 test('the scan field of custom-controls is a text field; other custom controls stay not described', () => {
   const xml = view('<Label text="Scan"/><cci:ScanInput id="BIN" value="{/SCAN}" submit=".eB([\'BIN\'])"/><cci:FloorPlan items="{/T}"/>', 'xmlns:cci="z2ui5_cci.cc"');
   const s = buildSnapshot({ response: respond(xml, { SCAN: 'C05', T: [] }) });
