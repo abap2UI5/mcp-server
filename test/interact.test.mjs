@@ -79,10 +79,13 @@ test('quietAfter gives a busy backend the ceiling it always had, and says it was
  * a slow theme download spent the whole 10 s there on every call, after the
  * actions had already settled. The one wait helper is quietAfter. */
 test('the browser tools never wait for networkidle', () => {
-  const src = fs.readFileSync(new URL('../lib/runtime.mjs', import.meta.url), 'utf8');
-  const code = src.split('\n').filter((l) => !/^\s*(\/\/|\/?\*)/.test(l));
-  const hit = code.findIndex((l) => /networkidle|waitForLoadState/.test(l));
-  assert.equal(hit, -1, `lib/runtime.mjs waits on the network, not the backend: ${code[hit]}`);
+  // lib/runtime.mjs and the modules it is split into (lib/browser.mjs holds the browser tools)
+  for (const file of ['runtime', 'browser', 'ui5-routing', 'backend-process']) {
+    const src = fs.readFileSync(new URL(`../lib/${file}.mjs`, import.meta.url), 'utf8');
+    const code = src.split('\n').filter((l) => !/^\s*(\/\/|\/?\*)/.test(l));
+    const hit = code.findIndex((l) => /networkidle|waitForLoadState/.test(l));
+    assert.equal(hit, -1, `lib/${file}.mjs waits on the network, not the backend: ${code[hit]}`);
+  }
 });
 
 // ---------------------------------------------------------- parseActions ----

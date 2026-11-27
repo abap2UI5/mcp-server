@@ -43,6 +43,17 @@
   stays; a mirror in `A2UI5_MCP_PREBUILT_URL` has to serve the sidecar too.
   Only a release up to 1.148.0 still unpacks unverified, and says so. New:
   `sidecarRequired`, `LAST_RELEASE_WITHOUT_SIDECAR` (`lib/runtime.mjs`).
+- **`lib/runtime.mjs` is split into the modules it was made of** - no
+  behaviour change. The 3,600 lines move verbatim, comments with their code,
+  into `lib/sandbox.mjs` (checkouts, backend choice, sandbox, port),
+  `lib/deploy.mjs`, `lib/lint.mjs`, `lib/build.mjs` (with the build log),
+  `lib/prebuilt.mjs`, `lib/backend-process.mjs`, `lib/ui5-routing.mjs`,
+  `lib/browser.mjs`, `lib/unit.mjs` and `lib/setup-status.mjs`;
+  `lib/runtime.mjs` re-exports every one of them, so no importer changes
+  (it additionally exports the few helpers the modules now share:
+  `corpus`, `a2Local`, `npmRuntimeDir`, `devDir`, `shotDir`,
+  `shotDirProblem`, `builtMarkerFile`, `recordCheckoutBuild`, `building`).
+  AGENTS.md has the module map.
 
 ## 1.3.0 - 2026-11-27
 
