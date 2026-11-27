@@ -9,7 +9,7 @@ import { parseExamples, searchExamples, catalogueEntries, derivedControls, CATAL
 import { CORPUS_DIRS, resolveLintConfig, viewCheckCandidates, SERVER_ROOT } from '../lib/repos.mjs';
 import { sliceCatalogue } from '../lib/pitfalls.mjs';
 import { sliceGuide, guideChapters } from '../lib/guide.mjs';
-import { parseApi, searchApi, apiSummary } from '../lib/api.mjs';
+import { parseApi, searchApi, apiSummary, byNameMatch } from '../lib/api.mjs';
 import { searchDocs, slicePage, headingText, markdownLinks } from '../lib/docs.mjs';
 import { parseSizes } from '../lib/screenshot.mjs';
 import { oneOf, boundedInt, stringArray, checkStringArgs } from '../lib/args.mjs';
@@ -1630,6 +1630,15 @@ test('an API query is AND-ed and returns whole entries', () => {
   assert.deepEqual(searchApi(p, 'timer omit').constants, []);
   // a group whose NAME matches returns the whole group
   assert.equal(searchApi(p, 'cs_device').constants[0].values.length, 2);
+});
+
+test('an API hit whose NAME answers the query comes first, the source order within a rank', () => {
+  const entries = [{ name: 'nav_app_leave' }, { name: 'message_box_display' }, { name: 'message_toast_display' }, { name: 'message_toast' }];
+  // nav_app_leave matched on its docs only; the exact name leads, then the prefix
+  assert.deepEqual(byNameMatch(entries, ['message_toast']).map((e) => e.name), ['message_toast', 'message_toast_display', 'nav_app_leave', 'message_box_display']);
+  // every term in the name beats a docs-only hit, without reordering the rest
+  assert.deepEqual(byNameMatch(entries, ['display', 'box']).map((e) => e.name), ['message_box_display', 'nav_app_leave', 'message_toast_display', 'message_toast']);
+  assert.deepEqual(byNameMatch([], ['x']), []);
 });
 
 test('the API parser reports, never throws, on a damaged interface', () => {

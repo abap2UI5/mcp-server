@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+- **deploy_app names the replacement of removed API.** An app written from
+  memory got `Method "_bind_edit" not found` from the lint and nothing else.
+  A "not found" whose name is in the docs' deprecations.json (checkout, else
+  the GitHub mirror) now carries `removed: { status, replacement, since,
+  note }` - `_bind( )`, "delete the call", `z2ui5_cl_ui5_view_builder` - and
+  the hint points at validate_view and fix_view. deploy_folder too
+  (`lib/removed-api.mjs`).
+- **api_reference puts the method that was asked for first.** A query was
+  answered in source order, so `message_toast` led with `nav_app_leave`
+  (whose documentation mentions a toast) and an answer cut at the budget
+  could drop the method itself. Hits are now ordered by how well the NAME
+  matches - exact, prefix, every term, docs only - source order within each.
+- **add_agent_setup merges package.json as text, like the create package.**
+  app-template's create/agent-setup.mjs (app-template#107) now inserts the
+  missing entries into the project's package.json text instead of writing
+  the parsed object back - key order, inline objects, CRLF and a `1.0` stay
+  as the project wrote them. This server re-serialised, so the two executors
+  of agentSetup wrote different bytes and test/agent-setup.test.mjs's parity
+  test failed on main. `mergePackageJson` is now that file's code.
+- **The repository's lockfile installs the linter users get.** It still
+  held `@abap2ui5/linter` 0.8.5, the bottom of the peer range, so `npm test`
+  and a local run validated against a linter without `obsolete-binder`,
+  `obsolete-model-update`, `manual-init-flag` or the moved-view-builder
+  message, while `npx` installs 0.13.0. Now 0.13.0.
+
 - **The server tells the agent how to use it.** The initialize result now
   carries `instructions` (`lib/instructions.mjs`), which Claude Code, Cursor
   and the other clients put into the agent's system prompt: the order of the
