@@ -1,7 +1,13 @@
 # Changelog
 
-## Unreleased
+## 1.3.0 - 2026-11-27
 
+- **The linter peer range follows the linter: `>=0.8.0 <0.14.0`.** It ended
+  at `<0.12.0`, so an install beside linter 0.12.x was refused with ERESOLVE
+  and `npx -p @abap2ui5/mcp-server` brought 0.11.x. Checked against the
+  linter at 0.13.0 (its `main`, as a sibling checkout): the suite here
+  passes, and the linter's own `mcp-server smoke (unpinned consumer)` job ran
+  green on that release.
 - **System mode can write a class to the system - experimental, opt-in.**
   The mode could only operate apps; an agent with a gate-green class had no
   way to put it on the system. With `A2UI5_MCP_SYSTEM_WRITE=1` set in
