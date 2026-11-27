@@ -42,7 +42,7 @@ The one thing that is not read from a checkout is the BACKEND when there is
 no framework checkout: the npm package `@abap2ui5/node-runtime`, installed
 per release into the workspace (see "The expensive half with one checkout —
 or none"). It is still not bundled - the server installs the release the
-registry (or `A2UI5_MCP_RUNTIME_VERSION`) names, at exact versions, and
+project pins (or `A2UI5_MCP_RUNTIME_VERSION`, or the registry) names, at exact versions, and
 reads it live like a checkout.
 
 | Env var | Default sibling | Used for |
@@ -105,8 +105,9 @@ because the backend hands its paths to children running elsewhere), `A2UI5_MCP_B
 (`npm`: the npm backend even beside a framework checkout; `clone`: the
 framework clone as the answer to "no checkout", the default before the npm
 backend), `A2UI5_MCP_RUNTIME_VERSION` (the `@abap2ui5/node-runtime` release,
-X.Y.Z; default the registry's latest - `A2UI5_MCP_OFFLINE` also stops that
-question), `A2UI5_MCP_NETWORK_TESTS=1` (the three `npm test` files that
+X.Y.Z; default the project's pin, else the registry's latest -
+`A2UI5_MCP_OFFLINE` also stops that question), `A2UI5_MCP_PROJECT_DIR` (the
+project whose pins are read, `lib/project.mjs`; default the cwd), `A2UI5_MCP_NETWORK_TESTS=1` (the three `npm test` files that
 reach the registry - npm-integration, agent-integration and migrate's
 deploy test - run; they are opt-in, half a minute and more each, and
 `ci.yml` sets it) and `A2UI5_MCP_SKIP_NETWORK_TESTS` (they skip even then),
@@ -279,7 +280,13 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
     sandbox/             the dev apps' sources - outside runtime/, so a new
                          release keeps every deployed app
 
-- **The release**: `A2UI5_MCP_RUNTIME_VERSION`, else the registry's latest -
+- **The release**: `A2UI5_MCP_RUNTIME_VERSION`, else the PROJECT's pin
+  (`lib/project.mjs`: the `branch` of the abap2UI5 dependency in the
+  abaplint.jsonc of `A2UI5_MCP_PROJECT_DIR`, default the cwd the client
+  started the server in - the release the project's lint resolves against,
+  the one `abap2ui5-unit` always ran; a pin before 1.145.0, which the package
+  does not exist for, is skipped and `setup_status` says so under
+  `projectPinNote`), else the registry's latest -
   asked through `npm view`, so the registry, proxy and CA npm is configured
   with are the ones asked, the same the install then uses: both run in the
   workspace (`npm view` in `runtime/`, the install in `runtime/<version>`),
@@ -298,8 +305,9 @@ ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
   exact by `--save-exact`), `@abaplint/transpiler-cli` at
   `abap2ui5.transpiler` (else the package's `@abaplint/runtime` pin - the two
   are released in lockstep) and, for the lint, `@abaplint/cli` at
-  app-template's pin (its lockfile, its package.json, then
-  `ABAPLINT_CLI_FALLBACK`, said in `setup_status`) with `@abaplint/core` at
+  the project's own pin (its lockfile, its package.json - `lintCliVersion`),
+  else app-template's (the same two files), then `ABAPLINT_CLI_FALLBACK`,
+  said in `setup_status`) with `@abaplint/core` at
   the SAME version beside it - what the warm lint worker parses with (the
   CLI bundles its own core, and only the matching version may stand in for
   it; an install from before the pair gets the core added by the next lint
@@ -1562,6 +1570,19 @@ legitimately slower.
   stale prompt behind. Prompts read no sibling checkout (the tools they
   point at carry the degradation), which `test/missing-siblings.test.mjs`
   pins by rendering one with every env var pointed at nowhere.
+- **The server's `instructions` are read before any tool is chosen** -
+  `lib/instructions.mjs`, sent in the initialize result, which clients put
+  into the agent's system prompt. Without them an agent with no AGENTS.md of
+  its own (the plugin, `claude mcp add`, a project that never started from
+  app-template) wrote the app from memory - the API from before 1.143.0 - and
+  called no tool. They carry the order of the loop and the renames a model
+  gets wrong most, and nothing else: every agent pays for them in every turn.
+  `test/instructions.test.mjs` holds every tool they name to the surface.
+- **The annotations decide what a client runs unasked** -
+  `lib/annotations.mjs` (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
+  `openWorldHint`), one map per surface because `app_act` on a real system can
+  post data and in the sandbox cannot. A new tool needs its entry there:
+  `test/tool-surface.test.mjs` fails otherwise.
 - **A tool description is the only documentation the agent reads.** It never
   sees this file, the README or a comment — it picks a tool from the sentence
   in `TOOLS`. So two tools that answer neighbouring questions have to say

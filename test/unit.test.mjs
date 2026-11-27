@@ -1944,8 +1944,13 @@ test('scaffolding renames the class in the ABAP, the sidecar and the file name',
   assert.match(at('package.devc.xml').text, /<CTEXT>Invoice App<\/CTEXT>/);
   assert.match(at('.abapgit.xml').text, /<NAME>invoice-app<\/NAME>/);
 
-  assert.ok(!files.some((f) => /zcl_app_001/i.test(f.text)),
-    'no file still carries the template own class name');
+  /* The tooling under .github/scripts/ is excluded: rename.mjs is a copy of
+   * abap2UI5's shared script (app-template's sync-shared.yaml keeps it equal)
+   * and names the template's class in its usage comment, as the example of
+   * what it renames. That is documentation of the tool, not a part of the
+   * project still carrying the old name - and app-template may not edit it. */
+  const leftover = files.filter((f) => !f.path.startsWith('.github/scripts/') && /zcl_app_001/i.test(f.text));
+  assert.deepEqual(leftover.map((f) => f.path), [], 'no file still carries the template own class name');
   assert.ok(files.some((f) => f.path === 'AGENTS.md'),
     'the briefing ships with the project - an agent without one is the gap this closes');
 });

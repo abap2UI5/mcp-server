@@ -104,7 +104,13 @@
         },
         {
           "name": "A2UI5_MCP_RUNTIME_VERSION",
-          "description": "Pin the @abap2ui5/node-runtime release (X.Y.Z) the npm backend installs. Default: the registry's latest.",
+          "description": "Pin the @abap2ui5/node-runtime release (X.Y.Z) the npm backend installs. Default: the release the project's abaplint.jsonc pins, else the registry's latest.",
+          "format": "string",
+          "isRequired": false
+        },
+        {
+          "name": "A2UI5_MCP_PROJECT_DIR",
+          "description": "The abap2UI5 project whose pins the backend follows (the framework release in abaplint.jsonc, @abaplint/cli in package-lock.json). Default: the directory the server was started in.",
           "format": "string",
           "isRequired": false
         },

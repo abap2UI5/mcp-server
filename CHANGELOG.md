@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+- **The server tells the agent how to use it.** The initialize result now
+  carries `instructions` (`lib/instructions.mjs`), which Claude Code, Cursor
+  and the other clients put into the agent's system prompt: the order of the
+  loop (setup_status, then capabilities / examples / app_guide /
+  api_reference before writing, validate_view after a view change, deploy /
+  build / run, pitfalls before finishing) and the old API names a model gets
+  wrong most, with their replacements. An agent without an AGENTS.md - the
+  plugin, `claude mcp add`, any project not made from app-template - had 32
+  tools and no word on when to call which. System mode gets its own, shorter
+  text.
+- **Every tool carries MCP annotations.** `readOnlyHint`,
+  `destructiveHint`, `idempotentHint` and `openWorldHint` for both surfaces
+  (`lib/annotations.mjs`), so a client can run the 19 read-only tools without
+  asking - in a cloud session each `examples` lookup went through the same
+  approval as `remove_app`. `deploy_app`, `deploy_folder`, `remove_app` and
+  `verify_app` are marked destructive; on the system surface `app_start` and
+  `app_act` are too, since an event there runs on a real system.
+- **The npm backend follows the project's pins.** `build_backend`, `run_app`
+  and the rest took the registry's latest `@abap2ui5/node-runtime`, while the
+  project's lint resolved against the release its `abaplint.jsonc` pins - a
+  project on 1.149.0 was linted against 1.149.0 and booted on 1.151.0. The
+  release is now `A2UI5_MCP_RUNTIME_VERSION`, else the project's pin, else
+  the registry's latest, the order `abap2ui5-unit` already used; and the
+  lint's `@abaplint/cli` is the project's own lockfile entry before
+  app-template's. The project is the directory the client started the
+  server in, or the new `A2UI5_MCP_PROJECT_DIR`. A pin before 1.145.0, which
+  the package does not exist for, is skipped and named in `setup_status`
+  (`projectPinNote`). `frameworkPinOf` moved from `scripts/ci-unit.mjs` to
+  `lib/project.mjs` (re-exported there).
+
 - **System mode: pin the system's certificate instead of accepting any.**
   `A2UI5_MCP_SYSTEM_INSECURE_TLS=1` was the only way to a system with a
   self-signed certificate, and it accepted ANY certificate while the Basic

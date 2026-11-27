@@ -33,7 +33,7 @@ const META_145 = {
 /* A workspace of its own per test: A2UI5_MCP_WORKSPACE decides every path of
  * the npm backend, and the pin/offline/template variables are cleared so the
  * surrounding shell cannot decide a test. */
-const ENV = ['A2UI5_MCP_WORKSPACE', 'A2UI5_MCP_RUNTIME_VERSION', 'A2UI5_MCP_OFFLINE', 'APP_TEMPLATE_HOME', 'PATH', 'A2UI5_MCP_REMOTE'];
+const ENV = ['A2UI5_MCP_WORKSPACE', 'A2UI5_MCP_RUNTIME_VERSION', 'A2UI5_MCP_OFFLINE', 'APP_TEMPLATE_HOME', 'PATH', 'A2UI5_MCP_REMOTE', 'A2UI5_MCP_PROJECT_DIR'];
 function withWorkspace(fn) {
   return async (t) => {
     const saved = Object.fromEntries(ENV.map((v) => [v, process.env[v]]));
@@ -43,6 +43,7 @@ function withWorkspace(fn) {
     delete process.env.A2UI5_MCP_OFFLINE;
     process.env.A2UI5_MCP_REMOTE = '0'; // no template mirror download from a unit test
     process.env.APP_TEMPLATE_HOME = path.join(ws, 'no-template');
+    process.env.A2UI5_MCP_PROJECT_DIR = path.join(ws, 'no-project'); // the cwd would be this repository
     resetNpmBackend();
     try {
       await fn(t, { ws, workspace: process.env.A2UI5_MCP_WORKSPACE });

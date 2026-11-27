@@ -64,6 +64,8 @@ import { ANSWER_BUDGET, sizeOf, takeWithin, takeSmallestWithin, fitSnapshot, fit
 import { getRenderer, dropRenderer, closeRenderers, rendererLooksDead, renderPages } from './lib/renderer.mjs';
 import { closeLintWorker } from './lib/lint-host.mjs';
 import { TOOLS } from './lib/tools.mjs';
+import { annotate, TOOL_ANNOTATIONS, SYSTEM_TOOL_ANNOTATIONS } from './lib/annotations.mjs';
+import { serverInstructions } from './lib/instructions.mjs';
 import { RESOURCES, RESOURCE_TEMPLATES, GUIDE_CHAPTER_TEMPLATE, readResource } from './lib/resources.mjs';
 import { PROMPTS, getPrompt } from './lib/prompts.mjs';
 import { missingSiblingMessage, missingLocalSiblingMessage } from './lib/siblings.mjs';
@@ -353,7 +355,11 @@ const SYSTEM = systemConfig(process.env);
  * mode: without A2UI5_MCP_SYSTEM_WRITE=1 its tools are not listed, and a
  * call by name is refused before anything is sent. */
 const SYSTEM_WRITE = writeConfig(process.env);
-const ACTIVE_TOOLS = SYSTEM ? (SYSTEM_WRITE.enabled ? [...SYSTEM_TOOLS, ...SYSTEM_WRITE_TOOLS] : SYSTEM_TOOLS) : TOOLS;
+/* Each surface with its annotations (lib/annotations.mjs): what a client reads
+ * to decide whether a call needs the user's approval. */
+const ACTIVE_TOOLS = SYSTEM
+  ? annotate(SYSTEM_WRITE.enabled ? [...SYSTEM_TOOLS, ...SYSTEM_WRITE_TOOLS] : SYSTEM_TOOLS, SYSTEM_TOOL_ANNOTATIONS)
+  : annotate(TOOLS, TOOL_ANNOTATIONS);
 
 let systemHttp = null;
 let systemClient = null;
@@ -1834,7 +1840,12 @@ const server = new Server(
    * is up (declaring the capability also gives the SDK's logging/setLevel
    * handler something to filter by); completions: the guide-chapter resource
    * template completes its {chapter} argument. */
-  { capabilities: { tools: {}, resources: {}, prompts: {}, logging: {}, completions: {} } },
+  /* instructions: read before any tool is chosen - clients put them into the
+   * agent's system prompt (lib/instructions.mjs says why and what). */
+  {
+    capabilities: { tools: {}, resources: {}, prompts: {}, logging: {}, completions: {} },
+    instructions: serverInstructions({ system: Boolean(SYSTEM) }),
+  },
 );
 
 /* One diagnostic channel. Through the MCP logging notification when the
