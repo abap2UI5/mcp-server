@@ -69,7 +69,12 @@ no GitHub mirror either), `A2UI5_MCP_CHROMIUM` (browser path; `CHROMIUM_BIN`,
 the linter's variable, is read after it — then Playwright's managed browser,
 then a system binary, `resolveChromium`), `A2UI5_MCP_UI5_CACHE_MB` (how many MB of the
 CDN's UI5 answers `run_app`/`interact_app` keep in memory across calls;
-default 64, 0 = off, `ui5RouteHandler` below), `A2UI5_MCP_RENDER_PAGES` (the
+default 64, 0 = off, `ui5RouteHandler` below), `A2UI5_MCP_BSP_DIRS` (the directories, separated like `PATH`, whose abapGit
+WAPA files `run_app` and `interact_app` serve for `/sap/bc/ui5_ui5/sap/<bsp>/`
+- the controls of an addon such as custom-controls, which the backend does not
+serve; authoritative when set, else the working directory and a
+`custom-controls`/`custom-controls-customer` sibling, `lib/bsp.mjs`),
+`A2UI5_MCP_RENDER_PAGES` (the
 pages of `validate_view`'s warm render gate - concurrent calls queue on the
 pool; default 2, 1 to 8, `renderPages` in `lib/renderer.mjs`),
 `A2UI5_MCP_SCREENSHOT_DIR` (where `run_app` and `interact_app` write their
@@ -148,7 +153,7 @@ Four rules, each pinned by `test/remote.test.mjs` and
   the answer to "nothing configured, nothing next to me", and the
   missing-checkout message says so when an env var is the reason.
 - **The mirror is read-only, and the tools that write or build refuse it.**
-  `deploy_app`, `read_app`, `remove_app`, `scope_of`, `build_backend`,
+  `deploy_app`, `deploy_folder`, `read_app`, `remove_app`, `scope_of`, `build_backend`,
   `run_app`, `interact_app`, `run_unit_tests` and `backend start` resolve
   with `{ local: true }` (`missingLocalSiblingMessage` in `lib/siblings.mjs`)
   and never write into or build out of a mirror. `corpus()` and `a2Local()`
@@ -236,12 +241,13 @@ module it belongs to and reaches the door by its `export *`.
 | Module | What it holds |
 | --- | --- |
 | `lib/sandbox.mjs` | `corpus()`, `a2Local()`, the backend choice (`backendKind`, `decideBackend`), `sandbox()`, the screenshot dir, `PORT` / `BACKEND_HOST` |
-| `lib/deploy.mjs` | the class-name gate, `deployApp` / `removeApp`, the dev copies (`syncDevCopies`), the checkout build fingerprint, `readAppSource`, `listDevApps` |
-| `lib/lint.mjs` | the lint configs per backend, `lintApp` (warm worker or a fresh process), `runScopeOf` |
+| `lib/deploy.mjs` | the class-name gate, `deployApp` / `removeApp`, `deployFolder` / `folderObjects` (deploy_folder), the dev copies (`syncDevCopies`), the checkout build fingerprint, `readAppSource`, `listDevApps` |
+| `lib/lint.mjs` | the lint configs per backend, `lintApp` (warm worker or a fresh process; `objectsMatcher` filters it to deploy_folder's objects), `runScopeOf` |
 | `lib/build.mjs` | `planBuild`, `buildBackend` (single flight), and the build log `build_log` reads - the log is written by the build, so it stays beside it |
 | `lib/prebuilt.mjs` | the release asset (`downloadPrebuilt`, the size cap, the `.sha256` sidecar, the layout check), the framework clone, `transpileFramework` |
 | `lib/backend-process.mjs` | the backend child: `startBackend` / `stopBackend`, liveness, `appChildEnv`, `builtAppClasses` |
 | `lib/ui5-routing.mjs` | the benign console rules, UI5 from the local `@openui5` packages, the CDN cache (`ui5RouteHandler`) |
+| `lib/bsp.mjs` | the frontend files of addons with controls, served from their abapGit BSP files (`bspRoots`, `bspIndex`, `bspRouteHandler`) |
 | `lib/browser.mjs` | Chromium (`resolveChromium`, `getBrowser`), `runApp`, `interactApp`, the screenshots |
 | `lib/unit.mjs` | `runUnitTests`: the runner filtered to the classes asked for, `parseUnitOutput` |
 | `lib/setup-status.mjs` | `setupStatus`, `scopeOfNote` |
@@ -934,7 +940,13 @@ them - source, XML, test include, local-class includes (`writeObjects`,
 under the sandbox's name gate). NOT through `deploy_app`'s gate: that one
 asks for `z2ui5_if_app`, which refused every helper class - its tests never
 ran and the run still exited 0 - and it never deployed an interface or a
-locals include. On the npm backend into a sandbox and a build of the run's
+locals include. The tool for that is `deploy_folder` (`folderObjects` and
+`deployFolder` in `lib/deploy.mjs`): the same file names, collected without
+following symbolic links and at most `FOLDER_MAX_OBJECTS`, every name through
+`classNameOf` and the own-object gate BEFORE the first write (all or nothing),
+each target inside the sandbox and written with O_NOFOLLOW; a redeployed
+object loses the files the folder no longer has; the lint is deploy_app's,
+its findings filtered to the deployed objects (`objectsMatcher`). On the npm backend into a sandbox and a build of the run's
 OWN (`<workspace>/unit-*`, `runtime/<v>/apps-unit-*`: `buildNpm` with an
 `appsName`, which records no `current.json`; `runUnitTests({ appsDir })`),
 removed afterwards - an MCP session's sandbox on the same machine used to

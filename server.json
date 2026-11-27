@@ -157,6 +157,12 @@
           "isRequired": false
         },
         {
+          "name": "A2UI5_MCP_BSP_DIRS",
+          "description": "Directories (separated like PATH) whose abapGit BSP files run_app and interact_app serve for /sap/bc/ui5_ui5/sap/<bsp>/ - the controls of an addon such as custom-controls, which the Node backend does not serve. Default: the working directory and a custom-controls or custom-controls-customer checkout beside the server.",
+          "format": "string",
+          "isRequired": false
+        },
+        {
           "name": "A2UI5_MCP_RENDER_PAGES",
           "description": "Pages (Chromium tabs) of validate_view's warm render gate, which concurrent calls queue on. Default: 2 (1 to 8).",
           "format": "number",

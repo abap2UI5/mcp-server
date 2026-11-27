@@ -73,6 +73,8 @@ import { resolveKey, RESOLVERS } from './lib/repos.mjs';
 import { oneOf, boundedInt, stringArray, optionalName, checkStringArgs } from './lib/args.mjs';
 import {
   deployApp,
+  deployFolder,
+  objectsMatcher,
   removeApp,
   readAppSource,
   listDevApps,
@@ -1152,6 +1154,38 @@ async function handle(name, args = {}, ctx = {}) {
         reply.next = res.testclassesPath
           ? 'run build_backend once, then run_app to see the app and run_unit_tests to run its tests'
           : 'run build_backend once, then run_app to see the app';
+      }
+      return text(reply);
+    }
+    case 'deploy_folder': {
+      const miss = missingSandbox();
+      if (miss) return miss;
+      if (typeof args.path !== 'string' || !args.path.trim()) {
+        return toolError('path is required: the folder whose ABAP objects to deploy, e.g. the src of your project');
+      }
+      const res = deployFolder({ dir: args.path });
+      const reply = {
+        deployed: res.deployed.map((o) => `${o.name}.${o.type}`),
+        apps: res.apps,
+        from: res.root,
+        into: res.dir,
+        ...(res.skipped.length ? { skipped: res.skipped.slice(0, 50), ...(res.skipped.length > 50 ? { skippedMore: res.skipped.length - 50 } : {}) } : {}),
+      };
+      if (args.lint !== false) {
+        const report = progressReporter(ctx);
+        if (report) report(`abaplint: linting ${res.deployed.length} object(s)`, true);
+        reply.lint = await lintApp(res.deployed[0].name, { signal: ctx.signal, onLine: report, match: objectsMatcher(res.deployed) });
+        if (report) report(`abaplint: finished (${reply.lint.ok ? 'clean' : `${reply.lint.issues.length} finding(s)`})`, true);
+        if (reply.lint.aborted) {
+          return toolError('deploy_folder cancelled during the lint - the objects were already written to the dev sandbox; '
+            + 'deploy the folder again to lint them');
+        }
+        if (!reply.lint.ok) reply.hint = 'fix the lint findings and deploy the folder again; build_backend is only worth running on a clean lint';
+      }
+      if (!reply.lint || reply.lint.ok) {
+        reply.next = res.apps.length
+          ? `run build_backend once, then run_app with one of the apps (${res.apps.slice(0, 5).join(', ')}) and run_unit_tests for the test classes`
+          : 'run build_backend once, then run_unit_tests for the test classes - no class of the folder implements z2ui5_if_app';
       }
       return text(reply);
     }

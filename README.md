@@ -236,6 +236,7 @@ fix it.
 | `fix_view` | Apply the linter's mechanical fixes and get the corrected source back — writes nothing | linter |
 | `screenshot_view` | See the view in seconds — no build, no backend | linter |
 | `deploy_app` | Write the class + abapGit sidecar (+ test include) into the dev sandbox, then abaplint it | nothing (the npm backend's `~/.abap2ui5-mcp/sandbox`); samples-controls' `src/zz_dev` or abap2UI5's `node/zz_dev` when present |
+| `deploy_folder` | Write the ABAP objects of a local folder (a project's `src`, or one package) into the dev sandbox in one call - classes with their includes, interfaces, tables, data elements - then abaplint them and name the apps among them | the sandbox (as deploy_app) |
 | `read_app` | Read a deployed dev app's source back, and whether the built backend already carries it | the sandbox (as deploy_app) |
 | `build_backend` | Get the transpiled Node backend: without a checkout `@abap2ui5/node-runtime` from npm and only the dev apps transpiled (seconds); with one `prebuilt` downloads the framework's released backend and `incremental` re-transpiles the dev apps on top; `prebuilt`/`transpile` clone the framework when asked to; `full` runs the corpus' e2e-build | nothing (npm), or abap2UI5 (`full` needs samples-controls) |
 | `build_log` | Page through the last build's full output — the error the result's short tail cut off | nothing (reads the record the last build left) |
@@ -734,6 +735,16 @@ duplicates none of their content:
   in memory across calls (`A2UI5_MCP_UI5_CACHE_MB`, default 64; 0 switches
   it off), so a second boot does not download UI5 again.
   `A2UI5_MCP_OFFLINE=1` forces the hermetic behaviour.
+- **Addon controls:** an app that uses the controls of an addon (for example
+  `z2ui5_cci.cc.ScanInput` of
+  [custom-controls](https://github.com/abap2UI5-addons/custom-controls))
+  loads their files from `/sap/bc/ui5_ui5/sap/<bsp>/`, which the Node backend
+  does not serve. `run_app` and `interact_app` answer those requests from the
+  addon's abapGit BSP files in a local checkout: the directories in
+  `A2UI5_MCP_BSP_DIRS` (separated like `PATH`) when it is set, else the
+  directory the server runs in and a `custom-controls` or
+  `custom-controls-customer` checkout beside the server. A file nobody
+  carries is reported in `errors` with that remedy.
 - **Chromium:** `A2UI5_MCP_CHROMIUM` (or `CHROMIUM_BIN`, which the linter
   reads too) names the executable; otherwise the Playwright-managed browser
   (`npx playwright install chromium`); otherwise a system chromium.
