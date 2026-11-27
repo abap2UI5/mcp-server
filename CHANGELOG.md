@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+- **`deploy_folder`: the ABAP objects of a folder into the dev sandbox in
+  one call.** `deploy_app` takes one class, and only one that implements
+  `z2ui5_if_app` - so an app with a helper class, an interface, a table it
+  reads or a test double beside it could not be built at all without copying
+  files into the sandbox by hand. `deploy_folder { path }` takes a local
+  folder (a project's `src`, or one package of it) and deploys its classes
+  with their includes and sidecars, interfaces, tables and data elements -
+  the abapGit names `abap2ui5-unit` copies. All or nothing: every name goes
+  through the sandbox's name gate and the own-object gate before the first
+  file is written; symbolic links, `node_modules` and dot folders are
+  skipped, at most 300 objects; each target stays inside the sandbox and is
+  written with O_NOFOLLOW; a redeployed object loses the files the folder no
+  longer has. Then the deployed objects are linted (deploy_app's lint, its
+  findings filtered to them) and the apps among them are named for
+  `run_app`. New: `folderObjects`, `deployFolder`, `objectsMatcher` in
+  `lib/runtime.mjs`, `test/deploy-folder.test.mjs`.
+
 ## 1.3.0 - 2026-11-27
 
 - **The linter peer range follows the linter: `>=0.8.0 <0.14.0`.** It ended
