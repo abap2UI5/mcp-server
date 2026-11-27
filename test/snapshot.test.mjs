@@ -639,6 +639,37 @@ test('message box with onClose: an action whose $action argument lists the choic
   assert.equal(byEvent(s, 'TICK').trigger, 'timer');
 });
 
+test('a repeating START_TIMER stays an action until STOP_TIMER or another app; a plain one lasts one response', () => {
+  const xml = view('<Text text="x"/>');
+  let st = applyResponse(emptyState(), respond(xml, {}, { T_CUSTOM: [['START_TIMER', 'POLL', '1000', 'X', 'X']] }));
+  const first = buildSnapshot({ state: st });
+  assert.equal(first.actions.filter((a) => a.event === 'POLL').length, 1, 'the arming response lists it once');
+  assert.equal(byEvent(first, 'POLL').label, 'timer (1000 ms, repeating)');
+
+  // the tick's own response arms nothing - the browser re-arms it after it
+  st = applyResponse(st, respond(xml, {}));
+  assert.equal(byEvent(buildSnapshot({ state: st }), 'POLL').trigger, 'timer');
+
+  st = applyResponse(st, respond(xml, {}, { T_CUSTOM: [['STOP_TIMER']] }));
+  assert.equal(byEvent(buildSnapshot({ state: st }), 'POLL'), undefined);
+
+  // a plain START_TIMER replaces a repeating one and is gone after its response
+  st = applyResponse(st, respond(xml, {}, { T_CUSTOM: [['START_TIMER', 'POLL', '1000', 'X', 'X']] }));
+  st = applyResponse(st, respond(xml, {}, { T_CUSTOM: [['START_TIMER', 'ONCE', '500']] }));
+  const once = buildSnapshot({ state: st });
+  assert.equal(byEvent(once, 'POLL'), undefined);
+  assert.equal(byEvent(once, 'ONCE').label, 'timer (500 ms)');
+  st = applyResponse(st, respond(xml, {}));
+  assert.equal(byEvent(buildSnapshot({ state: st }), 'ONCE'), undefined);
+
+  // another app ends the poll of the one that armed it
+  const asApp = (r, app) => ({ ...r, S_FRONT: { ...r.S_FRONT, APP: app } });
+  st = applyResponse(emptyState(), asApp(respond(xml, {}, { T_CUSTOM: [['START_TIMER', 'POLL', '1000', '', 'X']] }), 'ZCL_A'));
+  assert.equal(byEvent(buildSnapshot({ state: st }), 'POLL').trigger, 'timer');
+  st = applyResponse(st, asApp(respond(xml, {}), 'ZCL_B'));
+  assert.equal(byEvent(buildSnapshot({ state: st }), 'POLL'), undefined);
+});
+
 test('maxRows bounds the rows, and the linter metadata classifies an unmapped subclass', () => {
   const rows = Array.from({ length: 50 }, (_, i) => ({ N: i }));
   const xml = view('<Table items="{/T}"><columns><Column><Text text="N"/></Column></columns><items><ColumnListItem><cells><Text text="{N}"/></cells></ColumnListItem></items></Table><FancyInput value="{/F}"/>');
