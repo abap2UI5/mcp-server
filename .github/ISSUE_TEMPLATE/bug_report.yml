@@ -1,0 +1,40 @@
+name: Bug report
+description: A tool of the abap2UI5 MCP server answered wrong, failed or hung
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Drafted by an AI assistant? The `report_issue` tool fills this form in - read it before you submit.
+        The field ids below (description, reproduction, version, environment, context) are what it fills;
+        keep them when you change this form.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: The tool, the arguments, what it answered - and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: How to reproduce
+      description: The tool call (name and arguments) and, where an app is involved, the smallest app class - one that verify_app runs, so it reproduces without a system.
+      render: abap
+  - type: input
+    id: version
+    attributes:
+      label: Server version
+      description: "`setup_status`, or `npm view @abap2ui5/mcp-server version` for what npx runs."
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: MCP client (Claude Code, Cursor, VS Code ...), OS, Node version, backend (npm / framework checkout / system mode).
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: setup_status output, build_log, and whether an AI assistant found it (which one).

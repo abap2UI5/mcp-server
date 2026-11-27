@@ -239,6 +239,7 @@ fix it.
 | `fix_view` | Apply the linter's mechanical fixes and get the corrected source back — writes nothing | linter |
 | `screenshot_view` | See the view in seconds — no build, no backend | linter |
 | `deploy_app` | Write the class + abapGit sidecar (+ test include) into the dev sandbox, then abaplint it | nothing (the npm backend's `~/.abap2ui5-mcp/sandbox`); samples-controls' `src/zz_dev` or abap2UI5's `node/zz_dev` when present |
+| `lint_abap` | abaplint a class without deploying it: the lint deploy_app runs, the sandbox exactly as it was afterwards; removed abap2UI5 API comes with its replacement | the sandbox (as deploy_app) |
 | `deploy_folder` | Write the ABAP objects of a local folder (a project's `src`, or one package) into the dev sandbox in one call - classes with their includes, interfaces, tables, data elements - then abaplint them and name the apps among them | the sandbox (as deploy_app) |
 | `read_app` | Read a deployed dev app's source back, and whether the built backend already carries it | the sandbox (as deploy_app) |
 | `build_backend` | Get the transpiled Node backend: without a checkout `@abap2ui5/node-runtime` from npm and only the dev apps transpiled (seconds); with one `prebuilt` downloads the framework's released backend and `incremental` re-transpiles the dev apps on top; `prebuilt`/`transpile` clone the framework when asked to; `full` runs the corpus' e2e-build | nothing (npm), or abap2UI5 (`full` needs samples-controls) |
@@ -255,6 +256,7 @@ fix it.
 | `migrate_report` | Convert the **user interface of a classic ABAP report** into an abap-cloud-gui app class (report2UI5, the logic copied as it is): the class files, the migration report (TODOs, what was not carried over), the refusals with `file:row:col`; `deploy: true` builds it here and answers its selection screen's agent snapshot | abap-cloud-gui (with `npm ci`); `deploy` also the popups and a build |
 | `backend` | `status` / `start` / `stop` / `restart` of the local express backend | a build (start/restart; status and stop always work) |
 | `remove_app` | Delete a dev app from the sandbox, or list the deployed ones | the sandbox (as deploy_app) |
+| `report_issue` | Draft a GitHub issue for a defect in abap2UI5 or its tools for the user to file: a prefilled new-issue link, the markdown, and similar open issues. Posts nothing | nothing (the issue search is GitHub's public one) |
 
 `verify_app` is the loop in one call: validate, deploy, build, unit tests and
 boot, stopping at the first stage that fails and reporting every stage before

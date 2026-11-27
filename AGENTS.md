@@ -1596,6 +1596,14 @@ legitimately slower.
   called no tool. They carry the order of the loop and the renames a model
   gets wrong most, and nothing else: every agent pays for them in every turn.
   `test/instructions.test.mjs` holds every tool they name to the surface.
+- **report_issue drafts, it never posts** - `lib/report-issue.mjs`. The
+  link opens the repository's issue form with the fields filled in by their
+  ids (description, reproduction, version, environment, context - the ids of
+  abap2UI5's bug_report.yml, and of the forms of this repository, docs and
+  app-template made to match); renaming a field id in any of those forms
+  breaks the prefill silently. The search is GitHub's public one,
+  unauthenticated; offline it is skipped and said. No token, no posting:
+  the user files it.
 - **A "not found" on removed API names the replacement** -
   `lib/removed-api.mjs`. deploy_app and deploy_folder hand their abaplint
   findings through `explainRemoved`: a `Method "x" not found` / `Class x not

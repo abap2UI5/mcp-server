@@ -39,6 +39,23 @@
   order of events, and the bin-symlink test reports a skip instead of a
   pass where no symlink can be made.
 
+- **lint_abap: abaplint without deploying.** The lint deploy_app runs -
+  app-template's rules, the framework as the dependency, the project's
+  @abaplint/cli - on a class that is only put into the sandbox for the lint;
+  the sandbox is restored afterwards, a deployed class byte for byte, a new
+  one gone (`snapshotClass` / `restoreClass` in lib/deploy.mjs). Syntax,
+  unknown methods and classes, types - what validate_view, which checks the
+  view, does not look at - while writing, and without leaving a class behind
+  that fails every later build. Removed abap2UI5 API comes with its
+  replacement.
+- **report_issue: an issue drafted for the user to file.** For a defect in
+  abap2UI5 or its tools, not in the agent's own code: a link that opens the
+  repository's new-issue form with its fields filled in (abap2UI5,
+  mcp-server, docs, app-template) or title and body (the sample
+  repositories), the same text as markdown, and the open issues that look
+  like it, from GitHub's public search. It files nothing (lib/report-issue.mjs).
+  The instructions say when to use it; `.github/ISSUE_TEMPLATE/bug_report.yml`
+  is new here, with the field ids the tool fills.
 - **A backend stop waits for the backend to be gone.** stopBackend sent
   SIGTERM and returned, so `backend restart` and a build spawned the next
   backend while the old process still held the port - for good, when it was
