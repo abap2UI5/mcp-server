@@ -9,10 +9,10 @@ import { parseExamples, searchExamples, catalogueEntries, derivedControls, CATAL
 import { CORPUS_DIRS, resolveLintConfig, viewCheckCandidates, SERVER_ROOT } from '../lib/repos.mjs';
 import { sliceCatalogue } from '../lib/pitfalls.mjs';
 import { sliceGuide, guideChapters } from '../lib/guide.mjs';
-import { parseApi, searchApi, apiSummary, byNameMatch } from '../lib/api.mjs';
+import { parseApi, searchApi, apiSummary, byNameMatch, splitByName } from '../lib/api.mjs';
 import { searchDocs, slicePage, headingText, markdownLinks } from '../lib/docs.mjs';
 import { parseSizes } from '../lib/screenshot.mjs';
-import { oneOf, boundedInt, stringArray, checkStringArgs } from '../lib/args.mjs';
+import { oneOf, boundedInt, stringArray, checkStringArgs, startParams } from '../lib/args.mjs';
 import { readCached } from '../lib/cache.mjs';
 import { scaffold, rename, validClassName, templateFiles, readSpec } from '../lib/scaffold.mjs';
 import fs from 'node:fs';
@@ -1175,6 +1175,20 @@ test('a verified port outranks an unverified one when the relevance ties', () =>
   assert.equal(named[0].status, 'generated');
 });
 
+test('examples: a term that stands as a word outranks the same letters inside an API name', () => {
+  const cat = {
+    samples: [
+      { class: 'z2ui5_cl_device', file: 'src/a.clas.abap', category: 'Device', title: 'Device Model', keywords: 'device orientation popup_close popup_display' },
+      { class: 'z2ui5_cl_popup', file: 'src/b.clas.abap', category: 'Popups', title: 'Popup to Confirm', keywords: 'dialog confirm' },
+      { class: 'z2ui5_cl_popups', file: 'src/c.clas.abap', category: 'Popups', title: 'Dialogs', keywords: 'dialog popups' },
+    ],
+  };
+  // before: the device model came first, its keywords hold the letters "popup"
+  const order = searchExamples({ query: 'popup', repo: 'samples', rawCatalogue: cat }).map((e) => e.cls);
+  assert.equal(order.at(-1), 'Z2UI5_CL_DEVICE', `the API name came last: ${order}`);
+  assert.deepEqual(order.slice(0, 2).sort(), ['Z2UI5_CL_POPUP', 'Z2UI5_CL_POPUPS'], 'a title word and a plural keyword both count');
+});
+
 /* catalogue-derived.json (samples-controls, samples) lists every control
  * type a sample's view BUILDS. The catalogue's own words name what a port is
  * filed under, so "sap.m.Dialog" found 7 of the 33 ports that build one. A
@@ -1639,6 +1653,27 @@ test('an API hit whose NAME answers the query comes first, the source order with
   // every term in the name beats a docs-only hit, without reordering the rest
   assert.deepEqual(byNameMatch(entries, ['display', 'box']).map((e) => e.name), ['message_box_display', 'nav_app_leave', 'message_toast_display', 'message_toast']);
   assert.deepEqual(byNameMatch([], ['x']), []);
+});
+
+test('an API query: what the NAME answers comes whole, what only its docs mention comes as one line', () => {
+  const found = {
+    methods: [
+      { name: '_bind', doc: 'Bind a variable. Two-way.', parameters: [{ name: 'val' }] },
+      { name: 'view_display', doc: 'Show a view. Its bindings come from _bind.', parameters: [] },
+    ],
+    constants: [{ name: 'cs_event', doc: 'Events, some of them bind.', values: [] }],
+  };
+  const { named, mentioned } = splitByName(found, '_bind');
+  assert.deepEqual(named.methods.map((m) => m.name), ['_bind']);
+  assert.equal(named.methods[0].parameters.length, 1, 'a name hit stays whole');
+  assert.deepEqual(mentioned, [
+    { kind: 'method', name: 'view_display', about: 'Show a view.' },
+    { kind: 'constant', name: 'cs_event', about: 'Events, some of them bind.' },
+  ]);
+  // no name matches: every hit stays whole, as before
+  const docsOnly = splitByName(found, 'two-way');
+  assert.deepEqual(docsOnly.named.methods.map((m) => m.name), ['_bind', 'view_display']);
+  assert.deepEqual(docsOnly.mentioned, []);
 });
 
 test('the API parser reports, never throws, on a damaged interface', () => {
@@ -2432,4 +2467,22 @@ test('catalogue rows and markdown links take linear time over runs of link opene
     assert.equal(searchDocs({ query: 'zz', pages: [{ path: 'p', text: `# zz\n${body}` }] }).length, 1);
   }
   assert.ok(Date.now() - t0 < 2000, `took ${Date.now() - t0} ms`);
+});
+
+test('startParams: the start parameters of an app as the query after app_start, refused when they cannot be one', () => {
+  assert.equal(startParams(undefined), '');
+  assert.equal(startParams(null), '');
+  assert.equal(startParams({}), '');
+  assert.equal(startParams({ source: 'demo', n: 3, f: true }), '&source=demo&n=3&f=true');
+  // encoded: a value cannot add a parameter of its own
+  assert.equal(startParams({ 'a.b-c_d': 'x y&app_start=z' }), '&a.b-c_d=x%20y%26app_start%3Dz');
+  assert.throws(() => startParams('source=demo'), /must be an object of start parameters/);
+  assert.throws(() => startParams(['demo']), /must be an object of start parameters/);
+  // the class is the tool's own argument - in any case
+  assert.throws(() => startParams({ App_Start: 'zcl_other' }), /cannot carry app_start/);
+  assert.throws(() => startParams({ '1x': 1 }), /no start parameter name/);
+  assert.throws(() => startParams({ 'a b': 1 }), /no start parameter name/);
+  assert.throws(() => startParams({ a: { b: 1 } }), /must be a string, a number or a boolean/);
+  assert.throws(() => startParams({ a: 'x'.repeat(1001) }), /at most 1000/);
+  assert.throws(() => startParams(Object.fromEntries(Array.from({ length: 21 }, (_, i) => [`p${i}`, i]))), /at most 20/);
 });

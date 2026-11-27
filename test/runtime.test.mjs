@@ -863,6 +863,7 @@ test('every client of the backend connects to the address it binds, never to the
   assert.equal(start.hostname, BACKEND_HOST, 'run_app\'s Chromium opens the bound address');
   assert.equal(start.port, '4567');
   assert.equal(start.search, '?app_start=ZCL_APP');
+  assert.equal(new URL(appStartUrl('ZCL_APP', 4567, '&source=demo')).search, '?app_start=ZCL_APP&source=demo', 'the start parameters follow the class');
   assert.equal(new URL(backendBaseUrl()).hostname, BACKEND_HOST, 'the app tools post to the bound address');
   assert.equal(new URL(backendBaseUrl()).port, String(PORT));
 

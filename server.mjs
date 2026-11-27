@@ -50,7 +50,7 @@ import { searchCapabilities, capabilitySummary } from './lib/capabilities.mjs';
 import { searchExamples, exampleSummary, catalogueFiles, findExample } from './lib/examples.mjs';
 import { searchPitfalls } from './lib/pitfalls.mjs';
 import { readGuide, sliceGuide, guideChapters, guideFile, GUIDE_PATH } from './lib/guide.mjs';
-import { readApiParsed, searchApi, apiSummary, apiFile, API_PATH } from './lib/api.mjs';
+import { readApiParsed, searchApi, apiSummary, apiFile, API_PATH, splitByName } from './lib/api.mjs';
 import { parseSizes, screenshotSource } from './lib/screenshot.mjs';
 import { resolveSamplesControls, resolveAppTemplate, importViewCheck, SERVER_ROOT, workspaceRoot } from './lib/repos.mjs';
 import { searchDocs, docsRoot } from './lib/docs.mjs';
@@ -67,13 +67,14 @@ import { TOOLS } from './lib/tools.mjs';
 import { annotate, TOOL_ANNOTATIONS, SYSTEM_TOOL_ANNOTATIONS } from './lib/annotations.mjs';
 import { serverInstructions } from './lib/instructions.mjs';
 import { explainRemoved } from './lib/removed-api.mjs';
+import { classNameFromSource, blockingDevObjects, blockingSentence } from './lib/deploy.mjs';
 import { RESOURCES, RESOURCE_TEMPLATES, GUIDE_CHAPTER_TEMPLATE, readResource } from './lib/resources.mjs';
 import { PROMPTS, getPrompt } from './lib/prompts.mjs';
 import { missingSiblingMessage, missingLocalSiblingMessage } from './lib/siblings.mjs';
 import { hydrate, REMOTE_TOOLS, resourceRepos, fetchRemoteFile, isRemoteCheckout, remoteBase, resolvedInside } from './lib/remote.mjs';
 import { readInside } from './lib/contain.mjs';
 import { resolveKey, RESOLVERS } from './lib/repos.mjs';
-import { oneOf, boundedInt, stringArray, optionalName, checkStringArgs } from './lib/args.mjs';
+import { oneOf, boundedInt, stringArray, optionalName, checkStringArgs, startParams } from './lib/args.mjs';
 import {
   deployApp,
   deployFolder,
@@ -106,6 +107,7 @@ import {
   classNameOf,
 } from './lib/runtime.mjs';
 import { createAppClient, AgentError } from './lib/appclient.mjs';
+import { callHandler, icfClassName } from './lib/icf.mjs';
 import { toolsWithUi, uiEnabled } from './lib/mcp-app.mjs';
 import { appCard, cardContent, defaultAppFormat, APP_FORMATS } from './lib/adaptive-card.mjs';
 import { migrateReport, deployFiles, resolvePopups, validTargetClass, SetupError, KernelEscapeError } from './lib/migrate.mjs';
@@ -429,9 +431,10 @@ async function handleSystem(name, args = {}, { signal } = {}) {
       const cls = systemClassName(args.app);
       const format = oneOf(args.format, { name: 'format', allowed: APP_FORMATS, dflt: defaultAppFormat() });
       const maxRows = boundedInt(args.max_rows, { name: 'max_rows', dflt: 20, min: 0, max: 200 });
+      const query = startParams(args.params);
       return snapshotAnswer(async () => {
         await sys.ready();
-        return client.start(cls, { values: args.values, maxRows, signal });
+        return client.start(cls, { values: args.values, maxRows, signal, query });
       }, { format, client });
     }
     case 'app_describe': {
@@ -979,8 +982,20 @@ async function handle(name, args = {}, ctx = {}) {
        * against the answer budget: "e" matched almost the whole interface,
        * ~75,000 characters. An entry is never cut (a signature belongs with
        * its documentation). */
-      const { notes, groups } = paged(found, '(same query and kind)');
-      return text({ matches: total, ...notes, source: 'abap2UI5/' + API_PATH.join('/'), ...groups });
+      /* What the NAME answers comes whole; what only mentions the query in
+       * its docs comes as one line each (lib/api.mjs splitByName). */
+      const { named, mentioned } = splitByName(found, args.query);
+      const { notes, groups } = paged(named, '(same query and kind)');
+      return text({
+        matches: total,
+        ...notes,
+        source: 'abap2UI5/' + API_PATH.join('/'),
+        ...groups,
+        ...(mentioned.length ? {
+          mentionedIn: mentioned,
+          mentionedHint: 'these only mention the query in their documentation - ask for one by its name for the whole entry',
+        } : {}),
+      });
     }
     case 'generation_rules': {
       const miss = missingSibling('samples-controls');
@@ -1128,6 +1143,15 @@ async function handle(name, args = {}, ctx = {}) {
     case 'deploy_app': {
       const miss = missingSandbox();
       if (miss) return miss;
+      // the name is in the source: taken from there when it was left out
+      if ((args.class_name === undefined || args.class_name === null || args.class_name === '') && typeof args.abap_source === 'string') {
+        const inferred = classNameFromSource(args.abap_source);
+        if (!inferred) {
+          return toolError('class_name is missing and the source defines no class (no `CLASS <name> DEFINITION`) - '
+            + 'pass the whole class source, or class_name');
+        }
+        args = { ...args, class_name: inferred };
+      }
       const res = deployApp({
         className: args.class_name,
         source: args.abap_source,
@@ -1156,6 +1180,7 @@ async function handle(name, args = {}, ctx = {}) {
         if (!reply.lint.ok) {
           const removed = await explainRemoved(reply.lint);
           reply.hint = 'fix the lint findings and deploy again; build_backend is only worth running on a clean lint'
+            + ` - the class is in the dev sandbox as it is, and every deployed app is built together: until it is fixed or taken out (remove_app { class_name: "${res.class}" }), build_backend fails for all of them`
             + (removed ? ` - ${removed}` : '');
         }
       }
@@ -1524,7 +1549,10 @@ async function handle(name, args = {}, ctx = {}) {
       const res = await buildBackend({ mode, onLine: progressReporter(ctx), signal: ctx.signal, beforeBuild: stopBackend });
       if (res.joined) return toolError(`build_backend cancelled by the client: ${res.tail}`);
       if (res.aborted) return toolError(`build cancelled by the client (mode ${res.mode || mode}):\n${res.tail}`);
-      if (!res.ok) return toolError(`build failed (exit ${res.code}, mode ${res.mode || mode}):\n${res.tail}`);
+      if (!res.ok) {
+        return toolError(`build failed (exit ${res.code}, mode ${res.mode || mode}):\n${res.tail}`
+          + blockingSentence(blockingDevObjects(res.tail, listDevApps())));
+      }
       return text({
         built: true,
         mode: res.mode,
@@ -1544,10 +1572,15 @@ async function handle(name, args = {}, ctx = {}) {
       });
     }
     case 'verify_app': {
+      if ((args.class_name === undefined || args.class_name === null || args.class_name === '') && typeof args.abap_source === 'string') {
+        args = { ...args, class_name: classNameFromSource(args.abap_source) || '' };
+      }
       /* Composed out of the single tools' handlers, so a stage answers
        * exactly what its tool answers and there is one implementation of
        * each. A stage's tool error is the stage's failure; the loop stops
        * there, and everything before it stays in the report. */
+      // start parameters wrong: refused now, not after a deploy and a build
+      startParams(args.params);
       const stages = {};
       const result = (label, r) => {
         const text = r.content && r.content.find((c) => c.type === 'text');
@@ -1595,7 +1628,7 @@ async function handle(name, args = {}, ctx = {}) {
         stages.boot = { skipped: 'boot: false' };
         return done(null);
       }
-      const r = await handle('run_app', { class_name: args.class_name, timeout_ms: args.timeout_ms }, ctx);
+      const r = await handle('run_app', { class_name: args.class_name, timeout_ms: args.timeout_ms, params: args.params }, ctx);
       const rok = result('boot', r);
       const image = r.content && r.content.find((c) => c.type === 'image');
       const reply = done(rok && stages.boot.ok !== false ? null : 'boot');
@@ -1632,6 +1665,7 @@ async function handle(name, args = {}, ctx = {}) {
         className: args.class_name,
         timeoutMs: boundedInt(args.timeout_ms, { name: 'timeout_ms', dflt: 60000, min: 5000, max: 600000 }),
         signal: ctx.signal,
+        query: startParams(args.params),
       });
       const report = {
         class: res.class,
@@ -1660,6 +1694,7 @@ async function handle(name, args = {}, ctx = {}) {
           timeoutMs: boundedInt(args.timeout_ms, { name: 'timeout_ms', dflt: 60000, min: 5000, max: 600000 }),
           actionTimeoutMs: boundedInt(args.action_timeout_ms, { name: 'action_timeout_ms', dflt: 10000, min: 500, max: 120000 }),
           signal: ctx.signal,
+          query: startParams(args.params),
         });
       } catch (e) {
         return toolError(String((e && e.message) || e));
@@ -1703,9 +1738,10 @@ async function handle(name, args = {}, ctx = {}) {
       const format = oneOf(args.format, { name: 'format', allowed: APP_FORMATS, dflt: defaultAppFormat() });
       if (!backendBuilt()) return toolError('backend not built — call build_backend first (then app_start; app_list names what the build carries)');
       const maxRows = boundedInt(args.max_rows, { name: 'max_rows', dflt: 20, min: 0, max: 200 });
+      const query = startParams(args.params);
       await startBackend();
       const client = await agentClient();
-      return snapshotAnswer(() => client.start(cls, { values: args.values, maxRows, signal: ctx.signal }), { format, client });
+      return snapshotAnswer(() => client.start(cls, { values: args.values, maxRows, signal: ctx.signal, query }), { format, client });
     }
     case 'app_describe': {
       const maxRows = boundedInt(args.max_rows, { name: 'max_rows', dflt: undefined, min: 0, max: 200 });
@@ -1722,6 +1758,30 @@ async function handle(name, args = {}, ctx = {}) {
       return snapshotAnswer(() => client.act(args.session, {
         values: args.values, event: args.event, window: args.window, args: args.args, row: args.row, maxRows, signal: ctx.signal,
       }), { format, client });
+    }
+    case 'call_handler': {
+      const miss = missingBackend();
+      if (miss) return miss;
+      if (backendKind() !== 'npm') {
+        return toolError('call_handler needs the npm backend - a framework checkout\'s express host has no /__a2ui5/icf route; unset A2UI5_HOME / A2UI5_MCP_BACKEND to run on @abap2ui5/node-runtime');
+      }
+      if (!icfClassName(args.class)) return toolError(`class must be an ABAP class name (letters, digits, _; at most 30), not ${JSON.stringify(args.class ?? null)}`);
+      if (!backendBuilt()) return toolError('backend not built — deploy the handler class (deploy_app / deploy_folder), then build_backend');
+      await startBackend();
+      try {
+        const answer = await callHandler({
+          baseUrl: backendBaseUrl(), className: args.class, method: args.method, path: args.path,
+          query: args.query, body: args.body, contentType: args.content_type, signal: ctx.signal,
+        });
+        return text({
+          ...answer,
+          ...(answer.status === 404 && /no deployed class/.test(answer.body)
+            ? { hint: 'deploy the class (it must implement if_http_extension), then build_backend - a class deployed after the last build is not in the backend yet' }
+            : {}),
+        });
+      } catch (e) {
+        return toolError(String((e && e.message) || e));
+      }
     }
     case 'run_unit_tests': {
       const miss = missingBackend();

@@ -266,7 +266,12 @@ framework transpiled; `init.mjs` boots it), `downport/` (the same commit's
 ABAP, what apps are transpiled against), `srv/host.mjs` (`initialize`,
 `createHandler`, `createApp`, `serve`) and in its package.json
 `abap2ui5.transpiler` (from the release after 1.145.0 also
-`abap2ui5.openAbapCore`). The workspace (`A2UI5_MCP_WORKSPACE`, default
+`abap2ui5.openAbapCore`). The host also serves the deployed HTTP handlers -
+any class implementing `if_http_extension` - at `/__a2ui5/icf/<CLASS>`,
+through the release's `createHandler({ handlerClass })` on an express app of
+its own, in front of the framework's (`lib/icf.mjs`; `call_handler` is the
+tool, the banner says `handlers: ...`). A release without `createHandler`
+serves as before. The workspace (`A2UI5_MCP_WORKSPACE`, default
 `~/.abap2ui5-mcp`):
 
     runtime/<version>/   package.json + package-lock.json (exact versions),

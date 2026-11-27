@@ -49,6 +49,79 @@
   linear scan (the head, `?`, the last colon outside a quoted string), and an
   argument longer than 4096 characters is asked for in `args` like any shape
   the client does not model.
+- **call_handler: the HTTP handlers of an app, tested without a system.**
+  An app is not only screens: a REST endpoint for a device, a webhook, the
+  door a middleware polls are classes implementing `if_http_extension`,
+  which a system serves through a service node in SICF. The npm backend
+  now runs every deployed handler class at `/__a2ui5/icf/<CLASS>` - through
+  the release's own `createHandler`, so `get_form_field`, the method, the
+  body and `set_status` behave as for the framework's handler; nothing to
+  configure, loopback only like every other request, a class that is not
+  deployed or is no handler answers 404 with the reason. The new tool
+  `call_handler` sends one request (method, path, query, body) and returns
+  status, content type and body - an endpoint used to need a script that
+  started its own express app around the backend
+  (`lib/icf.mjs`, the host's banner names the route).
+
+- **A dev app left broken no longer blocks every build in silence.** A
+  deploy whose lint fails still writes the class, and every deployed dev app
+  is built together - so verify_app of a clean app stopped at the build on
+  an older one, and the answer named a file of another class with no word
+  that it was another app. A failed build_backend now names the dev objects
+  it stopped at and the `remove_app` call for each (`blockingDevObjects` in
+  lib/deploy.mjs), and deploy_app's lint hint says the class is in the
+  sandbox as it is until fixed or removed.
+- **interact_app says why an element was not found.** A fill by `id: "f1"` -
+  an id from app_start's snapshot, the natural one to reuse - waited ten
+  seconds and answered "locator.evaluate: Timeout 10000ms exceeded.". A
+  timeout now names the element, and a snapshot-shaped id is called one, with
+  the two ways that work: the control's own id from the view, `text` or
+  `selector` - or app_start / app_act (`actionError` in lib/browser.mjs).
+
+- **api_reference answers what was asked, not everything that mentions it.**
+  A query came back with every matching entry whole: `_bind` was 41,000
+  characters (_bind and every method whose documentation says "bind"),
+  `popup` 42,000. The entries whose NAME carries the query still come whole;
+  the ones that only mention it in their documentation come as one line each
+  under `mentionedIn` - name and first sentence - to ask for by name. When no
+  name matches, nothing changes. Now `_bind` is 14,700 characters, `popup`
+  3,400 (`splitByName` in lib/api.mjs).
+- **examples ranks a term that stands as a word first.** "popup" led with
+  the device model, found by `popup_close` / `popup_display` among its
+  keywords; the popup samples came after. A term that is a keyword of its
+  own or a word of the title now ranks before the same letters inside an
+  identifier.
+- **deploy_app and verify_app take the class name from the source.**
+  `class_name` is optional now: left out, it is the class the source's
+  `CLASS ... DEFINITION` defines (`classNameFromSource` in lib/deploy.mjs).
+  An agent that sent only the source got "invalid class name ''"; a source
+  without any class now gets a sentence saying so.
+
+- **`run_app` photographs the app, not the frontend's empty shell.** The
+  boot check (more than three UI5 elements on the page) is met by the
+  frontend's own shell, before the app's first roundtrip is answered, its
+  XML view built and the libraries the view needs loaded; the 600 ms after
+  it covered a small app. A large view - a page of tables and a custom
+  control - was photographed as an empty grey page and reported `ok: true`.
+  After the boot, `run_app` and `interact_app` now wait until no request of
+  the page has been in flight and the DOM has not changed for 300 ms (at
+  least 300 ms, at most 10 s; a page that never quiets is photographed when
+  the time is up, as before). New: `firstViewSettled` in `lib/browser.mjs`.
+- **Start parameters for the tools that start an app.** `run_app`,
+  `interact_app`, `app_start` (sandbox and system mode) and `verify_app`'s
+  boot stage take an optional `params` object - `{ "source": "demo" }`
+  starts `?app_start=<class>&source=demo`, what the app reads with
+  `client->get_start_param( )`. Until now only the class could be named
+  (`app_start` encoded `zcl_app&source=demo` into the class name), so an app
+  that decides by a start parameter - a demo switch, a key to open, a mode -
+  could only be run and operated on its default branch. A name is letters,
+  digits and `_ - .` (at most 60), never `app_start`; a value a string, a
+  number or a boolean (at most 1000 characters); at most 20 - refused naming
+  what is wrong otherwise, and in `verify_app` before the deploy. The query is
+  encoded, so a value cannot add a parameter of its own. New:
+  `startParams` in `lib/args.mjs`; `appStartUrl` takes the query, and the app
+  client's `start` appends it to the location's own `SEARCH`.
+
 - **deploy_app names the replacement of removed API.** An app written from
   memory got `Method "_bind_edit" not found` from the lint and nothing else.
   A "not found" whose name is in the docs' deprecations.json (checkout, else

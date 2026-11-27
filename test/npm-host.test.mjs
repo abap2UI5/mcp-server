@@ -102,6 +102,44 @@ test('a release that exports compress gets it in front of the handler; one witho
   }
 });
 
+/* The deployed HTTP handlers (lib/icf.mjs): a release that exports
+ * createHandler serves any class at /__a2ui5/icf/<CLASS>, in front of the
+ * framework's app, the class and the rest of the path apart, the body raw. */
+test('a release with createHandler serves the deployed handlers at /__a2ui5/icf/<CLASS>', async () => {
+  fs.rmSync(workspace, { recursive: true, force: true });
+  fakeRelease(workspace, { compress: true, handlers: true });
+  deployApp({ className: 'zcl_hosted', source: APP('zcl_hosted') });
+  assert.equal((await buildBackend({ mode: 'auto' })).ok, true);
+  const request = (method, url, body) => new Promise((resolve, reject) => {
+    const req = http.request({ host: '127.0.0.1', port: PORT, path: url, method, timeout: 5000, headers: body ? { 'content-type': 'text/plain' } : {} }, (res) => {
+      let text = '';
+      res.on('data', (d) => (text += d));
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: text }));
+    });
+    req.on('error', reject);
+    req.end(body);
+  });
+  try {
+    const st = await startBackend();
+    assert.match(st.host, /compression: on.*; handlers: \/__a2ui5\/icf\/<CLASS>/);
+    const get = await request('GET', '/__a2ui5/icf/zcl_echo/orders/42?lift=L1');
+    assert.equal(get.status, 200);
+    assert.deepEqual(JSON.parse(get.body), { handler: 'ZCL_ECHO', url: '/orders/42?lift=L1', method: 'GET', body: null });
+    assert.equal(get.headers['x-fake-compress'], 'yes', 'behind the release\'s compress, like the framework');
+    const post = await request('POST', '/__a2ui5/icf/ZCL_ECHO?x=1', 'status=IDLE');
+    assert.deepEqual(JSON.parse(post.body), { handler: 'ZCL_ECHO', url: '/?x=1', method: 'POST', body: 'status=IDLE' });
+    const missing = await request('GET', '/__a2ui5/icf/ZCL_MISSING');
+    assert.equal(missing.status, 404);
+    assert.match(missing.body, /no deployed class ZCL_MISSING implementing if_http_extension/);
+    const bad = await request('GET', '/__a2ui5/icf/not-a-class');
+    assert.equal(bad.status, 404);
+    const page = JSON.parse((await request('GET', '/')).body);
+    assert.ok(page.classes.includes('ZCL_HOSTED'), 'every other path is still the framework\'s');
+  } finally {
+    await stopBackend();
+  }
+});
+
 /* The server's gates over stdio: with the npm backend in use, the tools that
  * used to demand a framework checkout answer for the npm backend instead - a
  * boot before a build names build_backend and the package, not a clone. */

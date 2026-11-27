@@ -1614,3 +1614,16 @@ test('windowed table: a second window request while one is in flight waits and c
   assert.deepEqual(sent.slice(1).map((b) => [b.S_FRONT.ID, ...b.S_FRONT.T_EVENT_ARG]), [[s.session, '/ROWS', '10'], ['W2', '/ROWS', '15']]);
   assert.equal(last.session, 'W3');
 });
+
+test('start: the start parameters follow the location\'s own query in SEARCH', async () => {
+  const seen = [];
+  const client = createAppClient({
+    transport: async (req) => { seen.push(JSON.parse(req.body).value.S_FRONT); throw new Error('ECONNREFUSED'); },
+    location: async (app) => ({ origin: 'http://127.0.0.1:3000', pathname: '/', search: `?app_start=${app}` }),
+    backendHint: '',
+  });
+  await assert.rejects(client.start('zcl_app', { query: '&source=demo' }), /did not answer/);
+  await assert.rejects(client.start('zcl_app'), /did not answer/);
+  assert.equal(seen[0].SEARCH, '?app_start=zcl_app&source=demo');
+  assert.equal(seen[1].SEARCH, '?app_start=zcl_app', 'none given: the location as it is');
+});

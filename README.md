@@ -241,12 +241,13 @@ fix it.
 | `read_app` | Read a deployed dev app's source back, and whether the built backend already carries it | the sandbox (as deploy_app) |
 | `build_backend` | Get the transpiled Node backend: without a checkout `@abap2ui5/node-runtime` from npm and only the dev apps transpiled (seconds); with one `prebuilt` downloads the framework's released backend and `incremental` re-transpiles the dev apps on top; `prebuilt`/`transpile` clone the framework when asked to; `full` runs the corpus' e2e-build | nothing (npm), or abap2UI5 (`full` needs samples-controls) |
 | `build_log` | Page through the last build's full output — the error the result's short tail cut off | nothing (reads the record the last build left) |
-| `run_app` | Boot an app headless: status, real page errors, and a **screenshot** | a build (npm backend or abap2UI5 checkout); samples-controls serves UI5 locally when present, the CDN otherwise |
+| `run_app` | Boot an app headless: status, real page errors, and a **screenshot**; optional start `params` (`{ "source": "demo" }` boots `?app_start=<class>&source=demo`) | a build (npm backend or abap2UI5 checkout); samples-controls serves UI5 locally when present, the CDN otherwise |
 | `interact_app` | Boot an app, then click, fill, press and wait through a short script — the **event branch**, photographed | a build (same as run_app) |
 | `app_list` | The app classes the built backend can start — the deployed dev apps and the framework's own | a build (npm backend or abap2UI5 checkout) |
-| `app_start` | Start an app and get its **agent snapshot**: fields (path, label, kind, value), actions (event + arguments), tables, messages — over the abap2UI5 JSON protocol, no browser; in an MCP Apps host also an interactive screen, with `format: "adaptive-card"` also an Adaptive Card | a build (same as run_app) |
+| `app_start` | Start an app (optional start `params`, as run_app) and get its **agent snapshot**: fields (path, label, kind, value), actions (event + arguments), tables, messages — over the abap2UI5 JSON protocol, no browser; in an MCP Apps host also an interactive screen, with `format: "adaptive-card"` also an Adaptive Card | a build (same as run_app) |
 | `app_describe` | The current agent snapshot of a session, from memory — no roundtrip | a session from app_start |
 | `app_act` | Fill fields and fire an event by name — validated against the snapshot, sent as the real model delta — and get the next snapshot | a session from app_start |
+| `call_handler` | Send one HTTP request (method, path, query, body) to a deployed `if_http_extension` class — a REST endpoint, a webhook — which the npm backend serves at `/__a2ui5/icf/<CLASS>`, and get status, content type and body | a build (npm backend) |
 | `run_unit_tests` | Run the deployed apps' test classes (on a checkout: or the whole transpiled tree) in the open-abap runtime: assertions, not pictures | a build (npm backend or abap2UI5 checkout) |
 | `verify_app` | The whole loop in one call — validate, deploy, build, unit, boot — stopping at the first stage that fails | what the stages need |
 | `migrate_report` | Convert the **user interface of a classic ABAP report** into an abap-cloud-gui app class (report2UI5, the logic copied as it is): the class files, the migration report (TODOs, what was not carried over), the refusals with `file:row:col`; `deploy: true` builds it here and answers its selection screen's agent snapshot | abap-cloud-gui (with `npm ci`); `deploy` also the popups and a build |
@@ -309,6 +310,17 @@ one, not only those filed under it. `screenshot_view` and `run_app` answer the
 same question at three orders of magnitude apart: the first photographs the
 reconstructed **view** with no backend, the second the **running app** after a
 build. Most iterations should end at the first.
+
+### Calling an HTTP handler
+
+Not every class of an app is a screen: a REST endpoint, a webhook, the
+door a device or a middleware polls implement `if_http_extension` and are
+served by a service node in SICF on a system. The npm backend runs every
+deployed one at `/__a2ui5/icf/<CLASS>`, and `call_handler` sends it one
+request — `{ "class": "zcl_my_endpoint", "method": "POST", "query":
+{ "id": "42" }, "body": "..." }` — and answers with `status`,
+`content_type` and `body`. Nothing to configure; deploy, `build_backend`,
+call.
 
 ### Operating an app without a browser
 
