@@ -67,7 +67,8 @@ import { TOOLS } from './lib/tools.mjs';
 import { annotate, TOOL_ANNOTATIONS, SYSTEM_TOOL_ANNOTATIONS } from './lib/annotations.mjs';
 import { serverInstructions } from './lib/instructions.mjs';
 import { explainRemoved } from './lib/removed-api.mjs';
-import { classNameFromSource, blockingDevObjects, blockingSentence } from './lib/deploy.mjs';
+import { classNameFromSource, blockingDevObjects, blockingSentence, snapshotClass, restoreClass } from './lib/deploy.mjs';
+import { ISSUE_REPOS, issueUrl, issueMarkdown, similarIssues } from './lib/report-issue.mjs';
 import { RESOURCES, RESOURCE_TEMPLATES, GUIDE_CHAPTER_TEMPLATE, readResource } from './lib/resources.mjs';
 import { PROMPTS, getPrompt } from './lib/prompts.mjs';
 import { missingSiblingMessage, missingLocalSiblingMessage } from './lib/siblings.mjs';
@@ -1189,6 +1190,64 @@ async function handle(name, args = {}, ctx = {}) {
           : 'run build_backend once, then run_app to see the app';
       }
       return text(reply);
+    }
+    case 'lint_abap': {
+      const miss = missingSandbox();
+      if (miss) return miss;
+      if (typeof args.abap_source !== 'string' || !args.abap_source.trim()) {
+        return toolError('abap_source is required: the full source of the class (CLASS ... DEFINITION + IMPLEMENTATION)');
+      }
+      const cls = args.class_name || classNameFromSource(args.abap_source);
+      if (!cls) {
+        return toolError('class_name is missing and the source defines no class (no `CLASS <name> DEFINITION`) - '
+          + 'pass the whole class source, or class_name');
+      }
+      /* The lint deploy_app runs reads the sandbox, so the class goes in for
+       * the lint and the sandbox is put back after it - a class of that name
+       * already deployed exactly as it was, a new one gone again. */
+      const before = snapshotClass(cls);
+      let lint;
+      try {
+        const res = deployApp({ className: cls, source: args.abap_source, testclasses: args.testclasses });
+        const report = progressReporter(ctx);
+        lint = await lintApp(res.class, { signal: ctx.signal, onLine: report });
+      } finally {
+        restoreClass(cls, before);
+      }
+      if (lint.aborted) return toolError('lint_abap cancelled during the lint - the sandbox is as it was');
+      const reply = { class: cls, ok: lint.ok, issues: lint.issues };
+      if (!lint.ok) {
+        const removed = await explainRemoved(reply);
+        reply.hint = 'fix the findings and lint again' + (removed ? ` - ${removed}` : '');
+      } else {
+        reply.next = 'deploy_app (or verify_app) to build and run it';
+      }
+      reply.note = 'nothing was deployed: the dev sandbox is as it was before this call';
+      return text(reply);
+    }
+    case 'report_issue': {
+      const repo = oneOf(args.repo, { name: 'repo', allowed: Object.keys(ISSUE_REPOS) });
+      for (const k of ['title', 'what_happened']) {
+        if (typeof args[k] !== 'string' || !args[k].trim()) return toolError(`${k} is required`);
+      }
+      const fields = {
+        title: args.title.trim().slice(0, 200),
+        whatHappened: args.what_happened,
+        reproduction: typeof args.reproduction === 'string' ? args.reproduction : '',
+        version: typeof args.version === 'string' ? args.version : '',
+        environment: typeof args.environment === 'string' ? args.environment : '',
+      };
+      const { url, cut } = issueUrl(repo, fields);
+      const similar = await similarIssues(repo, fields.title);
+      return text({
+        filed: false,
+        repo: `abap2UI5/${ISSUE_REPOS[repo].name}`,
+        url,
+        ...(cut ? { cut: 'the reproduction did not fit the link - the user pastes it from `markdown`' } : {}),
+        ...(similar.issues ? { similarOpenIssues: similar.issues } : { similarSearch: similar.error }),
+        markdown: issueMarkdown(fields),
+        next: 'show the user the draft and the link - they file it, or comment on one of similarOpenIssues if it is the same problem. Nothing was posted.',
+      });
     }
     case 'deploy_folder': {
       const miss = missingSandbox();

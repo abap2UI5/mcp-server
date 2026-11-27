@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **lint_abap: abaplint without deploying.** The lint deploy_app runs -
+  app-template's rules, the framework as the dependency, the project's
+  @abaplint/cli - on a class that is only put into the sandbox for the lint;
+  the sandbox is restored afterwards, a deployed class byte for byte, a new
+  one gone (`snapshotClass` / `restoreClass` in lib/deploy.mjs). Syntax,
+  unknown methods and classes, types - what validate_view, which checks the
+  view, does not look at - while writing, and without leaving a class behind
+  that fails every later build. Removed abap2UI5 API comes with its
+  replacement.
+- **report_issue: an issue drafted for the user to file.** For a defect in
+  abap2UI5 or its tools, not in the agent's own code: a link that opens the
+  repository's new-issue form with its fields filled in (abap2UI5,
+  mcp-server, docs, app-template) or title and body (the sample
+  repositories), the same text as markdown, and the open issues that look
+  like it, from GitHub's public search. It files nothing (lib/report-issue.mjs).
+  The instructions say when to use it; `.github/ISSUE_TEMPLATE/bug_report.yml`
+  is new here, with the field ids the tool fills.
+
 - **A dev app left broken no longer blocks every build in silence.** A
   deploy whose lint fails still writes the class, and every deployed dev app
   is built together - so verify_app of a clean app stopped at the build on
