@@ -563,14 +563,24 @@ test('downloadPrebuilt is cancelled by the signal', { skip: !HAVE_TAR && 'needs 
 const A2 = resolveA2UI5({ local: true });
 const HAVE_BUILT = Boolean(A2 && backendBuilt() && fs.existsSync(path.join(A2, 'node/output/index.mjs')));
 
+/* z2ui5_cl_ui5_view_builder: the public view API, in the framework's src/02
+ * with a test include. It used to be z2ui5_cl_pop_to_confirm, which moved to
+ * abap2UI5-ext in 1.151.0 - a class the checkout does not have runs no tests,
+ * and "ran > 0" said so. The include is asserted first, so the next move of
+ * the class under test fails with its reason rather than with a count. */
+const UNIT_CLASS = 'z2ui5_cl_ui5_view_builder';
+
 test('run_unit_tests runs one object\'s test classes in the transpiled backend', { skip: !HAVE_BUILT && 'no built framework backend next to this checkout' }, async () => {
-  const res = await runUnitTests({ className: 'z2ui5_cl_pop_to_confirm' });
+  assert.ok(fs.existsSync(path.join(A2, 'src/02', `${UNIT_CLASS}.clas.testclasses.abap`)),
+    `the framework checkout at ${A2} ships no test include for ${UNIT_CLASS} - pick a class it does`);
+  const res = await runUnitTests({ className: UNIT_CLASS });
   assert.equal(res.filtered, true);
-  assert.equal(res.class, 'Z2UI5_CL_POP_TO_CONFIRM');
+  assert.equal(res.class, UNIT_CLASS.toUpperCase());
   assert.equal(res.ok, true, JSON.stringify(res.failed));
   assert.ok(res.ran > 0);
-  assert.ok(res.tests.every((t) => t.object === 'Z2UI5_CL_POP_TO_CONFIRM'));
-  assert.ok(!fs.existsSync(path.join(A2, 'node/output/index-mcp-z2ui5_cl_pop_to_confirm.mjs')), 'the filtered runner is removed again');
+  assert.ok(res.tests.every((t) => t.object === UNIT_CLASS.toUpperCase()));
+  // the runner copy is index-mcp-<class>-<pid>-<n>.mjs: no file with that prefix may be left
+  assert.deepEqual(fs.readdirSync(path.join(A2, 'node/output')).filter((f) => f.startsWith(`index-mcp-${UNIT_CLASS}`)), [], 'the filtered runner is removed again');
   const none = await runUnitTests({ className: 'zcl_no_such_app' });
   assert.equal(none.tests.length, 0);
   assert.equal(none.ok, true);
