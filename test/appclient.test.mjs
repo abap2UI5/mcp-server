@@ -12,6 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAppClient, buildDelta, errorText, AgentError, PROTOCOL, PROTOCOLS, EARLIER_IDS, headerOf, validContextId, fetchTransport, RESPONSE_MAX_BYTES } from '../lib/appclient.mjs';
 import { setAt } from '../lib/snapshot.mjs';
+import { scalesLinearly, scalesLinearlyAsync } from './helpers/timing.mjs';
 
 const FIX = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'agent');
 const fixture = (name) => JSON.parse(fs.readFileSync(path.join(FIX, `${name}.json`), 'utf8'));
@@ -112,10 +113,10 @@ test('errorText shows the error body verbatim: markup is text, nothing stripped 
 
 test('errorText takes linear time over a long run of whitespace inside the body', () => {
   // /\s+$/ retried each run from every one of its positions: 15 s for this body
-  const body = `a${' '.repeat(100000)}b${'\n'.repeat(100000)}c \n\t `;
-  const t0 = Date.now();
-  const out = errorText(500, body);
-  assert.ok(Date.now() - t0 < 1000, `took ${Date.now() - t0} ms`);
+  const make = (n) => `a${' '.repeat(n)}b${'\n'.repeat(n)}c \n\t `;
+  const linear = scalesLinearly(make, (b) => errorText(500, b), 25000);
+  assert.ok(linear.ok, `n: ${linear.small} ms, 4n: ${linear.big} ms - not linear`);
+  const out = errorText(500, make(100000));
   assert.ok(out.startsWith('HTTP 500: a   '), 'the body is still shown from its start');
   assert.equal(errorText(500, 'a 　\n \t'), 'HTTP 500: a', 'trailing whitespace of every kind \\s matched is still trimmed');
 });
@@ -597,13 +598,23 @@ test('a $parameters ternary is read in linear time: blank runs, quoted colons, t
     `, \${$parameters>/selectedItem} ?${blanks}x`,
     `, \${$parameters>/selectedItem} ?${': '.repeat(20000)}x`,
   ];
-  const started = Date.now();
   const { client, bodies } = fakeApp(DIALOG('false', cases.join('')), ROWS());
   const s = await client.start('z_t');
   await rejects(client.act(s.session, { event: 'OK', row: 2 }), /^argument 2 of OK /);
   await client.act(s.session, { event: 'OK', row: 2, args: [null, null, 'given', 'given2'] });
   assert.deepEqual(bodies[1].S_FRONT.T_EVENT_ARG, ['a2', 'a2', 'given', 'given2']);
-  assert.ok(Date.now() - started < 2000, `took ${Date.now() - started} ms`);
+  // the blank run inside the length cap (4096): 1000 against 4000 blanks -
+  // the cubic regex took 6.6 s for 3000
+  const linear = await scalesLinearlyAsync(
+    (n) => `, \${$parameters>/selectedItem} ?${' '.repeat(n)}x`,
+    async (arg) => {
+      const app = fakeApp(DIALOG('false', arg), ROWS());
+      const started = await app.client.start('z_t');
+      await rejects(app.client.act(started.session, { event: 'OK', row: 2 }), /^argument 0 of OK /);
+    },
+    1000,
+  );
+  assert.ok(linear.ok, `n: ${linear.small} ms, 4n: ${linear.big} ms - not linear`);
 });
 
 /* A view nested 5000 levels deep overflowed the snapshot's walk after the

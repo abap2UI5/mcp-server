@@ -282,7 +282,7 @@ test('the CI runner takes the npm package unless a checkout is named or the clon
   assert.match(renderSummary({ framework: '1.145.0', mode: 'npm', results: [] }), /framework 1\.145\.0, backend: @abap2ui5\/node-runtime/);
 });
 
-test('the abap2ui5-unit bin runs when invoked through npm\'s bin symlink', () => {
+test('the abap2ui5-unit bin runs when invoked through npm\'s bin symlink', (t) => {
   /* npm installs a bin as node_modules/.bin/<name> -> the script; process.argv[1]
    * then carries the LINK. The main guard used to compare that plain path with
    * the module's real one and never matched, so the bin exited 0 having done
@@ -294,8 +294,10 @@ test('the abap2ui5-unit bin runs when invoked through npm\'s bin symlink', () =>
     const link = path.join(dir, 'abap2ui5-unit');
     try {
       fs.symlinkSync(script, link);
-    } catch {
-      return; // no symlinks here: nothing to prove
+    } catch (e) {
+      // no symlinks here: nothing to prove - and said as a skip, not a pass
+      t.skip(`a symbolic link cannot be made here (${e.code || e.message})`);
+      return;
     }
     const out = run(process.execPath, [link, '--help'], { encoding: 'utf8' });
     assert.match(out, /^abap2ui5-unit/, 'the usage, from the header comment - without the shebang');

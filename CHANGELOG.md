@@ -13,6 +13,43 @@
   and task 13 closed its popover with a roundtrip (`close-only-roundtrip`) -
   it uses `follow_up_action( cs_event-popover_close )` now. A new series:
   results from the old pin are not comparable.
+- **Deprecated: the `mcp-server` bin.** The package installs three bins, and
+  `mcp-server` is a name any other MCP server's package may install as well -
+  in one project's `node_modules/.bin` the last install wins, and a
+  registration that runs `mcp-server` can start somebody else's server. It
+  stays in every 1.x release (removing a bin is a major change, see 1.0.0
+  below) and will be removed in 2.0.0. Register the server with the
+  explicit bin, as the README, the VS Code extension and the app template
+  already do: `npx --yes -p @abap2ui5/mcp-server abap2ui5-mcp`. The short
+  form `npx --yes @abap2ui5/mcp-server` resolves through `mcp-server` and
+  stops working with 2.0.0.
+- **The release workflow mints an OIDC token only where one is traded.**
+  `id-token: write` was granted workflow-wide, so the job that moves the
+  floating major tag (`contents: write`) could mint one too; it is now on
+  the `publish` and `mcp-registry` jobs only, and `publish` runs in the
+  GitHub environment `release`, whose deployment rules decide which refs may
+  publish.
+- **hono 4.13.23 and @hono/node-server 2.1.11** (through
+  @modelcontextprotocol/sdk) in the lockfile, past the advisories of
+  4.13.13 and 2.1.1 (middleware bypass on mounted and static paths, a
+  crash on a reset WebSocket upgrade). `npm audit --omit=dev` is clean.
+- **CI runs the tests it skipped.** A `browser` job installs Playwright's
+  Chromium and fetches the protocol commit the vendored renderer records,
+  so `test/interact-browser.test.mjs`, `test/mcp-app.test.mjs` and
+  `test/vendor.test.mjs` run in full, and the job fails when one of them
+  still skips.
+- **Tests that pass for the right reason.** A name-prefix sibling of a root
+  (`<base>/box2` beside `<base>/box`) is pinned as outside it
+  (`resolvedInside`); the system mode's write half has a case each for a
+  lock that is neither local nor in a request, the test include created
+  when the class metadata lists none, and the 60-character description cut.
+  The speed tests of errorText, parseWire, the ternary argument and model
+  markup ask whether the work scales linearly (n against 4n, the helper of
+  abap2UI5/linter) instead of comparing against a wall clock a loaded
+  runner exceeds; the joined-build cancel and the SIGKILL stop assert the
+  order of events, and the bin-symlink test reports a skip instead of a
+  pass where no symlink can be made.
+
 - **lint_abap: abaplint without deploying.** The lint deploy_app runs -
   app-template's rules, the framework as the dependency, the project's
   @abaplint/cli - on a class that is only put into the sandbox for the lint;
