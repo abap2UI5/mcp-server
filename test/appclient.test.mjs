@@ -606,6 +606,25 @@ test('a $parameters ternary is read in linear time: blank runs, quoted colons, t
   assert.ok(Date.now() - started < 2000, `took ${Date.now() - started} ms`);
 });
 
+/* A view nested 5000 levels deep overflowed the snapshot's walk after the
+ * response was adopted: start never returned the id and every later call on
+ * the session threw. Now start and act answer a snapshot that names the cut. */
+test('a view nested 5000 levels deep: start and act still answer a usable snapshot', async () => {
+  const deep = `<mvc:View xmlns="sap.m" xmlns:mvc="sap.ui.core.mvc"><Button text="Go" press=".eB(['GO'])"/>${'<VBox>'.repeat(5000)}<Text text="x"/>${'</VBox>'.repeat(5000)}</mvc:View>`;
+  const bodies = [];
+  const transport = async ({ body }) => {
+    bodies.push(JSON.parse(body).value);
+    return { status: 200, body: JSON.stringify({ S_FRONT: { ID: `D${bodies.length}`, APP: 'Z_T', S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'display', 'MAIN', deep]] } }, MODEL: {} }) };
+  };
+  const client = createAppClient({ transport, location: () => ({ origin: 'x', pathname: '/', search: '' }) });
+  const s = await client.start('z_t');
+  assert.equal(s.session, 'D1');
+  assert.match(s.unsupported.join(' '), /nested deeper than/);
+  const s2 = await client.act(s.session, { event: 'GO' });
+  assert.equal(s2.session, 'D2');
+  assert.equal(client.describe('D2').actions[0].event, 'GO');
+});
+
 test('`row` is a non-negative integer: a JSON number or a string of digits; "", false, [], true, 1.5, -1 are refused', async () => {
   /* server.mjs read `row` with Number(): "", false and [] became row 0 and
    * true row 1 - a pick of a row nobody named. The client checks it now. */

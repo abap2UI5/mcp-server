@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **A deeply nested view no longer breaks the session.** The snapshot's
+  walk is recursive, and a view nested 2000 levels deep overflowed the stack
+  after the client had already adopted the response: app_start never
+  returned the id and every later call on the session threw. The tree is now
+  cut below 256 levels (`MAX_VIEW_DEPTH`, named in `unsupported`), and an
+  analysis that fails after a response was adopted names the session the app
+  is at.
 - **A row event argument cannot stall the server.** The
   `${$parameters>/P} ? <expr> : <literal>` argument was matched by a regex
   that backtracked cubically on a run of blanks: 3000 of them, in a wire the

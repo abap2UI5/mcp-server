@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { parseViewXml, parseBinding, evalExpression, parseWire, describeArg, controlName } from '../lib/viewxml.mjs';
 import {
   buildSnapshot, analyzeScreen, applyResponse, emptyState, nameOfPath, FRONTEND_EVENTS, SNAPSHOT_VERSION, BINDING_CALL_EVENT,
-  windowStateOf, nextWindowCount, protocolOf, viewChanges, followUpActions,
+  windowStateOf, nextWindowCount, protocolOf, viewChanges, followUpActions, MAX_VIEW_DEPTH,
 } from '../lib/snapshot.mjs';
 
 const FIX = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'agent');
@@ -760,6 +760,21 @@ test('an out-of-range character reference stays as written; model markup of uncl
   const big = at(view('<FormattedText htmlText="{/H}"/>'), { H: `${'<'.repeat(80000)}<b>x</b>` });
   assert.ok(Date.now() - started < 1500, `${Date.now() - started} ms`);
   assert.ok(big);
+});
+
+/* The walk is recursive: a view nested 2000 levels deep threw a RangeError
+ * after the client had adopted the response. What lies below MAX_VIEW_DEPTH
+ * is cut and named; what is above it is described as before. */
+test('a view nested 5000 levels deep is described down to MAX_VIEW_DEPTH, the rest named in unsupported', () => {
+  const nest = (n, inner) => `<mvc:View xmlns="sap.m" xmlns:mvc="sap.ui.core.mvc"><Input value="{/A}"/>${'<VBox>'.repeat(n)}${inner}${'</VBox>'.repeat(n)}</mvc:View>`;
+  const at = (xml) => buildSnapshot({ state: applyResponse(emptyState(), { S_FRONT: { ID: '1', APP: 'Z_A', S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'display', 'MAIN', xml]] } }, MODEL: { A: 'a', X: 'x' } }) });
+  const deep = at(nest(5000, '<Input value="{/X}"/>'));
+  assert.deepEqual(deep.fields.map((f) => f.path), ['/A'], 'the field above the cut is there');
+  assert.equal(deep.unsupported.length, 1);
+  assert.match(deep.unsupported[0], new RegExp(`^MAIN view nested deeper than ${MAX_VIEW_DEPTH} levels \\(main\\) - 1 subtree\\(s\\) below that depth not described$`));
+  const shallow = at(nest(MAX_VIEW_DEPTH - 3, '<Input value="{/X}"/>'));
+  assert.deepEqual(shallow.fields.map((f) => f.path), ['/A', '/X'], 'a view within the limit is described whole');
+  assert.deepEqual(shallow.unsupported, []);
 });
 
 // ---------------------------------------------------- windowed tables ----

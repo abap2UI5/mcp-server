@@ -332,7 +332,8 @@ describe: custom controls (any namespace outside `sap.*`, except
 wires other than the popup/popover close, `T_CUSTOM` entries other than
 messages, timers and benign ones such as `SET_FOCUS`), tables or fields
 bound to a named model, element-bound fields, cut choice lists, unreadable
-event handlers.
+event handlers, and the controls of a view nested deeper than 256 levels
+(`MAX_VIEW_DEPTH`; what lies below is not walked).
 
 ## Operations
 
