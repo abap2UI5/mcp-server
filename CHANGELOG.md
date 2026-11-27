@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **A cancelled run_app / interact_app stops where it is.** An abort while
+  the backend was starting, the browser launching or the context being made
+  was not looked at until the boot had run its course - openPage attached
+  its abort listener only after newContext, and an aborted signal fires no
+  second time, so the context stayed open through a boot nobody waited for.
+  openApp now checks the signal after every await, and openPage closes a
+  context made under an aborted signal at once.
 - **The app tools read at most 32 MB of an answer.** The default transport
   read the backend's answer whole (`res.text()`), so a backend or a proxy
   that streamed without end held the server's memory until the timeout. It
