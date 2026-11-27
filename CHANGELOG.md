@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **call_handler: the HTTP handlers of an app, tested without a system.**
+  An app is not only screens: a REST endpoint for a device, a webhook, the
+  door a middleware polls are classes implementing `if_http_extension`,
+  which a system serves through a service node in SICF. The npm backend
+  now runs every deployed handler class at `/__a2ui5/icf/<CLASS>` - through
+  the release's own `createHandler`, so `get_form_field`, the method, the
+  body and `set_status` behave as for the framework's handler; nothing to
+  configure, loopback only like every other request, a class that is not
+  deployed or is no handler answers 404 with the reason. The new tool
+  `call_handler` sends one request (method, path, query, body) and returns
+  status, content type and body - an endpoint used to need a script that
+  started its own express app around the backend
+  (`lib/icf.mjs`, the host's banner names the route).
+
 - **deploy_app names the replacement of removed API.** An app written from
   memory got `Method "_bind_edit" not found` from the lint and nothing else.
   A "not found" whose name is in the docs' deprecations.json (checkout, else
