@@ -500,7 +500,8 @@ claude mcp add abap2ui5-dev-system \
 | `A2UI5_MCP_SYSTEM_USER` | The SAP user (Basic authentication) |
 | `A2UI5_MCP_SYSTEM_PASSWORD` | Its password — in the client's configuration file, in plain text |
 | `A2UI5_MCP_SYSTEM_PASSWORD_CMD` | Instead: a shell command that prints the password, run once and kept in memory. macOS keychain: store it with `security add-generic-password -s abap2ui5-dev -a DEVELOPER -w`, read it as above; Linux: `secret-tool lookup service abap2ui5-dev` |
-| `A2UI5_MCP_SYSTEM_INSECURE_TLS` | `1` accepts a certificate that cannot be verified (a development system's self-signed one). Better: `NODE_EXTRA_CA_CERTS` pointing at the system's CA certificate (PEM) |
+| `A2UI5_MCP_SYSTEM_CERT_SHA256` | The SHA-256 fingerprint of the system's certificate (`openssl x509 -noout -fingerprint -sha256 -in cert.pem`; colons and case do not matter): exactly that certificate is accepted without a CA, any other is refused before the logon is sent. The way to a development system's self-signed certificate |
+| `A2UI5_MCP_SYSTEM_INSECURE_TLS` | `1` accepts ANY certificate, unverified - the password goes to whoever answers. Read-only: the write tools refuse it. Better: the pin above, or `NODE_EXTRA_CA_CERTS` pointing at the system's CA certificate (PEM) |
 
 What to know before switching it on:
 
@@ -516,6 +517,11 @@ What to know before switching it on:
 - **Basic authentication only.** SAML, X.509 or SSO logons are not
   supported in this mode; the VS Code extension's system server (its auth
   proxy) is the way there.
+- **Use `https:`.** Basic authentication sends the password with every
+  request; over plain `http:` to anything but the loopback (`127.0.0.1`,
+  `[::1]`) it travels in clear text. The app tools still work there, but
+  `system_status` answers with the warning, and the write tools refuse it. `system_status` also says how the certificate
+  is treated (`tls`): verified, pinned, or accepted unverified.
 - **One system per registration.** Two systems are two entries with two
   names.
 - **No proxy support.** The requests go straight to the host;
@@ -566,6 +572,10 @@ What it will not do, whatever it is asked:
 - **Overwrite somebody else's work silently.** An existing class whose last
   change is not the logged-on user's is refused unless the call says
   `overwrite: true`; so is one in another package than the one given.
+- **Write over an unprotected connection.** `A2UI5_MCP_SYSTEM_INSECURE_TLS`
+  and a plain `http:` URL off the loopback make every write tool answer
+  with the misconfiguration, unsent; pin the certificate with
+  `A2UI5_MCP_SYSTEM_CERT_SHA256` instead.
 - **Leave a lock behind.** From the moment the class is locked, the unlock
   is sent whatever happens — a refused write, a dropped connection, a
   cancelled call — and the answer says whether the system confirmed it.
@@ -707,8 +717,11 @@ duplicates none of their content:
   attaches a `backend-<version>.tar.gz.sha256` sidecar beside the archive
   (releases after 1.148.0), and `build_backend` compares the download's
   sha256 against it - a mismatch discards the download and keeps the
-  previous build; a release without the sidecar unpacks as before and the
-  build log says it was unverified. The archive is code `run_app` boots, so
+  previous build. For a release after 1.148.0 a sidecar that is missing,
+  cannot be fetched or is no sha256sum line refuses the download the same
+  way (a mirror has to serve it beside the archive); only a release up to
+  1.148.0, which never had one, unpacks unverified, and the build log says
+  so. The archive is code `run_app` boots, so
   `A2UI5_MCP_PREBUILT_URL` must be `https:` - a plain `http:` mirror off the
   loopback is refused unless `A2UI5_MCP_PREBUILT_INSECURE=1` says the
   network is trusted (the sidecar is looked for at `<url>.sha256` there too).

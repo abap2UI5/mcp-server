@@ -255,7 +255,13 @@
         },
         {
           "name": "A2UI5_MCP_SYSTEM_INSECURE_TLS",
-          "description": "System mode: set to 1 to accept a certificate that cannot be verified. NODE_EXTRA_CA_CERTS with the CA is the better fix.",
+          "description": "System mode: set to 1 to accept ANY certificate, unverified - read-only, the write tools refuse it. A2UI5_MCP_SYSTEM_CERT_SHA256 or NODE_EXTRA_CA_CERTS with the CA is the better fix.",
+          "format": "string",
+          "isRequired": false
+        },
+        {
+          "name": "A2UI5_MCP_SYSTEM_CERT_SHA256",
+          "description": "System mode: the SHA-256 fingerprint of the system's certificate. Exactly that certificate is accepted without a CA, any other is refused before the logon is sent.",
           "format": "string",
           "isRequired": false
         },

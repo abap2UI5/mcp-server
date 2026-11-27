@@ -80,7 +80,7 @@ Worth knowing before assessing a report:
   system variables (`SYSTEMROOT`, `WINDIR`, `COMSPEC`, `PATHEXT`,
   `SYSTEMDRIVE`, `APPDATA`, `LOCALAPPDATA`, `USERNAME`, `USERDOMAIN`,
   `PROCESSOR_ARCHITECTURE`, `NUMBER_OF_PROCESSORS`) - plus `PORT` and the
-  loopback `HOST` (`appChildEnv` in `lib/runtime.mjs` lists each with its
+  loopback `HOST` (`appChildEnv` in `lib/backend-process.mjs` lists each with its
   reader; `test/security.test.mjs` fails when this list and that one
   differ).
   The GitHub token, the system-mode SAP credentials and anything else the
@@ -130,7 +130,11 @@ Worth knowing before assessing a report:
   and the SAP namespaces it knows are refused whatever the pattern says. The
   package and the transport request are arguments, never chosen or created;
   a class last changed by another user is refused without `overwrite: true`;
-  the lock is released in a `finally`. This half is **experimental and has
+  the lock is released in a `finally`. The write half refuses the blanket
+  `A2UI5_MCP_SYSTEM_INSECURE_TLS` and plain `http:` off the loopback (the
+  logon in clear text); a system without a trusted CA is reached by pinning
+  its certificate (`A2UI5_MCP_SYSTEM_CERT_SHA256`, compared before the first
+  byte - the Basic logon - is written). This half is **experimental and has
   only been tested against the fake system of the test suite**
   (`test/system-write.test.mjs`), not a real one: the model is that a
   developer, not the server, owns what an agent with these tools does to a
@@ -150,9 +154,9 @@ Worth knowing before assessing a report:
   the memory or the temp disk. An answer that declares more is refused
   unread, one that streams more is cut at the cap; either is reported by URL
   (`TEXT_MAX_BYTES` in `lib/remote.mjs`, `PREBUILT_MAX_BYTES` in
-  `lib/runtime.mjs`).
+  `lib/prebuilt.mjs`).
 - **Every spawned child gets a hard timeout and is killed as a process group**
-  (`lib/runtime.mjs`), so a hung or forking build cannot outlive the call that
+  (`lib/spawn.mjs`), so a hung or forking build cannot outlive the call that
   started it.
 - **It runs only tools the checkouts installed themselves.** The lint and
   the incremental transpile start `<checkout>/node_modules/@abaplint/cli`
