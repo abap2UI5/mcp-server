@@ -12,7 +12,7 @@ import { sliceGuide, guideChapters } from '../lib/guide.mjs';
 import { parseApi, searchApi, apiSummary, byNameMatch, splitByName } from '../lib/api.mjs';
 import { searchDocs, slicePage, headingText, markdownLinks } from '../lib/docs.mjs';
 import { parseSizes } from '../lib/screenshot.mjs';
-import { oneOf, boundedInt, stringArray, checkStringArgs } from '../lib/args.mjs';
+import { oneOf, boundedInt, stringArray, checkStringArgs, startParams } from '../lib/args.mjs';
 import { readCached } from '../lib/cache.mjs';
 import { scaffold, rename, validClassName, templateFiles, readSpec } from '../lib/scaffold.mjs';
 import fs from 'node:fs';
@@ -2467,4 +2467,22 @@ test('catalogue rows and markdown links take linear time over runs of link opene
     assert.equal(searchDocs({ query: 'zz', pages: [{ path: 'p', text: `# zz\n${body}` }] }).length, 1);
   }
   assert.ok(Date.now() - t0 < 2000, `took ${Date.now() - t0} ms`);
+});
+
+test('startParams: the start parameters of an app as the query after app_start, refused when they cannot be one', () => {
+  assert.equal(startParams(undefined), '');
+  assert.equal(startParams(null), '');
+  assert.equal(startParams({}), '');
+  assert.equal(startParams({ source: 'demo', n: 3, f: true }), '&source=demo&n=3&f=true');
+  // encoded: a value cannot add a parameter of its own
+  assert.equal(startParams({ 'a.b-c_d': 'x y&app_start=z' }), '&a.b-c_d=x%20y%26app_start%3Dz');
+  assert.throws(() => startParams('source=demo'), /must be an object of start parameters/);
+  assert.throws(() => startParams(['demo']), /must be an object of start parameters/);
+  // the class is the tool's own argument - in any case
+  assert.throws(() => startParams({ App_Start: 'zcl_other' }), /cannot carry app_start/);
+  assert.throws(() => startParams({ '1x': 1 }), /no start parameter name/);
+  assert.throws(() => startParams({ 'a b': 1 }), /no start parameter name/);
+  assert.throws(() => startParams({ a: { b: 1 } }), /must be a string, a number or a boolean/);
+  assert.throws(() => startParams({ a: 'x'.repeat(1001) }), /at most 1000/);
+  assert.throws(() => startParams(Object.fromEntries(Array.from({ length: 21 }, (_, i) => [`p${i}`, i]))), /at most 20/);
 });
