@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **abap2UI5-bench judges by linter 0.13.0** (`bench/`, not part of the
+  package). Its lockfile held `@abap2ui5/linter` and `linter-render` at
+  0.8.3, and `verify.mjs` requires the gate versions of the pinned
+  app-template's lockfile, so the template pin moved with them: `templateRef`
+  to app-template `bf956b2` (abap2UI5 1.151.0, linter 0.13.0, abaplint
+  2.120.120, AGENTS.md with the guide's essentials and the full guide under
+  `build-an-app`). Five references failed the newer gates and were fixed:
+  `condense( ... ) IS INITIAL` is no valid operand (tasks 05, 11, 15, 18),
+  and task 13 closed its popover with a roundtrip (`close-only-roundtrip`) -
+  it uses `follow_up_action( cs_event-popover_close )` now. A new series:
+  results from the old pin are not comparable.
 - **api_reference answers what was asked, not everything that mentions it.**
   A query came back with every matching entry whole: `_bind` was 41,000
   characters (_bind and every method whose documentation says "bind"),

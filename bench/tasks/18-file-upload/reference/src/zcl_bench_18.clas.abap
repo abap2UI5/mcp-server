@@ -130,7 +130,7 @@ CLASS zcl_bench_18 IMPLEMENTATION.
 
     CLEAR materials.
     LOOP AT lines INTO DATA(line).
-      IF condense( line ) IS INITIAL.
+      IF condense( line ) = ``.
         CONTINUE.
       ENDIF.
       SPLIT line AT `;` INTO DATA(material) DATA(description) DATA(quantity).
