@@ -73,7 +73,7 @@ import { missingSiblingMessage, missingLocalSiblingMessage } from './lib/sibling
 import { hydrate, REMOTE_TOOLS, resourceRepos, fetchRemoteFile, isRemoteCheckout, remoteBase, resolvedInside } from './lib/remote.mjs';
 import { readInside } from './lib/contain.mjs';
 import { resolveKey, RESOLVERS } from './lib/repos.mjs';
-import { oneOf, boundedInt, stringArray, optionalName, checkStringArgs } from './lib/args.mjs';
+import { oneOf, boundedInt, stringArray, optionalName, checkStringArgs, startParams } from './lib/args.mjs';
 import {
   deployApp,
   deployFolder,
@@ -429,9 +429,10 @@ async function handleSystem(name, args = {}, { signal } = {}) {
       const cls = systemClassName(args.app);
       const format = oneOf(args.format, { name: 'format', allowed: APP_FORMATS, dflt: defaultAppFormat() });
       const maxRows = boundedInt(args.max_rows, { name: 'max_rows', dflt: 20, min: 0, max: 200 });
+      const query = startParams(args.params);
       return snapshotAnswer(async () => {
         await sys.ready();
-        return client.start(cls, { values: args.values, maxRows, signal });
+        return client.start(cls, { values: args.values, maxRows, signal, query });
       }, { format, client });
     }
     case 'app_describe': {
@@ -1548,6 +1549,8 @@ async function handle(name, args = {}, ctx = {}) {
        * exactly what its tool answers and there is one implementation of
        * each. A stage's tool error is the stage's failure; the loop stops
        * there, and everything before it stays in the report. */
+      // start parameters wrong: refused now, not after a deploy and a build
+      startParams(args.params);
       const stages = {};
       const result = (label, r) => {
         const text = r.content && r.content.find((c) => c.type === 'text');
@@ -1595,7 +1598,7 @@ async function handle(name, args = {}, ctx = {}) {
         stages.boot = { skipped: 'boot: false' };
         return done(null);
       }
-      const r = await handle('run_app', { class_name: args.class_name, timeout_ms: args.timeout_ms }, ctx);
+      const r = await handle('run_app', { class_name: args.class_name, timeout_ms: args.timeout_ms, params: args.params }, ctx);
       const rok = result('boot', r);
       const image = r.content && r.content.find((c) => c.type === 'image');
       const reply = done(rok && stages.boot.ok !== false ? null : 'boot');
@@ -1632,6 +1635,7 @@ async function handle(name, args = {}, ctx = {}) {
         className: args.class_name,
         timeoutMs: boundedInt(args.timeout_ms, { name: 'timeout_ms', dflt: 60000, min: 5000, max: 600000 }),
         signal: ctx.signal,
+        query: startParams(args.params),
       });
       const report = {
         class: res.class,
@@ -1660,6 +1664,7 @@ async function handle(name, args = {}, ctx = {}) {
           timeoutMs: boundedInt(args.timeout_ms, { name: 'timeout_ms', dflt: 60000, min: 5000, max: 600000 }),
           actionTimeoutMs: boundedInt(args.action_timeout_ms, { name: 'action_timeout_ms', dflt: 10000, min: 500, max: 120000 }),
           signal: ctx.signal,
+          query: startParams(args.params),
         });
       } catch (e) {
         return toolError(String((e && e.message) || e));
@@ -1703,9 +1708,10 @@ async function handle(name, args = {}, ctx = {}) {
       const format = oneOf(args.format, { name: 'format', allowed: APP_FORMATS, dflt: defaultAppFormat() });
       if (!backendBuilt()) return toolError('backend not built — call build_backend first (then app_start; app_list names what the build carries)');
       const maxRows = boundedInt(args.max_rows, { name: 'max_rows', dflt: 20, min: 0, max: 200 });
+      const query = startParams(args.params);
       await startBackend();
       const client = await agentClient();
-      return snapshotAnswer(() => client.start(cls, { values: args.values, maxRows, signal: ctx.signal }), { format, client });
+      return snapshotAnswer(() => client.start(cls, { values: args.values, maxRows, signal: ctx.signal, query }), { format, client });
     }
     case 'app_describe': {
       const maxRows = boundedInt(args.max_rows, { name: 'max_rows', dflt: undefined, min: 0, max: 200 });
