@@ -45,6 +45,13 @@ The gate versions are not the bench's choice: `verify.mjs` fails when
 | `template` | the app-template project at the pin - AGENTS.md with the full app-building guide, CLAUDE.md, the four skills, `.claude/settings.json`, the gates installed with `npm ci` - but without its `.mcp.json` | the task |
 | `full` | `template` plus the abap2UI5 MCP server registered (the template's own `.mcp.json`, with the version resolved once per run and pinned for all its trials) | the task |
 
+`template` is described as it is at the pin. app-template has since changed
+its layout - AGENTS.md carries the guide's essentials, the full guide is one
+file under the `build-an-app` skill, the skills are split into a short
+`SKILL.md` plus `references/` - so results from a later `templateRef` measure
+a different briefing: a new series, not comparable with this one (see
+"Moving the pins").
+
 Everything else is the same in every condition: the task text, the autonomy
 note (`prompts/common.md`), the tool allowlist (the MCP server's tools are
 added where it is registered), the time and cost budget, the model. Each
@@ -271,7 +278,9 @@ writing - check `--help` of the version you run, these move fast):
   automatic approval in the workspace; MCP servers come from its config file
   (`config.toml`), so `full` needs a per-trial config home carrying the
   `abap2ui5` server - which is also the isolation. It reads `AGENTS.md`
-  natively, so `template` works unchanged.
+  natively, so `template` works unchanged (at the pin, where AGENTS.md holds
+  the whole guide; a later template pin puts the guide under
+  `.claude/skills/`, which Codex does not load by itself - a new series).
 - **GitHub Copilot CLI**: a prompt mode (`-p`) with tool approval switched to
   allow-all; MCP servers from its user config directory, so again a per-trial
   config directory. Usage is reported in premium requests rather than USD:

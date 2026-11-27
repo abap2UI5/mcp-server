@@ -224,7 +224,7 @@ fix it.
 | `app_guide` | How to build an app, live from the framework checkout | abap2UI5 |
 | `api_reference` | The client API (`z2ui5_if_client`) with its ABAP-Doc: methods, parameters, defaults, the `cs_*` constants | abap2UI5 |
 | `scaffold_app` | The files a new project starts from, live from app-template; `{ class: … }` renames throughout, sidecar `CLSNAME` included | app-template |
-| `add_agent_setup` | Set up an **existing** project for AI work — what `npm create abap2ui5-app -- --agent-setup` does: AGENTS.md, the skills, `.mcp.json`, the allowlist, both gates and the CI job, written into `project_dir`; never overwrites, merges `package.json`/`.gitignore`, follows the `STARTING_FOLDER` | app-template |
+| `add_agent_setup` | Set up an **existing** project for AI work — what `npm create abap2ui5-app -- --agent-setup` does: AGENTS.md (the project's page and the guide's essentials), `docs/project.md`, the skills (the full guide is one file among them), `.mcp.json`, the allowlist, both gates and the CI job, written into `project_dir`; never overwrites, merges `package.json`/`.gitignore`, follows the `STARTING_FOLDER` | app-template |
 | `examples` | Search the three sample catalogues, verification status and all — answers with a class to read, never a snippet to trust | any of samples / samples-controls / samples-stack (or the GitHub mirror) |
 | `read_example` | Read the source of a sample an `examples` hit named — from the checkout, or fetched from GitHub | the sample's repository (or the GitHub mirror) |
 | `docs_search` | Full-text search over the documentation site's pages: page, heading, snippet and the published URL | docs |

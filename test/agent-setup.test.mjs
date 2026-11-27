@@ -48,6 +48,8 @@ const TEMPLATE_PKG = {
 
 const AGENT_FILES = [
   'AGENTS.md', 'CLAUDE.md', '.claude/settings.json', '.claude/skills/build-an-app/SKILL.md', '.mcp.json',
+  // the layout since the guide left AGENTS.md: the one guide file, three directories deep, and a top-level docs/
+  '.claude/skills/build-an-app/references/building-apps.md', 'docs/project.md',
   'abaplint.jsonc', 'abap2ui5lint.jsonc', 'package.json', '.gitignore', '.github/workflows/check.yml',
 ];
 
@@ -86,6 +88,8 @@ function fakeTemplate(edit = (s) => s) {
   write(base, 'CLAUDE.md', 'Read AGENTS.md.\n');
   write(base, '.claude/settings.json', '{ "permissions": { "allow": ["Bash(npm run check)"] } }\n');
   write(base, '.claude/skills/build-an-app/SKILL.md', '---\nname: build-an-app\n---\n');
+  write(base, '.claude/skills/build-an-app/references/building-apps.md', '# Building apps\n\n## 1. The model in one paragraph\n');
+  write(base, 'docs/project.md', '# This project\n\nzcl_app_001 in src/.\n');
   write(base, '.mcp.json', '{ "mcpServers": { "abap2ui5": { "command": "npx" } } }\n');
   write(base, 'abaplint.jsonc', '{\n  "global": {\n    "files": "/src/**/*.*"\n  },\n  "dependencies": [\n    {\n      "url": "https://github.com/abap2UI5/abap2UI5",\n      "files": "/src/**/*.*"\n    }\n  ]\n}\n');
   write(base, 'abap2ui5lint.jsonc', '{\n  "paths": ["src"],\n  "ui5": "1.71"\n}\n');
@@ -241,7 +245,7 @@ test('a fresh directory gets the whole agent setup, package.json under its own n
       assert.match(r.sources.from, /no \.abapgit\.xml/);
       assert.ok(r.warnings.some((w) => /src\/ does not exist/.test(w)), 'a missing source folder is said');
       assert.ok(r.next.some((n) => /npm install/.test(n)) && r.next.some((n) => /npm run check/.test(n)));
-      assert.ok(r.next.some((n) => /AGENTS\.md's first section/.test(n)), 'a written AGENTS.md comes with the rewrite note');
+      assert.ok(r.next.some((n) => /AGENTS\.md's first part/.test(n)), 'a written AGENTS.md comes with the rewrite note');
 
       const pkg = JSON.parse(fs.readFileSync(path.join(project, 'package.json'), 'utf8'));
       assert.equal(pkg.name, packageNameFor(project));
@@ -277,7 +281,7 @@ test('an existing project: its files are skipped, package.json and .gitignore me
       const pkgMerge = r.merged.find((m) => m.path === 'package.json');
       assert.ok(pkgMerge.added.includes('scripts.check:abap') && !pkgMerge.added.includes('scripts.check'));
       assert.deepEqual(r.merged.find((m) => m.path === '.gitignore').added, ['.playwright/']);
-      assert.ok(!r.next.some((n) => /AGENTS\.md's first section/.test(n)), 'no rewrite note for an AGENTS.md left alone');
+      assert.ok(!r.next.some((n) => /AGENTS\.md's first part/.test(n)), 'no rewrite note for an AGENTS.md left alone');
 
       assert.ok(r.warnings.some((w) => /kept your scripts\.check "my own check"/.test(w)));
       assert.ok(r.warnings.some((w) => /kept your devDependencies\.@abap2ui5\/linter "\^0\.7\.0"/.test(w)));

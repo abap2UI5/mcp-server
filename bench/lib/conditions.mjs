@@ -8,6 +8,10 @@
 //   template  the app-template project at the pin: AGENTS.md (the full
 //             app-building guide), CLAUDE.md, the four skills, the gates
 //             installed (npm ci) - but NOT its .mcp.json
+//             (the layout AT THE PIN. The template has since moved the
+//             guide out of AGENTS.md into one file under the build-an-app
+//             skill and split the skills; a run from a later pin measures
+//             that layout and is a new series, not comparable)
 //   full      template plus the abap2UI5 MCP server registered
 import fs from 'node:fs';
 import path from 'node:path';

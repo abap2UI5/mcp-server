@@ -775,8 +775,9 @@ async function handle(name, args = {}, ctx = {}) {
           + 'update it (git pull), or point APP_TEMPLATE_HOME at a complete checkout');
       }
 
-      /* Paged (lib/budget.mjs): the whole template is ~280 KB - AGENTS.md and
-       * three skills are most of it - which is over what an MCP client
+      /* Paged (lib/budget.mjs): the whole template is ~470 KB - the four
+       * skills and their references, the app-building guide among them, are
+       * ~300 KB of it - which is over what an MCP client
        * accepts as one answer, and a refused answer is no files at all. The
        * first page carries every file that fits, smallest first so the class,
        * its sidecar and the configs always come; `remaining` names the rest,
