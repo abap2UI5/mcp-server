@@ -96,8 +96,6 @@ CLASS zcl_bench_13 IMPLEMENTATION.
       WHEN `DETAILS`.
         detail = VALUE #( orders[ id = client->get_event_arg( 2 ) ] OPTIONAL ).
         popover_display( client->get_event_arg( 1 ) ).
-      WHEN `CLOSE`.
-        client->popover_destroy( ).
     ENDCASE.
 
   ENDMETHOD.
@@ -131,7 +129,7 @@ CLASS zcl_bench_13 IMPLEMENTATION.
             )->tag( `ToolbarSpacer`
             )->tag( `Button`
                 )->a( n = `text`  v = `Close`
-                )->a( n = `press` v = client->_event( `CLOSE` ) ).
+                )->a( n = `press` v = client->follow_up_action( val = client->cs_event-popover_close ) ).
 
     client->popover_display( xml = fragment->stringify( ) by_id = anchor ).
 

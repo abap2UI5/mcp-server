@@ -107,7 +107,7 @@ CLASS zcl_bench_05 IMPLEMENTATION.
     model_init( ).
     result = abap_true.
 
-    IF condense( name-value ) IS INITIAL.
+    IF condense( name-value ) = ``.
       name-state = `Error`.
       name-text  = `Enter your name`.
       result     = abap_false.

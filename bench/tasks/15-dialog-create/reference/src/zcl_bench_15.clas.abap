@@ -99,7 +99,7 @@ CLASS zcl_bench_15 IMPLEMENTATION.
         last_name_state = `None`.
         popup_display( ).
       WHEN `SAVE`.
-        IF condense( draft-last_name ) IS INITIAL.
+        IF condense( draft-last_name ) = ``.
           last_name_state = `Error`.
         ELSE.
           APPEND draft TO contacts.

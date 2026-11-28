@@ -111,7 +111,7 @@ CLASS zcl_bench_11 IMPLEMENTATION.
     sync_done( ).
     CASE client->get_event( ).
       WHEN `ADD`.
-        IF condense( new_text ) IS INITIAL.
+        IF condense( new_text ) = ``.
           client->message_toast_display( `Enter a text first` ).
         ELSE.
           last_id = last_id + 1.
