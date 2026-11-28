@@ -12,16 +12,17 @@ import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   normalizeFingerprint, pinMatches, nodeRequest, isLoopbackHost, describeTls, PIN_MISMATCH,
-  systemEndpoint, maskedUrl, systemLocation, systemConfig, describeConfig, systemClassName, cookieJar, createSystemHttp,
+  systemEndpoint, maskedUrl, systemLocation, systemConfig, describeConfig, systemClassName, cookieJar, createSystemHttp, createSystemTransport,
   parseAdtClassRefs, adtSearchUrl, networkProblem, runPasswordCommand, checkSystem, isStartPage, PROBE_CLASS,
 } from '../lib/system.mjs';
 import { SYSTEM_TOOLS, SYSTEM_TOOL_NAMES } from '../lib/system-tools.mjs';
-import { AgentError } from '../lib/appclient.mjs';
+import { AgentError, createAppClient } from '../lib/appclient.mjs';
 import { fakeSystem, USER, PASSWORD } from './helpers/fake-system.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -390,6 +391,80 @@ test('network failures read as what to change', () => {
 test('a request that fails on the network throws the sentence, a 2xx resets nothing it should not', async () => {
   const sys = createSystemHttp(cfg(), { request: async () => { const e = new Error('self signed'); e.code = 'SELF_SIGNED_CERT_IN_CHAIN'; throw e; } });
   await assert.rejects(sys.send('https://h/a'), /certificate of h could not be verified/);
+});
+
+/* How far a request got, for the protocol client's "may have run": a
+ * timeout in the TLS handshake wrote nothing (`written: false`), one after
+ * the body was written may have run, one after the status line came ran
+ * (`answered: true`), and an answer over the cap ran too (sent: 'did'). */
+test('nodeRequest says how far a failed request got: unwritten, written, answered, over the cap', async () => {
+  const listen = (srv) => new Promise((r) => srv.listen(0, '127.0.0.1', () => r(srv.address().port)));
+  // accepts the connection, never speaks TLS: the handshake hangs
+  const silent = net.createServer(() => {});
+  const silentPort = await listen(silent);
+  const sockets = new Set();
+  const hang = http.createServer((req, res) => {
+    req.resume();
+    if (req.url === '/answered') res.writeHead(200, { 'content-type': 'application/json' }).write('{');
+    if (req.url === '/huge') {
+      res.writeHead(200);
+      const chunk = Buffer.alloc(1024 * 1024, 'x');
+      const more = () => { while (!res.destroyed && res.write(chunk)); };
+      res.on('drain', more);
+      more();
+    }
+  });
+  hang.on('connection', (s) => { sockets.add(s); s.on('close', () => sockets.delete(s)); });
+  const port = await listen(hang);
+  const post = (url) => nodeRequest(url, { method: 'POST', headers: {}, body: '{"value":{}}', signal: AbortSignal.timeout(300) });
+  try {
+    const tls = await post(`https://127.0.0.1:${silentPort}/`).then(() => null, (e) => e);
+    assert.equal(tls.written, false, 'nothing was written in the handshake');
+    const written = await post(`http://127.0.0.1:${port}/written`).then(() => null, (e) => e);
+    assert.equal(written.name, 'AbortError');
+    assert.equal(written.written, undefined, 'the body went out: it may have run');
+    assert.equal(written.answered, undefined);
+    const answered = await post(`http://127.0.0.1:${port}/answered`).then(() => null, (e) => e);
+    assert.equal(answered.answered, true, 'the status line came: it ran');
+    const huge = await nodeRequest(`http://127.0.0.1:${port}/huge`, { method: 'POST', body: '{}' }).then(() => null, (e) => e);
+    assert.ok(huge instanceof AgentError);
+    assert.match(huge.message, /^the system answered more than 32 MB - stopped reading it/);
+    assert.equal(huge.sent, 'did');
+  } finally {
+    for (const s of sockets) s.destroy();
+    silent.close();
+    hang.close();
+  }
+});
+
+test('the system transport: a roundtrip that times out in the TLS handshake ran nothing, one that timed out after writing may have', async () => {
+  const listen = (srv) => new Promise((r) => srv.listen(0, '127.0.0.1', () => r(srv.address().port)));
+  const silent = net.createServer(() => {});
+  const silentPort = await listen(silent);
+  const sockets = new Set();
+  const hang = http.createServer((req) => { req.resume(); });
+  hang.on('connection', (s) => { sockets.add(s); s.on('close', () => sockets.delete(s)); });
+  const port = await listen(hang);
+  const page = '<mvc:View xmlns="sap.m" xmlns:mvc="sap.ui.core.mvc"><Button text="Go" press=".eB([\'GO\'])"/></mvc:View>';
+  const start = { S_FRONT: { ID: 'D1', APP: 'Z_T', PROTOCOL: 2, S_ACTION: { T_SYSTEM: [['VIEW_SLOTS', 'display', 'MAIN', page]] } }, MODEL: {} };
+  let target = '';
+  const sys = createSystemHttp(cfg(), {
+    request: (url, init) => (JSON.parse(init.body).value.S_FRONT.EVENT ? nodeRequest(target, init) : Promise.resolve({ status: 200, headers: {}, body: JSON.stringify(start) })),
+  });
+  const c = createAppClient({ transport: createSystemTransport({ endpoint: 'https://h/sap/bc/z2ui5', send: sys.send }), location: () => ({ origin: 'x', pathname: '/', search: '' }), timeoutMs: 300, backendHint: '' });
+  try {
+    const s = await c.start('z_t');
+    target = `https://127.0.0.1:${silentPort}/`;
+    const unwritten = await c.act(s.session, { event: 'GO' }).then(() => null, (e) => e);
+    assert.match(unwritten.message, /^the backend did not answer/);
+    assert.doesNotMatch(unwritten.message, /out of sync|after the request had been sent/);
+    target = `http://127.0.0.1:${port}/`;
+    await assert.rejects(c.act(s.session, { event: 'GO' }), /after the request had been sent.*is out of sync: event GO may have run on the backend/);
+  } finally {
+    for (const s of sockets) s.destroy();
+    silent.close();
+    hang.close();
+  }
 });
 
 // ----------------------------------------------------------------- ADT -----
