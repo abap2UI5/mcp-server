@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+- **Addon BSPs are served as a system serves them, to every browser.**
+  `deploy_folder` no longer lists an addon's WAPA pages as skipped: the
+  folder becomes a BSP root (`bsp` in the answer names the BSPs and where
+  they are served), so an addon with its own custom control - a BSP under
+  `src/01` - runs from wherever it was deployed. The npm host now answers
+  `/sap/bc/ui5_ui5/sap/<bsp>/` itself, not only run_app's Chromium: an
+  agent's own Playwright script against `backend start` got the framework's
+  start page for those paths. A page is served without the blanks at the
+  end of its lines - the 255-character padding abapGit stores, and a blank
+  the source had before a line break, which a system drops as well.
+- **interact_app: drag, screenshot, read, save, downloads, kept sessions.**
+  New steps: `drag` (mouse down, move, up - to an element or by dx/dy, from
+  a point inside the element: a canvas, a splitter, a sortable list),
+  `screenshot` (a picture after any step, at most 5 per call), `read` (a DOM
+  attribute or property into the answer - the `src` of an iframe) and
+  `save` (the resource an element points at - a data:, blob: or backend
+  URL - written to disk). A download the app offers
+  (`cs_event-download_b64_file`) is written to disk too, and `files` lists
+  every path, so a PDF or a spreadsheet the app produced is checked with
+  ordinary tools. `keep_open: true` keeps the browser: the next call passes
+  `browser_session` instead of `class_name` and goes on from that screen
+  (at most 3, closed after 15 min idle, by `close: true` and by every
+  backend stop).
+- **verify_project**: verify_app for a folder - deploy_folder, the lint
+  with the project's own `abaplint.jsonc` (its rules, syntax version and
+  naming, the framework as the dependency), build, the unit tests of every
+  class with a test include, the boot of its app - stopping at the first
+  stage that fails.
+
+  From the feedback of an agent that built a 16-object addon with a custom
+  control and left the server for hand-written scripts at each of these.
+
 - **abap2UI5-bench judges by linter 0.13.0** (`bench/`, not part of the
   package). Its lockfile held `@abap2ui5/linter` and `linter-render` at
   0.8.3, and `verify.mjs` requires the gate versions of the pinned

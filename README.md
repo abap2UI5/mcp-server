@@ -253,6 +253,7 @@ fix it.
 | `call_handler` | Send one HTTP request (method, path, query, body) to a deployed `if_http_extension` class — a REST endpoint, a webhook — which the npm backend serves at `/__a2ui5/icf/<CLASS>`, and get status, content type and body | a build (npm backend) |
 | `run_unit_tests` | Run the deployed apps' test classes (on a checkout: or the whole transpiled tree) in the open-abap runtime: assertions, not pictures | a build (npm backend or abap2UI5 checkout) |
 | `verify_app` | The whole loop in one call — validate, deploy, build, unit, boot — stopping at the first stage that fails | what the stages need |
+| `verify_project` | The same loop for a FOLDER — deploy_folder, the lint with the project's own `abaplint.jsonc`, build, the unit tests of every class with a test include, the boot of its app — stopping at the first stage that fails | what the stages need |
 | `migrate_report` | Convert the **user interface of a classic ABAP report** into an abap-cloud-gui app class (report2UI5, the logic copied as it is): the class files, the migration report (TODOs, what was not carried over), the refusals with `file:row:col`; `deploy: true` builds it here and answers its selection screen's agent snapshot | abap-cloud-gui (with `npm ci`); `deploy` also the popups and a build |
 | `backend` | `status` / `start` / `stop` / `restart` of the local express backend | a build (start/restart; status and stop always work) |
 | `remove_app` | Delete a dev app from the sandbox, or list the deployed ones | the sandbox (as deploy_app) |

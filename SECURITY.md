@@ -79,8 +79,11 @@ Worth knowing before assessing a report:
   because an app's HTTP needs it as much as the server's), the Windows
   system variables (`SYSTEMROOT`, `WINDIR`, `COMSPEC`, `PATHEXT`,
   `SYSTEMDRIVE`, `APPDATA`, `LOCALAPPDATA`, `USERNAME`, `USERDOMAIN`,
-  `PROCESSOR_ARCHITECTURE`, `NUMBER_OF_PROCESSORS`) - plus `PORT` and the
-  loopback `HOST` (`appChildEnv` in `lib/backend-process.mjs` lists each with its
+  `PROCESSOR_ARCHITECTURE`, `NUMBER_OF_PROCESSORS`) - plus `PORT`, the
+  loopback `HOST` and `A2UI5_HOST_BSP_DIRS`, the directories whose abapGit
+  WAPA files the npm host serves at `/sap/bc/ui5_ui5/sap/<bsp>/` (only files
+  named `<bsp>.wapa.<page>` found by walking them, never a path a request
+  names - `lib/bsp.mjs`) (`appChildEnv` in `lib/backend-process.mjs` lists each with its
   reader; `test/security.test.mjs` fails when this list and that one
   differ).
   The GitHub token, the system-mode SAP credentials and anything else the

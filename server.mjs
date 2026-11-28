@@ -67,7 +67,9 @@ import { TOOLS } from './lib/tools.mjs';
 import { annotate, TOOL_ANNOTATIONS, SYSTEM_TOOL_ANNOTATIONS } from './lib/annotations.mjs';
 import { serverInstructions } from './lib/instructions.mjs';
 import { explainRemoved } from './lib/removed-api.mjs';
-import { classNameFromSource, blockingDevObjects, blockingSentence, snapshotClass, restoreClass } from './lib/deploy.mjs';
+import { classNameFromSource, blockingDevObjects, blockingSentence, snapshotClass, restoreClass, folderObjects } from './lib/deploy.mjs';
+import { projectLintConfig } from './lib/lint.mjs';
+import { registerBspRoot, bspNames, bspIndex } from './lib/bsp.mjs';
 import { ISSUE_REPOS, issueUrl, issueMarkdown, similarIssues } from './lib/report-issue.mjs';
 import { RESOURCES, RESOURCE_TEMPLATES, GUIDE_CHAPTER_TEMPLATE, readResource } from './lib/resources.mjs';
 import { PROMPTS, getPrompt } from './lib/prompts.mjs';
@@ -1264,6 +1266,25 @@ async function handle(name, args = {}, ctx = {}) {
         into: res.dir,
         ...(res.skipped.length ? { skipped: res.skipped.slice(0, 50), ...(res.skipped.length > 50 ? { skippedMore: res.skipped.length - 50 } : {}) } : {}),
       };
+      /* The BSP of the folder - an addon's own controls (lib/bsp.mjs): served
+       * from here on at /sap/bc/ui5_ui5/sap/<bsp>/, by run_app's route and by
+       * the npm host to any browser (from its next start - build_backend
+       * restarts it after a deploy that changed something). */
+      if (res.wapa) {
+        registerBspRoot(res.root);
+        const names = bspNames(bspIndex([res.root]));
+        reply.bsp = {
+          names,
+          files: res.wapa,
+          servedAt: names.map((n) => `/sap/bc/ui5_ui5/sap/${n}/`),
+          note: 'served as a system serves them: the 255-character padding - and any blank at the end of a line - removed',
+        };
+        if (backendStatus().running) reply.bsp.restart = 'run_app and interact_app serve them now; the running backend serves them to other browsers from its next start - backend { action: "restart" }, or the restart of the next build_backend that builds something';
+      }
+      if (!res.deployed.length) {
+        reply.next = 'no ABAP object in the folder - its BSP is served from now on; run_app / interact_app an app that uses it';
+        return text(reply);
+      }
       if (args.lint !== false) {
         const report = progressReporter(ctx);
         if (report) report(`abaplint: linting ${res.deployed.length} object(s)`, true);
@@ -1694,6 +1715,102 @@ async function handle(name, args = {}, ctx = {}) {
       if (image) reply.content.push(image);
       return reply;
     }
+    case 'verify_project': {
+      /* verify_app for a FOLDER: deploy_folder, the lint with the project's
+       * own abaplint.jsonc, build, the unit tests of every class of the
+       * folder that has some, the boot of one app - composed out of the
+       * single tools' handlers like verify_app, stopping at the first stage
+       * that fails. */
+      if (typeof args.path !== 'string' || !args.path.trim()) {
+        return toolError('path is required: the folder of the project, e.g. its src');
+      }
+      startParams(args.params);
+      // what the folder holds, before anything is written: which app to boot, which classes have tests
+      const scan = folderObjects(args.path);
+      const appsOf = scan.objects.filter((o) => o.type === 'clas' && o.files.some((f) => f.name === `${o.name}.clas.abap`
+        && /interfaces\s+z2ui5_if_app\b/i.test(fs.readFileSync(f.path, 'utf8')))).map((o) => o.name);
+      const tested = scan.objects.filter((o) => o.type === 'clas' && o.files.some((f) => f.name === `${o.name}.clas.testclasses.abap`)).map((o) => o.name);
+      let boot = null;
+      if (args.boot !== false) {
+        if (args.class_name) {
+          boot = classNameOf(args.class_name);
+          if (!scan.objects.some((o) => o.type === 'clas' && o.name === boot)) {
+            return toolError(`${boot} is no class of ${scan.root} - the apps there: ${appsOf.join(', ') || 'none'}`);
+          }
+        } else if (appsOf.length === 1) {
+          boot = appsOf[0];
+        } else if (appsOf.length > 1) {
+          return toolError(`the folder holds ${appsOf.length} apps (${appsOf.slice(0, 10).join(', ')}) - pass class_name, the one to boot (or boot: false)`);
+        }
+      }
+      const stages = {};
+      const result = (label, r) => {
+        const t = r.content && r.content.find((c) => c.type === 'text');
+        let parsed;
+        try {
+          parsed = t ? JSON.parse(t.text) : null;
+        } catch {
+          parsed = t ? { text: t.text } : null;
+        }
+        stages[label] = { ok: !r.isError, ...(parsed && typeof parsed === 'object' ? parsed : { text: parsed }) };
+        return !r.isError;
+      };
+      const done = (stoppedAt, extra) => ({
+        ...text({ ok: !stoppedAt, ...(stoppedAt ? { stoppedAt } : {}), from: scan.root, stages: fitVerifyStages(stages), ...(extra || {}) }),
+        ...(stoppedAt ? { isError: true } : {}),
+      });
+      // 1. deploy
+      const d = await handle('deploy_folder', { path: args.path, lint: false }, ctx);
+      if (!result('deploy', d)) return done('deploy');
+      delete stages.deploy.next;
+      const deployed = (stages.deploy.deployed || []).map((x) => {
+        const [name, type] = String(x).split('.');
+        return { name, type };
+      });
+      // 2. lint - the project's own config, else the template's (deploy_folder's lint)
+      if (args.lint === false) {
+        stages.lint = { skipped: 'lint: false' };
+      } else if (deployed.length) {
+        const project = args.project_dir ? projectLintConfig(args.project_dir) : projectLintConfig(scan.root);
+        const report = progressReporter(ctx);
+        const lint = await lintApp(deployed[0].name, { signal: ctx.signal, onLine: report, match: objectsMatcher(deployed), projectConfig: project ? project.text : null });
+        if (lint.aborted) return toolError('verify_project cancelled during the lint - the objects were already written to the dev sandbox');
+        stages.lint = {
+          ...lint,
+          config: project ? project.file : 'none in the project - app-template\'s rules, as deploy_folder lints',
+          ...(project && project.otherDependencies.length ? { notResolved: `the project's dependencies besides abap2UI5 (${project.otherDependencies.join(', ')}) are not resolved here - deploy their folders too (deploy_folder) when the lint misses their objects` } : {}),
+          ...(project && sandbox().kind === 'corpus' ? { note: 'the samples-controls sandbox lints with the corpus\' config, not the project\'s' } : {}),
+        };
+        if (!lint.ok) {
+          const removed = await explainRemoved(lint);
+          if (removed) stages.lint.removed = removed;
+          return done('lint');
+        }
+      } else {
+        stages.lint = { skipped: 'no ABAP object in the folder' };
+      }
+      // 3. build
+      const b = await handle('build_backend', { mode: 'auto' }, ctx);
+      if (!result('build', b)) return done('build');
+      // 4. unit - every class of the folder with a test include
+      if (tested.length) {
+        const u = await handle('run_unit_tests', { class_names: tested }, ctx);
+        if (!result('unit', u) || stages.unit.ok === false) return done('unit');
+      } else {
+        stages.unit = { skipped: 'no class of the folder has a .clas.testclasses.abap' };
+      }
+      // 5. boot
+      if (!boot) {
+        stages.boot = { skipped: args.boot === false ? 'boot: false' : 'no class of the folder implements z2ui5_if_app' };
+        return done(null);
+      }
+      const r = await handle('run_app', { class_name: boot, timeout_ms: args.timeout_ms, params: args.params }, ctx);
+      const rok = result('boot', r);
+      const image = r.content && r.content.find((c) => c.type === 'image');
+      const reply = done(rok && stages.boot.ok !== false ? null : 'boot');
+      if (image) reply.content.push(image);
+      return reply;
+    }
     case 'setup_status': {
       // reads only: what resolves, what is built, what is missing and why
       return text(setupStatus());
@@ -1745,25 +1862,47 @@ async function handle(name, args = {}, ctx = {}) {
     case 'interact_app': {
       const miss = missingBackend();
       if (miss) return miss;
+      const session = args.browser_session;
+      if (session && args.class_name) {
+        return toolError('give class_name to boot an app, OR browser_session to go on in a kept one - not both');
+      }
+      if (!session && !args.class_name) {
+        return toolError('class_name is required (the app to boot) - or browser_session, the `session` a call with keep_open: true answered');
+      }
+      if (session && (args.params || args.keep_open === false)) {
+        return toolError('a kept browser session goes on as it is: params belong to the boot, and close: true (not keep_open: false) ends it');
+      }
+      if (!session && args.close) return toolError('close: true ends a kept browser session - pass its browser_session');
       let res;
       try {
         res = await interactApp({
           className: args.class_name,
-          actions: args.actions,
+          actions: session && (args.actions === undefined || args.actions === null) ? undefined : args.actions,
           timeoutMs: boundedInt(args.timeout_ms, { name: 'timeout_ms', dflt: 60000, min: 5000, max: 600000 }),
           actionTimeoutMs: boundedInt(args.action_timeout_ms, { name: 'action_timeout_ms', dflt: 10000, min: 500, max: 120000 }),
           signal: ctx.signal,
           query: startParams(args.params),
+          keepOpen: args.keep_open === true,
+          session,
+          close: args.close === true,
         });
       } catch (e) {
         return toolError(String((e && e.message) || e));
+      }
+      if (res.closed && !res.actions.length && !res.base64) {
+        return text({ closed: res.closed, class: res.class, next: 'the browser session is closed; interact_app with class_name boots the app afresh' });
       }
       const report = {
         class: res.class,
         booted: res.booted,
         ok: res.ok,
+        ...(res.session ? { browser_session: res.session, sessionNote: `kept open: pass browser_session "${res.session}" to go on from this screen, close: true to end it (closed by itself after 15 min idle, and by every backend stop - a build_backend that builds)` } : {}),
+        ...(res.closed ? { closed: res.closed } : {}),
         actions: res.actions,
         ...(res.notPerformed ? { notPerformed: res.notPerformed } : {}),
+        // what the app handed out (downloads) and what save steps wrote - check them with ordinary tools
+        ...(res.files && res.files.length ? { files: res.files } : {}),
+        ...(res.shots && res.shots.length ? { shots: res.shots.map((x) => ({ step: x.step, screenshot: x.screenshot, ...(x.screenshotNotSaved ? { screenshotNotSaved: x.screenshotNotSaved } : {}) })) } : {}),
         errors: res.errors,
         ...(res.errorsCut ? { errorsCut: res.errorsCut } : {}),
         // UI5 resources that did not load while the app booted (a theme, a library)
@@ -1774,6 +1913,8 @@ async function handle(name, args = {}, ctx = {}) {
         ...(res.booted ? {} : { hint: 'the app did not boot, so no action was performed - run_app shows the boot on its own' }),
       };
       const content = [{ type: 'text', text: JSON.stringify(report, null, 2) }];
+      // the pictures of the screenshot steps in step order, then the final one
+      for (const x of res.shots || []) content.push({ type: 'image', data: x.base64, mimeType: 'image/png' });
       if (res.base64) content.push({ type: 'image', data: res.base64, mimeType: 'image/png' });
       return { content, isError: !res.booted };
     }

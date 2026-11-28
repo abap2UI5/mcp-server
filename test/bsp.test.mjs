@@ -91,3 +91,46 @@ test('a BSP no root carries is told once and passed on', async () => {
   }
   assert.deepEqual(told, [['z2ui5_cci', 'z2ui5_cci/cc/scaninput.js']]);
 });
+
+test('a page is served as a system serves it: the padding off; a binary file as it is', async () => {
+  const { bspBody, bspAnswer } = await import('../lib/bsp.mjs');
+  // the blank before the line break inside the template literal is gone, as on a system
+  const padded = 'const a = `x '.padEnd(255) + '\n' + 'y`;'.padEnd(255);
+  assert.equal(String(bspBody('z/a.js', Buffer.from(padded))), 'const a = `x\ny`;');
+  const png = Buffer.from([0x89, 0x50, 0x20, 0x20, 0x0a, 0x20]);
+  assert.deepEqual(bspBody('z/a.png', png), png);
+
+  const root = fixture();
+  fs.writeFileSync(path.join(root, 'src', '01', 'z2ui5_cci.wapa.cc_-pad.js'), 'x();'.padEnd(255) + '\n' + 'y();'.padEnd(255));
+  const index = bspIndex([root]);
+  const hit = bspAnswer(index, 'http://h/sap/bc/ui5_ui5/sap/z2ui5_cci/cc/Pad.js');
+  assert.equal(hit.status, 200);
+  assert.equal(String(hit.body), 'x();\ny();');
+  assert.equal(bspAnswer(index, 'http://h/sap/bc/ui5_ui5/sap/z2ui5_cci/cc/none.js').status, 404);
+  assert.equal(bspAnswer(index, 'http://h/sap/bc/ui5_ui5/sap/z2ui5_xyz/a.js'), null, 'a BSP nobody carries goes on to the backend');
+});
+
+test('a folder deploy_folder deployed is a root after the configured ones', async () => {
+  const { registerBspRoot, clearBspRoots } = await import('../lib/bsp.mjs');
+  const a = fixture();
+  const deployed = fixture();
+  try {
+    registerBspRoot(deployed);
+    registerBspRoot(deployed);
+    assert.deepEqual(bspRoots({ env: { A2UI5_MCP_BSP_DIRS: a }, cwd: '/' }), [a, deployed]);
+  } finally {
+    clearBspRoots();
+  }
+  assert.deepEqual(bspRoots({ env: { A2UI5_MCP_BSP_DIRS: a }, cwd: '/' }), [a]);
+});
+
+test('the npm host answers BSP files itself, to any browser, and passes the rest on', async () => {
+  const { hostBspServer } = await import('../lib/npm-host.mjs');
+  const serve = hostBspServer([fixture()]);
+  const hit = serve('/sap/bc/ui5_ui5/sap/z2ui5_cci/cc/ScanInput.js?v=1');
+  assert.equal(hit.status, 200);
+  assert.match(hit.type, /javascript/);
+  assert.equal(serve('/sap/bc/z2ui5?app_start=zcl_x'), null);
+  assert.equal(serve('/sap/bc/ui5_ui5/sap/z2ui5_other/a.js'), null);
+  assert.equal(hostBspServer([])('/sap/bc/ui5_ui5/sap/z2ui5_cci/cc/ScanInput.js'), null);
+});

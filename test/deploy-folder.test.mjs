@@ -135,6 +135,37 @@ test('deploy_folder writes every object into the sandbox, names the apps, and re
   }
 });
 
+test('deploy_folder serves the BSP of the folder instead of skipping its pages; verify_project stops where a stage fails', async () => {
+  const base = project();
+  fs.mkdirSync(path.join(base, 'corpus', 'scripts'), { recursive: true });
+  fs.writeFileSync(path.join(base, 'corpus', 'scripts', 'e2e-build.mjs'), '// probe\n');
+  fs.mkdirSync(path.join(base, 'corpus', 'src', 'zz_dev'), { recursive: true });
+  fs.mkdirSync(path.join(base, 'src', '01'), { recursive: true });
+  fs.writeFileSync(path.join(base, 'src', '01', 'z2ui5_ccc.wapa.xml'), '<abapGit/>');
+  fs.writeFileSync(path.join(base, 'src', '01', 'z2ui5_ccc.wapa.cc_-canvas.js'), 'x();'.padEnd(255));
+  try {
+    await withServer(base, async (call) => {
+      const r = await call('deploy_folder', { path: path.join(base, 'src'), lint: false });
+      assert.equal(r.isError, false, r.text);
+      const reply = JSON.parse(r.text);
+      assert.deepEqual(reply.bsp.names, ['z2ui5_ccc']);
+      assert.deepEqual(reply.bsp.servedAt, ['/sap/bc/ui5_ui5/sap/z2ui5_ccc/']);
+      assert.ok(!(reply.skipped || []).some((f) => /wapa/.test(f)), 'the pages are no skipped files');
+
+      // a folder of two apps: verify_project wants to be told which one to boot, before it writes anything
+      fs.writeFileSync(path.join(base, 'src', 'zcl_fold_two.clas.abap'), APP.replace(/zcl_fold_app/g, 'zcl_fold_two'));
+      const two = await call('verify_project', { path: path.join(base, 'src') });
+      assert.equal(two.isError, true);
+      assert.match(two.text, /2 apps \(zcl_fold_app, zcl_fold_two\) - pass class_name/);
+      const wrong = await call('verify_project', { path: path.join(base, 'src'), class_name: 'zcl_nope' });
+      assert.equal(wrong.isError, true);
+      assert.match(wrong.text, /zcl_nope is no class of/);
+    });
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test('deploy_folder writes nothing when one name is refused, and nothing through a link in the sandbox', async () => {
   const base = project();
   fs.mkdirSync(path.join(base, 'corpus', 'scripts'), { recursive: true });
