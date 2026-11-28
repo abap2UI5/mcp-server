@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.4.0 - 2026-11-28
+
 - **"May have run" says what a failed roundtrip ran.** A timeout or a
   cancel before the request body was handed to the socket (still
   connecting, in the TLS handshake, the pin refused) ran nothing: the
