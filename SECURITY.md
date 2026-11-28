@@ -190,7 +190,14 @@ Worth knowing before assessing a report:
   records (`git fetch --depth 1 <sha>`, the checkout's `rev-parse` verified
   before it is used) - never a branch, except for a release that records
   none, which gets the default branch's HEAD resolved to a sha and says
-  so. The backend it boots listens on 127.0.0.1 only. What runs is still
+  so. `build_static` installs its bundling tools the same way, once, into
+  `~/.abap2ui5-mcp/static-tools`: esbuild and the browser stand-ins of
+  Node's modules (`STATIC_TOOLS` in `lib/static-build.mjs`, exact versions,
+  `--ignore-scripts` - esbuild takes its binary from its platform package),
+  and writes a site only into a new or empty folder or one an earlier
+  build wrote (its `.abap2ui5-static.json`), never the project folder. The
+  site it writes runs the transpiled backend in the visitor's browser: what
+  the app's tables start with is in the bundle for anyone who opens it. The backend it boots listens on 127.0.0.1 only. What runs is still
   code from npm and GitHub: the package's transpiled framework in the
   backend process, the transpiler and abaplint during a build and a lint.
   Trusting them is trusting the abap2UI5 and abaplint publishers, as the

@@ -636,6 +636,27 @@ never fetched), build, `run_unit_tests` for every class of the folder with a
 app. Which app to boot is decided BEFORE the deploy: a folder of several apps
 without `class_name` is refused with nothing written.
 
+**`build_static`** (`lib/static-build.mjs`, browser side in
+`lib/static-site/`) is abap2UI5/browser-demo's recipe for any project: the
+folder's objects are copied into `<workspace>/static-input`, `buildNpm`
+transpiles them WITH the framework into the runtime directory's `static/`
+(a release with the full transpile - `boot.mjs` there is the proof), esbuild
+bundles `static-site/entry.mjs` against its `init.mjs` (`bundleOptions`:
+`keepNames` because RTTI reads the generated names, Node's `zlib`/`crypto`
+as pako/@noble shims, the rest of Node as `empty.mjs`, `ENCODED_PATHS` for
+the transpiler's `%23` imports), and the page, sql.js' wasm, `css/style.css`,
+`.nojekyll` and the folder's BSP files (unpadded, `bspBody`) go beside it.
+The entry adds three things browser-demo did not need: the endpoint is
+compared without a trailing slash and `index.html`; a `<script>` whose src
+is the endpoint (`?z2ui5-bundle=...`) is answered by the backend in the tab
+through a blob URL, while reading `src` back gives the endpoint URL (the cc
+bundle's URL is derived from it); and `/sap/bc/ui5_ui5/sap/...` is pointed at
+the site's own files for script elements, fetch and XMLHttpRequest. The
+tools are installed once into `<workspace>/static-tools` (`STATIC_TOOLS`).
+`outProblem` keeps a build out of anything but a new, empty or earlier site
+folder. Measured: a one-class project is 5.1 MB of bundle, served under
+`/repo/` it boots, roundtrips, gzips and loads the cc bundle.
+
 **`interact_app`'s steps beyond click/fill/press/wait** (`lib/interact.mjs`
 parses, `performAction` in `lib/browser.mjs` performs): `drag` is the mouse
 (down, move in `steps`, up) from a point of an element to another element or

@@ -31,6 +31,15 @@
   class with a test include, the boot of its app - stopping at the first
   stage that fails.
 
+- **build_static**: a project folder as a static site (GitHub Pages) - the
+  framework and the folder's classes transpiled, bundled for the browser
+  with esbuild (installed once into the workspace), the whole backend
+  running in the visitor's tab and starting the app named; `ui5` freezes
+  the OpenUI5 release. Built in: Node's zlib (pako) and crypto stand-ins,
+  the frontend's `?z2ui5-bundle` scripts answered in the tab (a static host
+  cannot), the endpoint with or without a project page's trailing slash,
+  and the folder's BSP files served as files of the site.
+
   From the feedback of an agent that built a 16-object addon with a custom
   control and left the server for hand-written scripts at each of these.
 

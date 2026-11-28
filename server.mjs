@@ -69,6 +69,11 @@ import { serverInstructions } from './lib/instructions.mjs';
 import { explainRemoved } from './lib/removed-api.mjs';
 import { classNameFromSource, blockingDevObjects, blockingSentence, snapshotClass, restoreClass, folderObjects } from './lib/deploy.mjs';
 import { projectLintConfig } from './lib/lint.mjs';
+import { buildStatic } from './lib/static-build.mjs';
+import { building, whileBuilding } from './lib/build.mjs';
+
+/* one build_static at a time: it writes the runtime directory's static/ */
+let staticBuilding = false;
 import { registerBspRoot, bspNames, bspIndex } from './lib/bsp.mjs';
 import { ISSUE_REPOS, issueUrl, issueMarkdown, similarIssues } from './lib/report-issue.mjs';
 import { RESOURCES, RESOURCE_TEMPLATES, GUIDE_CHAPTER_TEMPLATE, readResource } from './lib/resources.mjs';
@@ -1714,6 +1719,44 @@ async function handle(name, args = {}, ctx = {}) {
       const reply = done(rok && stages.boot.ok !== false ? null : 'boot');
       if (image) reply.content.push(image);
       return reply;
+    }
+    case 'build_static': {
+      if (typeof args.path !== 'string' || !args.path.trim()) {
+        return toolError('path is required: the project folder to build, e.g. its src');
+      }
+      if (building) return toolError(whileBuilding('call build_static again', 'both install into and transpile in the same runtime directory'));
+      if (staticBuilding) return toolError('a build_static is running - call again once it has finished');
+      const scan = folderObjects(args.path);
+      const appsOf = scan.objects.filter((o) => o.type === 'clas' && o.files.some((f) => f.name === `${o.name}.clas.abap`
+        && /interfaces\s+z2ui5_if_app\b/i.test(fs.readFileSync(f.path, 'utf8')))).map((o) => o.name);
+      let start = args.class_name ? classNameOf(args.class_name) : null;
+      if (!start) {
+        if (appsOf.length !== 1) {
+          return toolError(appsOf.length
+            ? `the folder holds ${appsOf.length} apps (${appsOf.slice(0, 10).join(', ')}) - pass class_name, the one the page starts`
+            : `no class of ${scan.root} implements z2ui5_if_app - a static site needs an app to start`);
+        }
+        start = appsOf[0];
+      }
+      if (args.ui5 !== undefined && args.ui5 !== null && !/^\d+\.\d+\.\d+$/.test(String(args.ui5))) {
+        return toolError(`ui5 must be a release like 1.136.11, not '${String(args.ui5).slice(0, 40)}'`);
+      }
+      const out = args.out ? path.resolve(args.out) : path.join(path.dirname(scan.root), 'site');
+      const report = progressReporter(ctx);
+      staticBuilding = true;
+      let res;
+      try {
+        res = await buildStatic({ dir: scan.root, startClass: start, out, ui5: args.ui5 || null, minify: args.minify !== false, onLine: report || (() => {}), signal: ctx.signal });
+      } finally {
+        staticBuilding = false;
+      }
+      if (!res.ok) return toolError(`build_static stopped at ${res.stage}: ${res.reason}`);
+      return text({
+        ...res,
+        next: `serve ${res.out} with any static server and open it (not as file://: the page fetches its wasm) - e.g. npx --yes http-server ${res.out}; `
+          + 'for GitHub Pages commit the folder (its .nojekyll included) to the branch or folder Pages serves. '
+          + `The page starts ${res.startClass}; ?app_start=<class> starts another class of the build.`,
+      });
     }
     case 'verify_project': {
       /* verify_app for a FOLDER: deploy_folder, the lint with the project's
