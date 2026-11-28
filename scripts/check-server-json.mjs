@@ -49,6 +49,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 /** Read by the server, deliberately NOT in server.json. */
 export const NOT_LISTED = {
   PORT: 'set by the server for the backend child it spawns (A2UI5_MCP_PORT is the knob)',
+  A2UI5_HOST_BSP_DIRS: 'set by the server for the npm host it spawns: the addon BSP roots (A2UI5_MCP_BSP_DIRS is the knob)',
   CHROMIUM_BIN: "the linter's variable, read after A2UI5_MCP_CHROMIUM; listed under that one",
   GH_TOKEN: 'alias of GITHUB_TOKEN, named in its description',
   AI_DEMOKIT_HOME: 'pre-rename alias of SAMPLES_CONTROLS_HOME, still read for old setups',

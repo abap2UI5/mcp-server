@@ -286,7 +286,7 @@ test('SECURITY.md names exactly the environment the app children are given', asy
   const named = new Set([...para[0].matchAll(/`([A-Z][A-Z0-9_]*)`/g)].map((m) => m[1]));
   for (const name of CHILD_ENV_NAMES) assert.ok(named.has(name), `${name} is passed to the app children and SECURITY.md does not say so`);
   for (const name of named) {
-    if (['PORT', 'HOST', 'LC_'].includes(name)) continue; // set by backendEnv, and the LC_* family
+    if (['PORT', 'HOST', 'A2UI5_HOST_BSP_DIRS', 'LC_'].includes(name)) continue; // set by backendEnv, and the LC_* family
     assert.ok(CHILD_ENV_NAMES.includes(name), `SECURITY.md says ${name} reaches the app children; appChildEnv does not pass it`);
   }
 });

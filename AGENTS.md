@@ -625,6 +625,65 @@ test classes were given), boot; the first failing stage stops it, everything
 before it stays in `stages`, `stoppedAt` names it, and a missing linter skips
 the validate stage rather than failing it.
 
+**`verify_project`** is `verify_app` for a FOLDER, composed the same way:
+`deploy_folder` (lint off), then the lint with the PROJECT's own
+`abaplint.jsonc` (`projectLintConfig` in `lib/lint.mjs`: the folder and its
+parents up to the repository root; retargeted by `frameworkLintConfig` with
+`keepNaming` - the sandbox as the files, the framework as the one dependency,
+the project's naming kept; other dependencies are named under `notResolved`,
+never fetched), build, `run_unit_tests` for every class of the folder with a
+`.clas.testclasses.abap`, and the boot of `class_name` or of the folder's one
+app. Which app to boot is decided BEFORE the deploy: a folder of several apps
+without `class_name` is refused with nothing written.
+
+**`build_static`** (`lib/static-build.mjs`, browser side in
+`lib/static-site/`) is abap2UI5/browser-demo's recipe for any project: the
+folder's objects are copied into `<workspace>/static-input`, `buildNpm`
+transpiles them WITH the framework into the runtime directory's `static/`
+(a release with the full transpile - `boot.mjs` there is the proof), esbuild
+bundles `static-site/entry.mjs` against its `init.mjs` (`bundleOptions`:
+`keepNames` because RTTI reads the generated names, Node's `zlib`/`crypto`
+as pako/@noble shims, the rest of Node as `empty.mjs`, `ENCODED_PATHS` for
+the transpiler's `%23` imports), and the page, sql.js' wasm, `css/style.css`,
+`.nojekyll` and the folder's BSP files (unpadded, `bspBody`) go beside it.
+The entry adds three things browser-demo did not need: the endpoint is
+compared without a trailing slash and `index.html`; a `<script>` whose src
+is the endpoint (`?z2ui5-bundle=...`) is answered by the backend in the tab
+through a blob URL, while reading `src` back gives the endpoint URL (the cc
+bundle's URL is derived from it); and `/sap/bc/ui5_ui5/sap/...` is pointed at
+the site's own files for script elements, fetch and XMLHttpRequest. The
+tools are installed once into `<workspace>/static-tools` (`STATIC_TOOLS`).
+`outProblem` keeps a build out of anything but a new, empty or earlier site
+folder. Measured: a one-class project is 5.1 MB of bundle, served under
+`/repo/` it boots, roundtrips, gzips and loads the cc bundle.
+
+**`interact_app`'s steps beyond click/fill/press/wait** (`lib/interact.mjs`
+parses, `performAction` in `lib/browser.mjs` performs): `drag` is the mouse
+(down, move in `steps`, up) from a point of an element to another element or
+by dx/dy - a canvas or a splitter listens to exactly that; `screenshot` adds a
+picture after its step (at most `MAX_STEP_SHOTS`); `read` answers an attribute
+or a property, a long value cut at `READ_MAX`; `save` fetches the src/href of
+an element INSIDE the page (data:, blob: and backend URLs alike) and writes it
+to `<screenshot dir>/files`. Every download the page offers is written there
+too and listed under `files` (`saveDownload`); names are made safe by
+`safeFileName`, the newest `FILES_KEPT` are kept. `keep_open` keeps the
+context in `sessions` (at most `MAX_SESSIONS`, closed after
+`SESSION_IDLE_MS` idle and by `closeAppContexts`, i.e. every backend stop):
+the next call passes `browser_session` instead of `class_name`, and its error
+log starts empty while the listeners wired at the boot follow it
+(`state.errors`).
+
+**The addon BSPs** (`lib/bsp.mjs`) are served at
+`/sap/bc/ui5_ui5/sap/<bsp>/` twice: by the Playwright route of run_app and
+interact_app, and by the npm host itself (`hostBspServer` in
+`lib/npm-host.mjs`, roots handed over as `A2UI5_HOST_BSP_DIRS` by
+`backendEnv`) - an agent's own browser against `backend start` used to get
+the framework's start page. The roots are `A2UI5_MCP_BSP_DIRS` or the cwd and
+the addon siblings, then every folder `deploy_folder` deployed WAPA files
+from (`registerBspRoot`). A page is served the way a system serves it
+(`bspBody`): no blank at the end of any line - the 255-character padding goes,
+and with it a blank the source had before a line break.
+
 **`app_start` / `app_act` / `app_describe` / `app_list`** operate a running
 app without a browser: `lib/appclient.mjs` speaks the abap2UI5 JSON protocol
 to the backend `startBackend` serves (the app start, then `S_FRONT.ID` /

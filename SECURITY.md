@@ -79,8 +79,11 @@ Worth knowing before assessing a report:
   because an app's HTTP needs it as much as the server's), the Windows
   system variables (`SYSTEMROOT`, `WINDIR`, `COMSPEC`, `PATHEXT`,
   `SYSTEMDRIVE`, `APPDATA`, `LOCALAPPDATA`, `USERNAME`, `USERDOMAIN`,
-  `PROCESSOR_ARCHITECTURE`, `NUMBER_OF_PROCESSORS`) - plus `PORT` and the
-  loopback `HOST` (`appChildEnv` in `lib/backend-process.mjs` lists each with its
+  `PROCESSOR_ARCHITECTURE`, `NUMBER_OF_PROCESSORS`) - plus `PORT`, the
+  loopback `HOST` and `A2UI5_HOST_BSP_DIRS`, the directories whose abapGit
+  WAPA files the npm host serves at `/sap/bc/ui5_ui5/sap/<bsp>/` (only files
+  named `<bsp>.wapa.<page>` found by walking them, never a path a request
+  names - `lib/bsp.mjs`) (`appChildEnv` in `lib/backend-process.mjs` lists each with its
   reader; `test/security.test.mjs` fails when this list and that one
   differ).
   The GitHub token, the system-mode SAP credentials and anything else the
@@ -187,7 +190,14 @@ Worth knowing before assessing a report:
   records (`git fetch --depth 1 <sha>`, the checkout's `rev-parse` verified
   before it is used) - never a branch, except for a release that records
   none, which gets the default branch's HEAD resolved to a sha and says
-  so. The backend it boots listens on 127.0.0.1 only. What runs is still
+  so. `build_static` installs its bundling tools the same way, once, into
+  `~/.abap2ui5-mcp/static-tools`: esbuild and the browser stand-ins of
+  Node's modules (`STATIC_TOOLS` in `lib/static-build.mjs`, exact versions,
+  `--ignore-scripts` - esbuild takes its binary from its platform package),
+  and writes a site only into a new or empty folder or one an earlier
+  build wrote (its `.abap2ui5-static.json`), never the project folder. The
+  site it writes runs the transpiled backend in the visitor's browser: what
+  the app's tables start with is in the bundle for anyone who opens it. The backend it boots listens on 127.0.0.1 only. What runs is still
   code from npm and GitHub: the package's transpiled framework in the
   backend process, the transpiler and abaplint during a build and a lint.
   Trusting them is trusting the abap2UI5 and abaplint publishers, as the
